@@ -107,6 +107,7 @@ class ConversionState:
     speed: float = 1.0
     split_mode: str = "auto"
     output_format: str = "m4b"
+    silence_between_chapters: float = 2.0
     chapters: list[ChapterState] = field(default_factory=list)
     started_at: str = ""
     last_updated: str = ""
@@ -123,6 +124,11 @@ class ConversionState:
             # Reconstruct ChapterState objects
             chapters = [ChapterState(**ch) for ch in data.get("chapters", [])]
             data["chapters"] = chapters
+
+            # Handle missing fields for backward compatibility
+            if "silence_between_chapters" not in data:
+                data["silence_between_chapters"] = 2.0
+
             return cls(**data)
         except (json.JSONDecodeError, TypeError, KeyError):
             return None
@@ -141,6 +147,7 @@ class ConversionState:
             "speed": self.speed,
             "split_mode": self.split_mode,
             "output_format": self.output_format,
+            "silence_between_chapters": self.silence_between_chapters,
             "chapters": [
                 {
                     "index": ch.index,
@@ -863,20 +870,43 @@ class TTSConverter:
             if resume and state_file.exists():
                 state = ConversionState.load(state_file)
                 if state:
-                    # Verify state matches current conversion
+                    # Verify source file hasn't changed
                     source_hash = _hash_file(source_file) if source_file else ""
-                    if (
-                        state.voice != self.options.voice
-                        or state.language != self.options.language
-                        or state.speed != self.options.speed
-                        or state.split_mode != self.options.split_mode
-                        or (source_file and state.source_hash != source_hash)
-                    ):
+                    if source_file and state.source_hash != source_hash:
                         self.log(
-                            "Options changed, starting fresh conversion",
+                            "Source file changed, starting fresh conversion",
                             "warning",
                         )
                         state = None
+                    else:
+                        # Check if settings differ from saved state
+                        settings_changed = (
+                            state.voice != self.options.voice
+                            or state.language != self.options.language
+                            or state.speed != self.options.speed
+                            or state.split_mode != self.options.split_mode
+                            or state.silence_between_chapters
+                            != self.options.silence_between_chapters
+                        )
+
+                        if settings_changed:
+                            self.log(
+                                f"Restoring settings from previous session: "
+                                f"voice={state.voice}, language={state.language}, "
+                                f"speed={state.speed}, split_mode={state.split_mode}, "
+                                f"silence={state.silence_between_chapters}s",
+                                "info",
+                            )
+
+                        # Apply saved settings to options for consistency
+                        self.options.voice = state.voice
+                        self.options.language = state.language
+                        self.options.speed = state.speed
+                        self.options.split_mode = state.split_mode
+                        self.options.output_format = state.output_format
+                        self.options.silence_between_chapters = (
+                            state.silence_between_chapters
+                        )
 
             if state is None:
                 # Create new state
@@ -891,6 +921,7 @@ class TTSConverter:
                     speed=self.options.speed,
                     split_mode=self.options.split_mode,
                     output_format=self.options.output_format,
+                    silence_between_chapters=self.options.silence_between_chapters,
                     chapters=[
                         ChapterState(
                             index=i,

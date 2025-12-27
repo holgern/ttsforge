@@ -161,6 +161,11 @@ def main(ctx: click.Context, version: bool) -> None:
     help="Enable/disable resume capability for interrupted conversions (default: enabled).",
 )
 @click.option(
+    "--fresh",
+    is_flag=True,
+    help="Discard any previous progress and start conversion from scratch.",
+)
+@click.option(
     "--keep-chapters",
     "keep_chapter_files",
     is_flag=True,
@@ -183,6 +188,7 @@ def convert(
     verbose: bool,
     split_mode: Optional[str],
     resume: bool,
+    fresh: bool,
     keep_chapter_files: bool,
 ) -> None:
     """Convert an EPUB file to an audiobook.
@@ -290,6 +296,17 @@ def convert(
         if not Confirm.ask("Proceed with conversion?"):
             console.print("[yellow]Cancelled.[/yellow]")
             return
+
+    # Handle --fresh flag: delete existing progress
+    if fresh:
+        import shutil
+
+        work_dir = output.parent / f".{output.stem}_chapters"
+        if work_dir.exists():
+            console.print(f"[yellow]Removing previous progress:[/yellow] {work_dir}")
+            shutil.rmtree(work_dir)
+        # Fresh start means we don't try to resume
+        resume = False
 
     # Create conversion options
     options = ConversionOptions(
