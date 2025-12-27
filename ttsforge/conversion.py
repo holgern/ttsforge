@@ -1,5 +1,7 @@
 """TTS conversion module for ttsforge - converts text/EPUB to audiobooks."""
 
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -78,6 +80,117 @@ class ConversionResult:
     chapters_dir: Optional[Path] = None
 
 
+@dataclass
+class ChapterState:
+    """State of a single chapter conversion."""
+
+    index: int
+    title: str
+    content_hash: str  # Hash of chapter content for integrity check
+    completed: bool = False
+    audio_file: Optional[str] = None  # Relative path to chapter audio
+    duration: float = 0.0  # Duration in seconds
+    char_count: int = 0
+
+
+@dataclass
+class ConversionState:
+    """Persistent state for resumable conversions."""
+
+    version: int = 1
+    source_file: str = ""
+    source_hash: str = ""  # Hash of source file for change detection
+    output_file: str = ""
+    work_dir: str = ""
+    voice: str = ""
+    language: str = ""
+    speed: float = 1.0
+    split_mode: str = "auto"
+    output_format: str = "m4b"
+    chapters: list[ChapterState] = field(default_factory=list)
+    started_at: str = ""
+    last_updated: str = ""
+
+    @classmethod
+    def load(cls, state_file: Path) -> Optional["ConversionState"]:
+        """Load state from a JSON file."""
+        if not state_file.exists():
+            return None
+        try:
+            with open(state_file, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # Reconstruct ChapterState objects
+            chapters = [ChapterState(**ch) for ch in data.get("chapters", [])]
+            data["chapters"] = chapters
+            return cls(**data)
+        except (json.JSONDecodeError, TypeError, KeyError):
+            return None
+
+    def save(self, state_file: Path) -> None:
+        """Save state to a JSON file."""
+        self.last_updated = time.strftime("%Y-%m-%d %H:%M:%S")
+        data = {
+            "version": self.version,
+            "source_file": self.source_file,
+            "source_hash": self.source_hash,
+            "output_file": self.output_file,
+            "work_dir": self.work_dir,
+            "voice": self.voice,
+            "language": self.language,
+            "speed": self.speed,
+            "split_mode": self.split_mode,
+            "output_format": self.output_format,
+            "chapters": [
+                {
+                    "index": ch.index,
+                    "title": ch.title,
+                    "content_hash": ch.content_hash,
+                    "completed": ch.completed,
+                    "audio_file": ch.audio_file,
+                    "duration": ch.duration,
+                    "char_count": ch.char_count,
+                }
+                for ch in self.chapters
+            ],
+            "started_at": self.started_at,
+            "last_updated": self.last_updated,
+        }
+        with open(state_file, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=2)
+
+    def get_completed_count(self) -> int:
+        """Get the number of completed chapters."""
+        return sum(1 for ch in self.chapters if ch.completed)
+
+    def get_next_incomplete_index(self) -> Optional[int]:
+        """Get the index of the next incomplete chapter."""
+        for ch in self.chapters:
+            if not ch.completed:
+                return ch.index
+        return None
+
+    def is_complete(self) -> bool:
+        """Check if all chapters are completed."""
+        return all(ch.completed for ch in self.chapters)
+
+
+def _hash_content(content: str) -> str:
+    """Generate a hash of content for integrity checking."""
+    return hashlib.md5(content.encode("utf-8")).hexdigest()[:12]
+
+
+def _hash_file(file_path: Path) -> str:
+    """Generate a hash of a file for change detection."""
+    if not file_path.exists():
+        return ""
+    hasher = hashlib.md5()
+    with open(file_path, "rb") as f:
+        for chunk in iter(lambda: f.read(8192), b""):
+            hasher.update(chunk)
+    return hasher.hexdigest()[:12]
+
+
 # Split mode options
 SPLIT_MODES = ["auto", "line", "paragraph", "sentence", "clause"]
 
@@ -97,6 +210,9 @@ class ConversionOptions:
     merge_at_end: bool = True
     # Split mode: auto, line, paragraph, sentence, clause
     split_mode: str = "auto"
+    # Resume capability
+    resume: bool = True  # Enable resume by default for long conversions
+    keep_chapter_files: bool = False  # Keep individual chapter files after merge
     # Metadata for m4b
     title: Optional[str] = None
     author: Optional[str] = None
@@ -473,6 +589,450 @@ class TTSConverter:
         os.replace(tmp_path, output_path)
         chapters_file.unlink()
 
+    def _convert_single_chapter_to_wav(
+        self,
+        chapter: Chapter,
+        output_file: Path,
+        progress: Optional[ConversionProgress] = None,
+        start_time: Optional[float] = None,
+        total_chars: int = 0,
+        chars_before: int = 0,
+    ) -> tuple[float, int]:
+        """
+        Convert a single chapter to a WAV file.
+
+        Args:
+            chapter: Chapter to convert
+            output_file: Output WAV file path
+            progress: Optional progress object to update
+            start_time: Conversion start time for ETA calculation
+            total_chars: Total characters in conversion
+            chars_before: Characters processed before this chapter
+
+        Returns:
+            Tuple of (duration in seconds, characters processed)
+        """
+        use_phrasplit = self._use_phrasplit_mode()
+        split_pattern = None if use_phrasplit else self._get_split_pattern()
+        chars_processed = 0
+
+        # Open WAV file for writing
+        with sf.SoundFile(
+            str(output_file),
+            "w",
+            samplerate=SAMPLE_RATE,
+            channels=1,
+            format="wav",
+        ) as out_file:
+            duration = 0.0
+
+            if use_phrasplit:
+                segments = self._split_text_with_phrasplit(chapter.content)
+                for segment in segments:
+                    if self._cancelled:
+                        break
+                    if not segment.strip():
+                        continue
+
+                    for result in self._pipeline(
+                        segment,
+                        voice=self.options.voice,
+                        speed=self.options.speed,
+                        split_pattern=None,
+                    ):
+                        if self._cancelled:
+                            break
+                        out_file.write(result.audio)
+                        duration += len(result.audio) / SAMPLE_RATE
+
+                        # Update progress
+                        grapheme_len = len(result.graphemes)
+                        chars_processed += grapheme_len
+                        if progress and self.progress_callback:
+                            progress.chars_processed = chars_before + chars_processed
+                            progress.current_text = result.graphemes[:100]
+                            if start_time and total_chars > 0:
+                                elapsed = time.time() - start_time
+                                if chars_processed > 0 and elapsed > 0.5:
+                                    avg_time = elapsed / chars_processed
+                                    remaining = total_chars - progress.chars_processed
+                                    progress.estimated_remaining = avg_time * remaining
+                                progress.elapsed_time = elapsed
+                            self.progress_callback(progress)
+            else:
+                for result in self._pipeline(
+                    chapter.content,
+                    voice=self.options.voice,
+                    speed=self.options.speed,
+                    split_pattern=split_pattern,
+                ):
+                    if self._cancelled:
+                        break
+                    out_file.write(result.audio)
+                    duration += len(result.audio) / SAMPLE_RATE
+
+                    # Update progress
+                    grapheme_len = len(result.graphemes)
+                    chars_processed += grapheme_len
+                    if progress and self.progress_callback:
+                        progress.chars_processed = chars_before + chars_processed
+                        progress.current_text = result.graphemes[:100]
+                        if start_time and total_chars > 0:
+                            elapsed = time.time() - start_time
+                            if chars_processed > 0 and elapsed > 0.5:
+                                avg_time = elapsed / chars_processed
+                                remaining = total_chars - progress.chars_processed
+                                progress.estimated_remaining = avg_time * remaining
+                            progress.elapsed_time = elapsed
+                        self.progress_callback(progress)
+
+        return duration, chars_processed
+
+    def _merge_chapter_files(
+        self,
+        chapter_files: list[Path],
+        chapter_durations: list[float],
+        chapter_titles: list[str],
+        output_path: Path,
+    ) -> None:
+        """
+        Merge individual chapter WAV files into the final output format.
+
+        Args:
+            chapter_files: List of chapter WAV file paths
+            chapter_durations: Duration of each chapter in seconds
+            chapter_titles: Title of each chapter
+            output_path: Final output file path
+        """
+        ensure_ffmpeg()
+        import static_ffmpeg
+
+        static_ffmpeg.add_paths()
+
+        fmt = self.options.output_format
+        silence_duration = self.options.silence_between_chapters
+
+        # Create a concat file for ffmpeg
+        concat_file = output_path.with_suffix(".concat.txt")
+        silence_file = output_path.parent / "_silence.wav"
+
+        # Generate silence file if needed
+        if silence_duration > 0 and len(chapter_files) > 1:
+            silence_samples = int(silence_duration * SAMPLE_RATE)
+            silence_audio = self._np.zeros(silence_samples, dtype="float32")
+            with sf.SoundFile(
+                str(silence_file),
+                "w",
+                samplerate=SAMPLE_RATE,
+                channels=1,
+                format="wav",
+            ) as f:
+                f.write(silence_audio)
+
+        # Write concat file
+        with open(concat_file, "w", encoding="utf-8") as f:
+            for i, chapter_file in enumerate(chapter_files):
+                f.write(f"file '{chapter_file.absolute()}'\n")
+                if i < len(chapter_files) - 1 and silence_duration > 0:
+                    f.write(f"file '{silence_file.absolute()}'\n")
+
+        # Build ffmpeg command
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-f",
+            "concat",
+            "-safe",
+            "0",
+            "-i",
+            str(concat_file),
+        ]
+
+        if fmt == "m4b":
+            if self.options.cover_image and self.options.cover_image.exists():
+                cmd.extend(
+                    [
+                        "-i",
+                        str(self.options.cover_image),
+                        "-map",
+                        "0:a",
+                        "-map",
+                        "1",
+                        "-c:v",
+                        "copy",
+                        "-disposition:v",
+                        "attached_pic",
+                    ]
+                )
+            cmd.extend(
+                [
+                    "-c:a",
+                    "aac",
+                    "-q:a",
+                    "2",
+                    "-movflags",
+                    "+faststart+use_metadata_tags",
+                ]
+            )
+            if self.options.title:
+                cmd.extend(["-metadata", f"title={self.options.title}"])
+            if self.options.author:
+                cmd.extend(["-metadata", f"artist={self.options.author}"])
+        elif fmt == "opus":
+            cmd.extend(["-c:a", "libopus", "-b:a", "24000"])
+        elif fmt == "mp3":
+            cmd.extend(["-c:a", "libmp3lame", "-q:a", "2"])
+        elif fmt == "flac":
+            cmd.extend(["-c:a", "flac"])
+        elif fmt == "wav":
+            cmd.extend(["-c:a", "pcm_s16le"])
+
+        cmd.append(str(output_path))
+
+        proc = create_process(cmd, suppress_output=True)
+        proc.wait()
+
+        # Clean up concat and silence files
+        concat_file.unlink(missing_ok=True)
+        silence_file.unlink(missing_ok=True)
+
+        # Add chapter markers for m4b
+        if fmt == "m4b" and len(chapter_files) > 1:
+            chapter_times: list[dict[str, Any]] = []
+            current_time = 0.0
+            for i, (duration, title) in enumerate(
+                zip(chapter_durations, chapter_titles)
+            ):
+                chapter_times.append(
+                    {
+                        "title": title,
+                        "start": current_time,
+                        "end": current_time + duration,
+                    }
+                )
+                current_time += duration
+                if i < len(chapter_durations) - 1:
+                    current_time += silence_duration
+
+            self._add_chapters_to_m4b(output_path, chapter_times)
+
+    def convert_chapters_resumable(
+        self,
+        chapters: list[Chapter],
+        output_path: Path,
+        source_file: Optional[Path] = None,
+        resume: bool = True,
+    ) -> ConversionResult:
+        """
+        Convert chapters to audio with resume capability.
+
+        Each chapter is saved as a separate WAV file, allowing conversion
+        to be resumed if interrupted. A state file tracks progress.
+
+        Args:
+            chapters: List of Chapter objects
+            output_path: Output file path
+            source_file: Original source file (for state tracking)
+            resume: Whether to resume from previous state
+
+        Returns:
+            ConversionResult with success status and paths
+        """
+        if not chapters:
+            return ConversionResult(
+                success=False, error_message="No chapters to convert"
+            )
+
+        if self.options.output_format not in SUPPORTED_OUTPUT_FORMATS:
+            return ConversionResult(
+                success=False,
+                error_message=f"Unsupported format: {self.options.output_format}",
+            )
+
+        self._cancelled = False
+        prevent_sleep_start()
+
+        try:
+            # Set up work directory for chapter files
+            work_dir = output_path.parent / f".{output_path.stem}_chapters"
+            work_dir.mkdir(parents=True, exist_ok=True)
+            state_file = work_dir / "conversion_state.json"
+
+            # Load or create state
+            state: Optional[ConversionState] = None
+            if resume and state_file.exists():
+                state = ConversionState.load(state_file)
+                if state:
+                    # Verify state matches current conversion
+                    source_hash = _hash_file(source_file) if source_file else ""
+                    if (
+                        state.voice != self.options.voice
+                        or state.language != self.options.language
+                        or state.speed != self.options.speed
+                        or state.split_mode != self.options.split_mode
+                        or (source_file and state.source_hash != source_hash)
+                    ):
+                        self.log(
+                            "Options changed, starting fresh conversion",
+                            "warning",
+                        )
+                        state = None
+
+            if state is None:
+                # Create new state
+                source_hash = _hash_file(source_file) if source_file else ""
+                state = ConversionState(
+                    source_file=str(source_file) if source_file else "",
+                    source_hash=source_hash,
+                    output_file=str(output_path),
+                    work_dir=str(work_dir),
+                    voice=self.options.voice,
+                    language=self.options.language,
+                    speed=self.options.speed,
+                    split_mode=self.options.split_mode,
+                    output_format=self.options.output_format,
+                    chapters=[
+                        ChapterState(
+                            index=i,
+                            title=ch.title,
+                            content_hash=_hash_content(ch.content),
+                            char_count=ch.char_count,
+                        )
+                        for i, ch in enumerate(chapters)
+                    ],
+                    started_at=time.strftime("%Y-%m-%d %H:%M:%S"),
+                )
+                state.save(state_file)
+            else:
+                completed = state.get_completed_count()
+                self.log(
+                    f"Resuming conversion: {completed}/{len(chapters)} chapters completed"
+                )
+
+            # Initialize pipeline
+            self._init_pipeline()
+
+            total_chars = sum(ch.char_count for ch in chapters)
+            # Account for already completed chapters
+            chars_already_done = sum(
+                state.chapters[i].char_count
+                for i in range(len(state.chapters))
+                if state.chapters[i].completed
+            )
+            chars_processed = chars_already_done
+            start_time = time.time()
+
+            progress = ConversionProgress(
+                total_chapters=len(chapters),
+                total_chars=total_chars,
+                chars_processed=chars_processed,
+            )
+
+            # Convert each chapter
+            for chapter_idx, chapter in enumerate(chapters):
+                if self._cancelled:
+                    state.save(state_file)
+                    return ConversionResult(
+                        success=False,
+                        error_message="Cancelled",
+                        chapters_dir=work_dir,
+                    )
+
+                chapter_state = state.chapters[chapter_idx]
+
+                # Skip already completed chapters
+                if chapter_state.completed and chapter_state.audio_file:
+                    chapter_file = work_dir / chapter_state.audio_file
+                    if chapter_file.exists():
+                        self.log(
+                            f"Skipping completed chapter {chapter_idx + 1}: {chapter.title}"
+                        )
+                        continue
+                    else:
+                        # File missing, need to reconvert
+                        chapter_state.completed = False
+
+                progress.current_chapter = chapter_idx + 1
+                progress.chapter_name = chapter.title
+
+                self.log(
+                    f"Converting chapter {chapter_idx + 1}/{len(chapters)}: {chapter.title}"
+                )
+
+                # Generate chapter filename
+                safe_title = sanitize_filename(chapter.title)[:50]
+                chapter_filename = f"{chapter_idx + 1:03d}_{safe_title}.wav"
+                chapter_file = work_dir / chapter_filename
+
+                # Convert chapter to WAV
+                duration, _ = self._convert_single_chapter_to_wav(
+                    chapter,
+                    chapter_file,
+                    progress=progress,
+                    start_time=start_time,
+                    total_chars=total_chars,
+                    chars_before=chars_processed,
+                )
+
+                if self._cancelled:
+                    # Remove incomplete file
+                    chapter_file.unlink(missing_ok=True)
+                    state.save(state_file)
+                    return ConversionResult(
+                        success=False,
+                        error_message="Cancelled",
+                        chapters_dir=work_dir,
+                    )
+
+                # Update state
+                chapter_state.completed = True
+                chapter_state.audio_file = chapter_filename
+                chapter_state.duration = duration
+                state.save(state_file)
+
+                # Update progress
+                chars_processed += chapter.char_count
+                progress.chars_processed = chars_processed
+                elapsed = time.time() - start_time
+                if chars_processed > chars_already_done and elapsed > 0.5:
+                    chars_in_session = chars_processed - chars_already_done
+                    avg_time = elapsed / chars_in_session
+                    remaining = total_chars - chars_processed
+                    progress.estimated_remaining = avg_time * remaining
+                progress.elapsed_time = elapsed
+
+                if self.progress_callback:
+                    self.progress_callback(progress)
+
+            # All chapters completed, merge into final output
+            self.log("Merging chapters into final audiobook...")
+
+            chapter_files = [
+                work_dir / ch.audio_file for ch in state.chapters if ch.audio_file
+            ]
+            chapter_durations = [ch.duration for ch in state.chapters]
+            chapter_titles = [ch.title for ch in state.chapters]
+
+            self._merge_chapter_files(
+                chapter_files,
+                chapter_durations,
+                chapter_titles,
+                output_path,
+            )
+
+            self.log("Conversion complete!")
+
+            return ConversionResult(
+                success=True,
+                output_path=output_path,
+                chapters_dir=work_dir,
+            )
+
+        except Exception as e:
+            return ConversionResult(success=False, error_message=str(e))
+        finally:
+            prevent_sleep_end()
+
     def convert_chapters(
         self,
         chapters: list[Chapter],
@@ -721,6 +1281,25 @@ class TTSConverter:
                         self.options.author = metadata.authors[0]
             except Exception:
                 pass
+
+        # Use resumable conversion if enabled
+        if self.options.resume:
+            result = self.convert_chapters_resumable(
+                chapters, output_path, source_file=epub_path, resume=True
+            )
+            # Clean up chapter files unless keep_chapter_files is set
+            if (
+                result.success
+                and result.chapters_dir
+                and not self.options.keep_chapter_files
+            ):
+                import shutil
+
+                try:
+                    shutil.rmtree(result.chapters_dir)
+                except Exception:
+                    pass
+            return result
 
         return self.convert_chapters(chapters, output_path)
 

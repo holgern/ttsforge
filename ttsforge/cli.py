@@ -154,6 +154,18 @@ def main(ctx: click.Context, version: bool) -> None:
     default=None,
     help="Text splitting mode: auto (language-based), line (newlines), paragraph, sentence (spaCy), clause (sentence+comma).",
 )
+@click.option(
+    "--resume/--no-resume",
+    "resume",
+    default=True,
+    help="Enable/disable resume capability for interrupted conversions (default: enabled).",
+)
+@click.option(
+    "--keep-chapters",
+    "keep_chapter_files",
+    is_flag=True,
+    help="Keep individual chapter audio files after conversion.",
+)
 def convert(
     epub_file: Path,
     output: Optional[Path],
@@ -170,6 +182,8 @@ def convert(
     yes: bool,
     verbose: bool,
     split_mode: Optional[str],
+    resume: bool,
+    keep_chapter_files: bool,
 ) -> None:
     """Convert an EPUB file to an audiobook.
 
@@ -287,6 +301,8 @@ def convert(
         use_gpu=use_gpu if use_gpu is not None else config.get("use_gpu", True),
         silence_between_chapters=silence or config.get("silence_between_chapters", 2.0),
         split_mode=split_mode or config.get("default_split_mode", "auto"),
+        resume=resume,
+        keep_chapter_files=keep_chapter_files,
         title=title or epub_title,
         author=author or epub_author,
         cover_image=cover,
