@@ -133,7 +133,7 @@ VOICE_PREFIX_TO_LANG = {
 
 # Language code to default voice mapping
 DEFAULT_VOICE_FOR_LANG = {
-    "a": "af_bella",
+    "a": "af_heart",
     "b": "bf_emma",
     "e": "ef_dora",
     "f": "ff_siwis",
@@ -161,7 +161,7 @@ SOUNDFILE_FORMATS = ["wav", "mp3", "flac"]
 
 # Default configuration values
 DEFAULT_CONFIG = {
-    "default_voice": "af_bella",
+    "default_voice": "af_heart",
     "default_language": "a",
     "default_speed": 1.0,
     "default_format": "m4b",

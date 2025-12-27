@@ -499,6 +499,142 @@ def info(epub_file: Path) -> None:
     console.print(table)
 
 
+# Default sample text for testing TTS settings
+DEFAULT_SAMPLE_TEXT = (
+    "The quick brown fox jumps over the lazy dog. "
+    "This sample text demonstrates the text-to-speech capabilities, "
+    "including punctuation handling, and natural speech flow."
+)
+
+
+@main.command()
+@click.argument("text", required=False, default=None)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    help="Output file path (default: ./sample.wav).",
+)
+@click.option(
+    "-f",
+    "--format",
+    "output_format",
+    type=click.Choice(SUPPORTED_OUTPUT_FORMATS),
+    default="wav",
+    help="Output audio format.",
+)
+@click.option("-v", "--voice", type=click.Choice(VOICES), help="TTS voice to use.")
+@click.option(
+    "-l",
+    "--language",
+    type=click.Choice(list(LANGUAGE_DESCRIPTIONS.keys())),
+    help="Language for TTS.",
+)
+@click.option("-s", "--speed", type=float, help="Speech speed (default: 1.0).")
+@click.option(
+    "--gpu/--no-gpu",
+    "use_gpu",
+    default=None,
+    help="Use GPU acceleration if available.",
+)
+@click.option(
+    "--split-mode",
+    "split_mode",
+    type=click.Choice(["auto", "line", "paragraph", "sentence", "clause"]),
+    help="Text splitting mode for processing.",
+)
+@click.option("--verbose", is_flag=True, help="Show detailed output.")
+def sample(
+    text: Optional[str],
+    output: Optional[Path],
+    output_format: str,
+    voice: Optional[str],
+    language: Optional[str],
+    speed: Optional[float],
+    use_gpu: Optional[bool],
+    split_mode: Optional[str],
+    verbose: bool,
+) -> None:
+    """Generate a sample audio file to test TTS settings.
+
+    If no TEXT is provided, uses a default sample text.
+
+    Examples:
+
+        ttsforge sample
+
+        ttsforge sample "Hello, this is a test."
+
+        ttsforge sample --voice am_adam --speed 1.2 -o test.wav
+    """
+    from .conversion import ConversionOptions, TTSConverter
+
+    # Use default text if none provided
+    sample_text = text or DEFAULT_SAMPLE_TEXT
+
+    # Determine output path
+    if output is None:
+        output = Path(f"./sample.{output_format}")
+    elif output.suffix == "":
+        # If no extension provided, add the format
+        output = output.with_suffix(f".{output_format}")
+
+    # Load config for defaults
+    user_config = load_config()
+
+    # Build conversion options (use ConversionOptions defaults if not specified)
+    options = ConversionOptions(
+        voice=voice or user_config.get("voice") or "af_bella",
+        language=language or user_config.get("language") or "a",
+        speed=speed or user_config.get("speed", 1.0),
+        output_format=output_format,
+        use_gpu=use_gpu if use_gpu is not None else user_config.get("use_gpu", True),
+        split_mode=split_mode or user_config.get("split_mode", "auto"),
+    )
+
+    # Always show settings
+    console.print(f"[dim]Voice:[/dim] {options.voice}")
+    console.print(
+        f"[dim]Language:[/dim] {options.language} ({LANGUAGE_DESCRIPTIONS.get(options.language, 'Unknown')})"
+    )
+    console.print(f"[dim]Speed:[/dim] {options.speed}")
+    console.print(f"[dim]Format:[/dim] {options.output_format}")
+    console.print(f"[dim]Split mode:[/dim] {options.split_mode}")
+    console.print(f"[dim]GPU:[/dim] {'enabled' if options.use_gpu else 'disabled'}")
+
+    if verbose:
+        console.print(
+            f"[dim]Text:[/dim] {sample_text[:100]}{'...' if len(sample_text) > 100 else ''}"
+        )
+        console.print(f"[dim]Output:[/dim] {output}")
+
+    try:
+        converter = TTSConverter(options)
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            console=console,
+            transient=True,
+        ) as progress:
+            progress.add_task("Generating audio...", total=None)
+            result = converter.convert_text(sample_text, output)
+
+        if result.success:
+            console.print(f"[green]Sample saved to:[/green] {output}")
+        else:
+            console.print(f"[red]Error:[/red] {result.error_message}")
+            raise SystemExit(1)
+
+    except Exception as e:
+        console.print(f"[red]Error generating sample:[/red] {e}")
+        if verbose:
+            import traceback
+
+            console.print(traceback.format_exc())
+        raise SystemExit(1)
+
+
 @main.command()
 @click.option(
     "--language",
