@@ -8,8 +8,9 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Callable, Optional, Union
 
+import numpy as np
 import soundfile as sf
 
 from .constants import (
@@ -19,11 +20,17 @@ from .constants import (
     SUPPORTED_OUTPUT_FORMATS,
     VOICE_PREFIX_TO_LANG,
 )
+from .onnx_backend import (
+    KokoroONNX,
+    VoiceBlend,
+    are_models_downloaded,
+    download_all_models,
+    get_onnx_lang_code,
+)
 from .utils import (
     create_process,
     ensure_ffmpeg,
     format_duration,
-    get_device,
     prevent_sleep_end,
     prevent_sleep_start,
     sanitize_filename,
@@ -209,7 +216,7 @@ class ConversionOptions:
     speed: float = 1.0
     output_format: str = "m4b"
     output_dir: Optional[Path] = None
-    use_gpu: bool = True
+    use_gpu: bool = False  # GPU requires onnxruntime-gpu
     silence_between_chapters: float = 2.0
     save_chapters_separately: bool = False
     merge_at_end: bool = True
@@ -222,6 +229,10 @@ class ConversionOptions:
     title: Optional[str] = None
     author: Optional[str] = None
     cover_image: Optional[Path] = None
+    # Voice blending (e.g., "af_nicole:50,am_michael:50")
+    voice_blend: Optional[str] = None
+    # Voice database for custom/synthetic voices
+    voice_database: Optional[Path] = None
 
 
 # Pattern to detect chapter markers in text
@@ -258,7 +269,7 @@ def get_default_voice_for_language(lang_code: str) -> str:
 
 
 class TTSConverter:
-    """Converts text to speech using Kokoro TTS."""
+    """Converts text to speech using Kokoro ONNX TTS."""
 
     # Split patterns for different languages
     PUNCTUATION_SENTENCE = ".!?।。！？"
@@ -282,8 +293,9 @@ class TTSConverter:
         self.progress_callback = progress_callback
         self.log_callback = log_callback
         self._cancelled = False
-        self._pipeline: Any = None
-        self._np: Any = None
+        self._kokoro: Optional[KokoroONNX] = None
+        self._np = np
+        self._voice_style: Optional[Union[str, np.ndarray]] = None
 
     def log(self, message: str, level: str = "info") -> None:
         """Log a message."""
@@ -295,23 +307,45 @@ class TTSConverter:
         self._cancelled = True
 
     def _init_pipeline(self) -> None:
-        """Initialize the TTS pipeline."""
-        if self._pipeline is not None:
+        """Initialize the TTS pipeline using ONNX backend."""
+        if self._kokoro is not None:
             return
 
-        self.log("Initializing TTS pipeline...")
-        import numpy as np
-        from kokoro import KPipeline
+        self.log("Initializing ONNX TTS pipeline...")
 
-        self._np = np
-        device = get_device(self.options.use_gpu)
-        self.log(f"Using device: {device}")
+        # Check if models are downloaded
+        if not are_models_downloaded():
+            self.log("Downloading ONNX model files...")
+            download_all_models()
+            self.log("Model download complete.")
 
-        self._pipeline = KPipeline(
-            lang_code=self.options.language,
-            repo_id="hexgrad/Kokoro-82M",
-            device=device,
-        )
+        # Initialize ONNX backend
+        self._kokoro = KokoroONNX(use_gpu=self.options.use_gpu)
+
+        # Load voice database if specified
+        if self.options.voice_database and self.options.voice_database.exists():
+            self._kokoro.load_voice_database(self.options.voice_database)
+            self.log(f"Loaded voice database: {self.options.voice_database}")
+
+        # Resolve voice (handle blending)
+        if self.options.voice_blend:
+            blend = VoiceBlend.parse(self.options.voice_blend)
+            self._voice_style = self._kokoro.create_blended_voice(blend)
+            voice_names = ", ".join(f"{v}:{int(w * 100)}%" for v, w in blend.voices)
+            self.log(f"Using blended voice: {voice_names}")
+        else:
+            # Check if voice is in database first
+            if self.options.voice_database:
+                db_voice = self._kokoro.get_voice_from_database(self.options.voice)
+                if db_voice is not None:
+                    self._voice_style = db_voice
+                    self.log(f"Using voice from database: {self.options.voice}")
+                else:
+                    self._voice_style = self.options.voice
+                    self.log(f"Using voice: {self.options.voice}")
+            else:
+                self._voice_style = self.options.voice
+                self.log(f"Using voice: {self.options.voice}")
 
     def _get_split_pattern(self) -> str:
         """Get the split pattern based on language (used for auto mode)."""
@@ -618,8 +652,10 @@ class TTSConverter:
             Tuple of (duration in seconds, characters processed)
         """
         use_phrasplit = self._use_phrasplit_mode()
-        split_pattern = None if use_phrasplit else self._get_split_pattern()
         chars_processed = 0
+
+        # Get language code for ONNX
+        lang_code = get_onnx_lang_code(self.options.language)
 
         # Open WAV file for writing
         with sf.SoundFile(
@@ -639,49 +675,54 @@ class TTSConverter:
                     if not segment.strip():
                         continue
 
-                    for result in self._pipeline(
+                    # Use ONNX backend
+                    assert self._kokoro is not None
+                    samples, sample_rate = self._kokoro.create(
                         segment,
-                        voice=self.options.voice,
+                        voice=self._voice_style or self.options.voice,
                         speed=self.options.speed,
-                        split_pattern=None,
-                    ):
-                        if self._cancelled:
-                            break
-                        out_file.write(result.audio)
-                        duration += len(result.audio) / SAMPLE_RATE
+                        lang=lang_code,
+                    )
 
-                        # Update progress
-                        grapheme_len = len(result.graphemes)
-                        chars_processed += grapheme_len
-                        if progress and self.progress_callback:
-                            progress.chars_processed = chars_before + chars_processed
-                            progress.current_text = result.graphemes[:100]
-                            if start_time and total_chars > 0:
-                                elapsed = time.time() - start_time
-                                if chars_processed > 0 and elapsed > 0.5:
-                                    avg_time = elapsed / chars_processed
-                                    remaining = total_chars - progress.chars_processed
-                                    progress.estimated_remaining = avg_time * remaining
-                                progress.elapsed_time = elapsed
-                            self.progress_callback(progress)
-            else:
-                for result in self._pipeline(
-                    chapter.content,
-                    voice=self.options.voice,
-                    speed=self.options.speed,
-                    split_pattern=split_pattern,
-                ):
                     if self._cancelled:
                         break
-                    out_file.write(result.audio)
-                    duration += len(result.audio) / SAMPLE_RATE
+                    out_file.write(samples)
+                    duration += len(samples) / SAMPLE_RATE
 
                     # Update progress
-                    grapheme_len = len(result.graphemes)
+                    grapheme_len = len(segment)
                     chars_processed += grapheme_len
                     if progress and self.progress_callback:
                         progress.chars_processed = chars_before + chars_processed
-                        progress.current_text = result.graphemes[:100]
+                        progress.current_text = segment[:100]
+                        if start_time and total_chars > 0:
+                            elapsed = time.time() - start_time
+                            if chars_processed > 0 and elapsed > 0.5:
+                                avg_time = elapsed / chars_processed
+                                remaining = total_chars - progress.chars_processed
+                                progress.estimated_remaining = avg_time * remaining
+                            progress.elapsed_time = elapsed
+                        self.progress_callback(progress)
+            else:
+                # Use chunk-based generation for progress tracking
+                assert self._kokoro is not None
+                for samples, sample_rate, chunk in self._kokoro.generate_chunks(
+                    chapter.content,
+                    voice=self._voice_style or self.options.voice,
+                    speed=self.options.speed,
+                    lang=lang_code,
+                ):
+                    if self._cancelled:
+                        break
+                    out_file.write(samples)
+                    duration += len(samples) / SAMPLE_RATE
+
+                    # Update progress
+                    grapheme_len = len(chunk)
+                    chars_processed += grapheme_len
+                    if progress and self.progress_callback:
+                        progress.chars_processed = chars_before + chars_processed
+                        progress.current_text = chunk[:100]
                         if start_time and total_chars > 0:
                             elapsed = time.time() - start_time
                             if chars_processed > 0 and elapsed > 0.5:
@@ -1106,7 +1147,6 @@ class TTSConverter:
 
             # Determine splitting strategy
             use_phrasplit = self._use_phrasplit_mode()
-            split_pattern = None if use_phrasplit else self._get_split_pattern()
 
             progress = ConversionProgress(
                 total_chapters=len(chapters),
@@ -1132,6 +1172,9 @@ class TTSConverter:
 
                 self.log(f"Chapter {chapter_idx + 1}/{len(chapters)}: {chapter.title}")
 
+                # Get language code for ONNX
+                lang_code = get_onnx_lang_code(self.options.language)
+
                 # Generate TTS for this chapter
                 if use_phrasplit:
                     # Pre-split text using phrasplit, then process each segment
@@ -1142,61 +1185,64 @@ class TTSConverter:
                         if not segment.strip():
                             continue
 
-                        # Process each segment without further splitting
-                        for result in self._pipeline(
+                        # Process each segment using ONNX backend
+                        assert self._kokoro is not None
+                        samples, sample_rate = self._kokoro.create(
                             segment,
-                            voice=self.options.voice,
+                            voice=self._voice_style or self.options.voice,
                             speed=self.options.speed,
-                            split_pattern=None,  # No further splitting
-                        ):
-                            if self._cancelled:
-                                break
+                            lang=lang_code,
+                        )
 
-                            # Write audio
-                            self._write_audio_chunk(result.audio, out_file, ffmpeg_proc)
+                        if self._cancelled:
+                            break
 
-                            # Update timing
-                            chunk_duration = len(result.audio) / SAMPLE_RATE
-                            current_time += chunk_duration
+                        # Write audio
+                        self._write_audio_chunk(samples, out_file, ffmpeg_proc)
 
-                            # Update progress
-                            grapheme_len = len(result.graphemes)
-                            chars_processed += grapheme_len
-                            progress.chars_processed = chars_processed
-                            progress.current_text = result.graphemes[:100]
+                        # Update timing
+                        chunk_duration = len(samples) / SAMPLE_RATE
+                        current_time += chunk_duration
 
-                            elapsed = time.time() - start_time
-                            if chars_processed > 0 and elapsed > 0.5:
-                                avg_time = elapsed / chars_processed
-                                remaining = total_chars - chars_processed
-                                progress.estimated_remaining = avg_time * remaining
-                            progress.elapsed_time = elapsed
+                        # Update progress
+                        grapheme_len = len(segment)
+                        chars_processed += grapheme_len
+                        progress.chars_processed = chars_processed
+                        progress.current_text = segment[:100]
 
-                            if self.progress_callback:
-                                self.progress_callback(progress)
+                        elapsed = time.time() - start_time
+                        if chars_processed > 0 and elapsed > 0.5:
+                            avg_time = elapsed / chars_processed
+                            remaining = total_chars - chars_processed
+                            progress.estimated_remaining = avg_time * remaining
+                        progress.elapsed_time = elapsed
+
+                        if self.progress_callback:
+                            self.progress_callback(progress)
                 else:
-                    # Use pattern-based splitting (auto/line modes)
-                    for result in self._pipeline(
+                    # Use chunk-based generation for progress tracking
+                    assert self._kokoro is not None
+                    for samples, sample_rate, chunk in self._kokoro.generate_chunks(
                         chapter.content,
-                        voice=self.options.voice,
+                        voice=self._voice_style or self.options.voice,
                         speed=self.options.speed,
-                        split_pattern=split_pattern,
+                        lang=lang_code,
                     ):
                         if self._cancelled:
                             break
 
                         # Write audio
-                        self._write_audio_chunk(result.audio, out_file, ffmpeg_proc)
+                        self._write_audio_chunk(samples, out_file, ffmpeg_proc)
 
                         # Update timing
-                        chunk_duration = len(result.audio) / SAMPLE_RATE
+                        chunk_duration = len(samples) / SAMPLE_RATE
                         current_time += chunk_duration
 
                         # Update progress
-                        grapheme_len = len(result.graphemes)
+                        grapheme_len = len(chunk)
                         chars_processed += grapheme_len
                         progress.chars_processed = chars_processed
-                        progress.current_text = result.graphemes[:100]
+                        progress.current_text = chunk[:100]
 
                         elapsed = time.time() - start_time
                         if chars_processed > 0 and elapsed > 0.5:

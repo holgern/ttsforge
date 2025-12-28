@@ -108,7 +108,7 @@ def detect_encoding(file_path: str | Path) -> str:
 
 def get_gpu_info(enabled: bool = True) -> tuple[str, bool]:
     """
-    Check GPU acceleration availability.
+    Check GPU acceleration availability for ONNX runtime.
 
     Args:
         enabled: Whether GPU acceleration is requested
@@ -116,71 +116,67 @@ def get_gpu_info(enabled: bool = True) -> tuple[str, bool]:
     Returns:
         Tuple of (status message, is_gpu_available)
     """
+    if not enabled:
+        return "GPU disabled in config. Using CPU.", False
+
     try:
-        import torch
-        from torch.cuda import is_available as cuda_available
+        import onnxruntime as ort
 
-        if not enabled:
-            return "GPU available but using CPU (disabled in config).", False
-
-        # Check for Apple Silicon MPS
-        if platform.system() == "Darwin" and platform.processor() == "arm":
-            if torch.backends.mps.is_available():
-                return "MPS GPU available and enabled.", True
-            else:
-                return "MPS GPU not available on Apple Silicon. Using CPU.", False
+        providers = ort.get_available_providers()
 
         # Check for CUDA
-        if cuda_available():
-            device_name = torch.cuda.get_device_name(0)
-            return f"CUDA GPU available and enabled ({device_name}).", True
+        if "CUDAExecutionProvider" in providers:
+            return "CUDA GPU available via ONNX Runtime.", True
 
-        # Gather CUDA diagnostic info if not available
-        try:
-            cuda_devices = torch.cuda.device_count()
-            cuda_error = (
-                torch.cuda.get_device_name(0)
-                if cuda_devices > 0
-                else "No devices found"
-            )
-        except Exception as e:
-            cuda_error = str(e)
-        return f"CUDA GPU is not available. Using CPU. ({cuda_error})", False
+        # Check for CoreML (Apple)
+        if "CoreMLExecutionProvider" in providers:
+            return "CoreML GPU available via ONNX Runtime.", True
+
+        # Check for DirectML (Windows)
+        if "DmlExecutionProvider" in providers:
+            return "DirectML GPU available via ONNX Runtime.", True
+
+        return f"No GPU providers available. Using CPU. (Available: {providers})", False
     except ImportError:
-        return "PyTorch not installed. Using CPU.", False
+        return "ONNX Runtime not installed. Using CPU.", False
     except Exception as e:
         return f"Error checking GPU: {e}", False
 
 
 def get_device(use_gpu: bool = True) -> str:
     """
-    Get the appropriate PyTorch device string.
+    Get the appropriate execution provider for ONNX Runtime.
 
     Args:
         use_gpu: Whether to attempt GPU usage
 
     Returns:
-        Device string: 'cuda', 'mps', or 'cpu'
+        Execution provider name: 'CUDAExecutionProvider', 'CoreMLExecutionProvider', or 'CPUExecutionProvider'
     """
     if not use_gpu:
-        return "cpu"
+        return "CPUExecutionProvider"
 
     try:
-        import torch
+        import onnxruntime as ort
 
-        # Check for Apple Silicon MPS
-        if platform.system() == "Darwin" and platform.processor() == "arm":
-            if torch.backends.mps.is_available():
-                return "mps"
+        providers = ort.get_available_providers()
 
-        # Check for CUDA
-        if torch.cuda.is_available():
-            return "cuda"
+        # Prefer CUDA
+        if "CUDAExecutionProvider" in providers:
+            return "CUDAExecutionProvider"
+
+        # CoreML for Apple
+        if "CoreMLExecutionProvider" in providers:
+            return "CoreMLExecutionProvider"
+
+        # DirectML for Windows
+        if "DmlExecutionProvider" in providers:
+            return "DmlExecutionProvider"
 
     except ImportError:
         pass
 
-    return "cpu"
+    return "CPUExecutionProvider"
 
 
 def create_process(
@@ -283,15 +279,16 @@ def ensure_ffmpeg() -> bool:
 
 def load_tts_pipeline() -> tuple[Any, Any]:
     """
-    Load numpy and Kokoro TTS pipeline.
+    Load numpy and Kokoro ONNX TTS backend.
 
     Returns:
-        Tuple of (numpy module, KPipeline class)
+        Tuple of (numpy module, KokoroONNX class)
     """
     import numpy as np
-    from kokoro import KPipeline
 
-    return np, KPipeline
+    from .onnx_backend import KokoroONNX
+
+    return np, KokoroONNX
 
 
 class LoadPipelineThread(Thread):
@@ -303,8 +300,8 @@ class LoadPipelineThread(Thread):
 
     def run(self) -> None:
         try:
-            np_module, kpipeline_class = load_tts_pipeline()
-            self.callback(np_module, kpipeline_class, None)
+            np_module, kokoro_class = load_tts_pipeline()
+            self.callback(np_module, kokoro_class, None)
         except Exception as e:
             self.callback(None, None, str(e))
 

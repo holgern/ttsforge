@@ -118,16 +118,22 @@ class TestSanitizeFilename:
 
 
 class TestGetDevice:
-    """Tests for get_device function."""
+    """Tests for get_device function (ONNX Runtime providers)."""
 
     def test_cpu_when_disabled(self):
-        """Should return 'cpu' when GPU disabled."""
-        assert get_device(use_gpu=False) == "cpu"
+        """Should return CPUExecutionProvider when GPU disabled."""
+        assert get_device(use_gpu=False) == "CPUExecutionProvider"
 
-    def test_returns_valid_device(self):
-        """Should return a valid device string."""
+    def test_returns_valid_provider(self):
+        """Should return a valid ONNX Runtime execution provider."""
         device = get_device(use_gpu=True)
-        assert device in ("cpu", "cuda", "mps")
+        valid_providers = (
+            "CPUExecutionProvider",
+            "CUDAExecutionProvider",
+            "CoreMLExecutionProvider",
+            "DmlExecutionProvider",
+        )
+        assert device in valid_providers
 
 
 class TestGetGpuInfo:

@@ -2,7 +2,7 @@
 
 # Program Information
 PROGRAM_NAME = "ttsforge"
-PROGRAM_DESCRIPTION = "Generate audiobooks from EPUB files with TTS."
+PROGRAM_DESCRIPTION = "Generate audiobooks from EPUB files using Kokoro ONNX TTS."
 
 # Language code to description mapping
 LANGUAGE_DESCRIPTIONS = {
@@ -165,11 +165,12 @@ DEFAULT_CONFIG = {
     "default_language": "a",
     "default_speed": 1.0,
     "default_format": "m4b",
-    "use_gpu": True,
+    "use_gpu": False,  # GPU requires onnxruntime-gpu
     "silence_between_chapters": 2.0,
     "save_chapters_separately": False,
     "merge_at_end": True,
     "auto_detect_language": True,
+    "default_split_mode": "auto",
 }
 
 # Audio settings

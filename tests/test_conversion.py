@@ -212,7 +212,7 @@ class TestConversionOptions:
         assert options.language == "a"
         assert options.speed == 1.0
         assert options.output_format == "m4b"
-        assert options.use_gpu is True
+        assert options.use_gpu is False  # ONNX default is CPU
 
     def test_custom_values(self):
         """Should accept custom values."""
@@ -221,13 +221,13 @@ class TestConversionOptions:
             language="b",
             speed=1.5,
             output_format="wav",
-            use_gpu=False,
+            use_gpu=True,
         )
         assert options.voice == "am_adam"
         assert options.language == "b"
         assert options.speed == 1.5
         assert options.output_format == "wav"
-        assert options.use_gpu is False
+        assert options.use_gpu is True
 
     def test_split_mode_default(self):
         """split_mode should default to 'auto'."""
@@ -238,6 +238,18 @@ class TestConversionOptions:
         """resume should default to True."""
         options = ConversionOptions()
         assert options.resume is True
+
+    def test_voice_blend_option(self):
+        """Should accept voice_blend option."""
+        options = ConversionOptions(voice_blend="af_nicole:50,am_michael:50")
+        assert options.voice_blend == "af_nicole:50,am_michael:50"
+
+    def test_voice_database_option(self):
+        """Should accept voice_database option."""
+        from pathlib import Path
+
+        options = ConversionOptions(voice_database=Path("/tmp/voices.db"))
+        assert options.voice_database == Path("/tmp/voices.db")
 
 
 class TestSplitModes:

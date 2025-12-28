@@ -1,7 +1,7 @@
 """
 ttsforge - Generate audiobooks from EPUB files with TTS.
 
-A CLI tool for converting EPUB books to audiobooks using Kokoro TTS.
+A CLI tool for converting EPUB books to audiobooks using Kokoro ONNX TTS.
 """
 
 from .constants import (
@@ -17,9 +17,32 @@ from .conversion import (
     ConversionResult,
     TTSConverter,
 )
+from .onnx_backend import (
+    KokoroONNX,
+    VoiceBlend,
+    are_models_downloaded,
+    download_all_models,
+    download_model,
+    get_model_dir,
+    get_onnx_lang_code,
+)
+from .phonemes import (
+    FORMAT_VERSION,
+    PhonemeBook,
+    PhonemeChapter,
+    PhonemeSegment,
+    create_phoneme_book_from_chapters,
+    phonemize_text_list,
+)
+from .tokenizer import (
+    MAX_PHONEME_LENGTH,
+    SAMPLE_RATE,
+    SUPPORTED_LANGUAGES,
+    EspeakConfig,
+    Tokenizer,
+)
+from .trim import trim
 from .utils import (
-    get_device,
-    get_gpu_info,
     load_config,
     save_config,
 )
@@ -36,9 +59,30 @@ __all__ = [
     "ConversionProgress",
     "ConversionResult",
     "TTSConverter",
+    # ONNX Backend
+    "KokoroONNX",
+    "VoiceBlend",
+    "are_models_downloaded",
+    "download_all_models",
+    "download_model",
+    "get_model_dir",
+    "get_onnx_lang_code",
+    # Tokenizer
+    "EspeakConfig",
+    "MAX_PHONEME_LENGTH",
+    "SAMPLE_RATE",
+    "SUPPORTED_LANGUAGES",
+    "Tokenizer",
+    # Phonemes
+    "FORMAT_VERSION",
+    "PhonemeBook",
+    "PhonemeChapter",
+    "PhonemeSegment",
+    "create_phoneme_book_from_chapters",
+    "phonemize_text_list",
+    # Trim
+    "trim",
     # Utils
-    "get_device",
-    "get_gpu_info",
     "load_config",
     "save_config",
 ]
