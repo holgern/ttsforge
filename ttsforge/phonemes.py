@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Iterator
+from typing import TYPE_CHECKING, Any, Callable, Iterator
 
 if TYPE_CHECKING:
     from .tokenizer import Tokenizer
@@ -84,6 +84,8 @@ class PhonemeChapter:
         split_mode: str = "sentence",
         max_chars: int = 300,
         language_model: str = "en_core_web_sm",
+        max_phoneme_length: int = 510,
+        warn_callback: Callable[[str], None] | None = None,
     ) -> list[PhonemeSegment]:
         """Add text by phonemizing it.
 
@@ -102,6 +104,8 @@ class PhonemeChapter:
             max_chars: Maximum characters per segment (default 300, used for
                        further splitting if segments are too long)
             language_model: spaCy language model for sentence/clause splitting
+            max_phoneme_length: Maximum phoneme length (default 510, Kokoro limit)
+            warn_callback: Optional callback for warnings (receives warning message)
 
         Returns:
             List of created PhonemeSegments
@@ -112,6 +116,51 @@ class PhonemeChapter:
             split_paragraphs,
             split_sentences,
         )
+
+        def warn(msg: str) -> None:
+            """Issue a warning."""
+            if warn_callback:
+                warn_callback(msg)
+
+        def phonemize_with_split(
+            chunk: str, current_max_chars: int
+        ) -> list[PhonemeSegment]:
+            """Phonemize a chunk, splitting further if phonemes exceed limit."""
+            chunk = chunk.strip()
+            if not chunk:
+                return []
+
+            phonemes = tokenizer.phonemize(chunk, lang=lang)
+
+            # Check if phonemes exceed limit
+            if len(phonemes) > max_phoneme_length:
+                # Try splitting further if we have room
+                if current_max_chars > 50:
+                    # Reduce max_chars and retry
+                    new_max_chars = current_max_chars // 2
+                    sub_chunks = split_long_lines(chunk, new_max_chars, language_model)
+                    results = []
+                    for sub in sub_chunks:
+                        results.extend(phonemize_with_split(sub, new_max_chars))
+                    return results
+                else:
+                    # Can't split further - warn and truncate
+                    warn(
+                        f"Segment phonemes too long ({len(phonemes)} > {max_phoneme_length}), "
+                        f"truncating. Text: '{chunk[:50]}...'"
+                    )
+                    # Truncate phonemes to limit
+                    phonemes = phonemes[:max_phoneme_length]
+
+            tokens = tokenizer.tokenize(phonemes)
+            return [
+                PhonemeSegment(
+                    text=chunk,
+                    phonemes=phonemes,
+                    tokens=tokens,
+                    lang=lang,
+                )
+            ]
 
         # Split text according to mode
         if split_mode == "paragraph":
@@ -141,18 +190,10 @@ class PhonemeChapter:
                 sub_chunks = [chunk]
 
             for sub_chunk in sub_chunks:
-                sub_chunk = sub_chunk.strip()
-                if not sub_chunk:
-                    continue
-                phonemes = tokenizer.phonemize(sub_chunk, lang=lang)
-                tokens = tokenizer.tokenize(phonemes)
-                segment = PhonemeSegment(
-                    text=sub_chunk,
-                    phonemes=phonemes,
-                    tokens=tokens,
-                    lang=lang,
-                )
-                self.segments.append(segment)
+                new_segments = phonemize_with_split(sub_chunk, max_chars)
+                for seg in new_segments:
+                    self.segments.append(seg)
+                    segments.append(seg)
                 segments.append(segment)
 
         return segments

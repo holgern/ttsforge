@@ -1050,6 +1050,59 @@ def phonemes_export(
     help="Enable/disable GPU acceleration.",
 )
 @click.option(
+    "--silence",
+    type=float,
+    default=2.0,
+    help="Silence between chapters in seconds.",
+)
+@click.option(
+    "--chapters",
+    type=str,
+    default=None,
+    help="Select chapters to convert (1-based). E.g., '1-5', '3,5,7', or '1-3,7'.",
+)
+@click.option(
+    "--title",
+    type=str,
+    default=None,
+    help="Audiobook title (for m4b metadata).",
+)
+@click.option(
+    "--author",
+    type=str,
+    default=None,
+    help="Audiobook author (for m4b metadata).",
+)
+@click.option(
+    "--cover",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Cover image path (for m4b format).",
+)
+@click.option(
+    "--voice-blend",
+    type=str,
+    default=None,
+    help="Blend multiple voices. E.g., 'af_nicole:50,am_michael:50'.",
+)
+@click.option(
+    "--voice-database",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to custom voice database (SQLite).",
+)
+@click.option(
+    "--streaming/--no-streaming",
+    "streaming",
+    default=False,
+    help="Use streaming mode (faster, no resume). Default: chapter-at-a-time with resume.",
+)
+@click.option(
+    "--keep-chapters",
+    is_flag=True,
+    help="Keep intermediate chapter files after merging.",
+)
+@click.option(
     "-y",
     "--yes",
     is_flag=True,
@@ -1062,19 +1115,43 @@ def phonemes_convert(
     voice: Optional[str],
     speed: float,
     use_gpu: Optional[bool],
+    silence: float,
+    chapters: Optional[str],
+    title: Optional[str],
+    author: Optional[str],
+    cover: Optional[Path],
+    voice_blend: Optional[str],
+    voice_database: Optional[Path],
+    streaming: bool,
+    keep_chapters: bool,
     yes: bool,
 ) -> None:
     """Convert a pre-tokenized phoneme file to audio.
 
     PHONEME_FILE should be a JSON file created by 'ttsforge phonemes export'.
 
+    By default, conversion is resumable (chapter-at-a-time mode). If interrupted,
+    re-running the same command will resume from the last completed chapter.
+
+    Use --streaming for faster conversion without resume capability.
+
     Examples:
 
         ttsforge phonemes convert book.phonemes.json
 
         ttsforge phonemes convert book.phonemes.json -v am_adam -o book.m4b
+
+        ttsforge phonemes convert book.phonemes.json --chapters 1-5
+
+        ttsforge phonemes convert book.phonemes.json --streaming
     """
     from .phonemes import PhonemeBook
+    from .phoneme_conversion import (
+        PhonemeConverter,
+        PhonemeConversionOptions,
+        PhonemeConversionProgress,
+        parse_chapter_selection,
+    )
 
     console.print(f"[bold]Loading:[/bold] {phoneme_file}")
 
@@ -1096,26 +1173,149 @@ def phonemes_convert(
     if voice is None:
         voice = config.get("default_voice", "af_heart")
 
+    # Get GPU setting
+    gpu = use_gpu if use_gpu is not None else config.get("use_gpu", False)
+
+    # Use book title/author as defaults for metadata
+    book_info = book.get_info()
+    if title is None:
+        title = book_info.get("title")
+    if author is None:
+        author = book_info.get("metadata", {}).get("author")
+
+    # Validate chapter selection if provided
+    selected_indices: list[int] = []
+    if chapters:
+        try:
+            selected_indices = parse_chapter_selection(chapters, len(book.chapters))
+        except ValueError as e:
+            console.print(f"[red]Invalid chapter selection:[/red] {e}")
+            sys.exit(1)
+
+    # Calculate total segments for selected chapters
+    if selected_indices:
+        selected_chapter_count = len(selected_indices)
+        total_segments = sum(len(book.chapters[i].segments) for i in selected_indices)
+    else:
+        selected_chapter_count = len(book.chapters)
+        total_segments = book.total_segments
+
     # Show info
-    info = book.get_info()
-    console.print(f"[dim]Title: {info['title']}[/dim]")
+    console.print(f"[dim]Title: {book_info['title']}[/dim]")
+    if selected_indices:
+        console.print(
+            f"[dim]Chapters: {selected_chapter_count}/{book_info['chapters']} (selected), "
+            f"Segments: {total_segments}[/dim]"
+        )
+    else:
+        console.print(
+            f"[dim]Chapters: {book_info['chapters']}, "
+            f"Segments: {book_info['segments']}, "
+            f"Tokens: {book_info['tokens']:,}[/dim]"
+        )
+
+    if voice_blend:
+        console.print(f"[dim]Voice blend: {voice_blend}[/dim]")
+    else:
+        console.print(f"[dim]Voice: {voice}, Speed: {speed}x[/dim]")
+
+    console.print(f"[dim]Output: {output} (format: {fmt})[/dim]")
     console.print(
-        f"[dim]Chapters: {info['chapters']}, "
-        f"Segments: {info['segments']}, "
-        f"Tokens: {info['tokens']:,}[/dim]"
+        f"[dim]Mode: {'streaming' if streaming else 'resumable (chapter-at-a-time)'}[/dim]"
     )
-    console.print(f"[dim]Voice: {voice}, Speed: {speed}x[/dim]")
-    console.print(f"[dim]Output: {output}[/dim]")
 
     if not yes:
         if not Confirm.ask("Proceed with conversion?"):
             console.print("[yellow]Cancelled.[/yellow]")
             return
 
-    console.print(
-        "[yellow]Note: Full phoneme-to-audio conversion coming soon.[/yellow]"
+    # Create conversion options
+    options = PhonemeConversionOptions(
+        voice=voice,
+        speed=speed,
+        output_format=fmt,
+        use_gpu=gpu,
+        silence_between_chapters=silence,
+        title=title,
+        author=author,
+        cover_image=cover,
+        voice_blend=voice_blend,
+        voice_database=voice_database,
+        chapters=chapters,
+        resume=not streaming,  # Resume only in chapter-at-a-time mode
+        keep_chapter_files=keep_chapters,
     )
-    console.print("[dim]This feature will generate audio directly from tokens.[/dim]")
+
+    # Progress tracking with Rich
+    progress_bar: Optional[Progress] = None
+    task_id = None
+
+    def log_callback(message: str, level: str) -> None:
+        """Handle log messages."""
+        if level == "warning":
+            console.print(f"[yellow]{message}[/yellow]")
+        elif level == "error":
+            console.print(f"[red]{message}[/red]")
+        else:
+            console.print(f"[dim]{message}[/dim]")
+
+    def progress_callback(prog: PhonemeConversionProgress) -> None:
+        """Update progress display."""
+        nonlocal progress_bar, task_id
+        if progress_bar is not None and task_id is not None:
+            progress_bar.update(
+                task_id,
+                completed=prog.segments_processed,
+                description=f"[cyan]Ch {prog.current_chapter}/{prog.total_chapters}[/cyan]",
+            )
+
+    # Create converter
+    converter = PhonemeConverter(
+        book=book,
+        options=options,
+        progress_callback=progress_callback,
+        log_callback=log_callback,
+    )
+
+    # Run conversion with progress bar
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        TextColumn("[dim]{task.fields[segment_info]}[/dim]"),
+        TimeElapsedColumn(),
+        TimeRemainingColumn(),
+        console=console,
+        transient=False,
+    ) as progress:
+        progress_bar = progress
+        task_id = progress.add_task(
+            "[cyan]Converting...[/cyan]",
+            total=total_segments,
+            segment_info="",
+        )
+
+        # Choose conversion mode
+        if streaming:
+            result = converter.convert_streaming(output)
+        else:
+            result = converter.convert(output)
+
+        # Mark complete
+        progress.update(task_id, completed=total_segments)
+
+    # Show result
+    if result.success:
+        console.print(f"\n[green]Conversion complete![/green]")
+        console.print(f"[bold]Output:[/bold] {result.output_path}")
+        if result.duration > 0:
+            from .utils import format_duration
+
+            console.print(f"[dim]Duration: {format_duration(result.duration)}[/dim]")
+    else:
+        console.print(f"\n[red]Conversion failed:[/red] {result.error_message}")
+        sys.exit(1)
 
 
 @phonemes.command("preview")
