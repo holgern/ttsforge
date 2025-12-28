@@ -1185,10 +1185,17 @@ def phonemes_preview(
 
 @phonemes.command("info")
 @click.argument("phoneme_file", type=click.Path(exists=True, path_type=Path))
-def phonemes_info(phoneme_file: Path) -> None:
+@click.option(
+    "--stats",
+    is_flag=True,
+    help="Show detailed token statistics.",
+)
+def phonemes_info(phoneme_file: Path, stats: bool) -> None:
     """Show information about a phoneme file.
 
     PHONEME_FILE should be a JSON file created by 'ttsforge phonemes export'.
+
+    Use --stats to show detailed token statistics (min, median, mean, max).
     """
     from .phonemes import PhonemeBook
 
@@ -1217,6 +1224,100 @@ def phonemes_info(phoneme_file: Path) -> None:
             table.add_row(f"Meta: {key}", str(value))
 
     console.print(table)
+
+    # Collect token counts per segment for statistics
+    token_counts = [len(seg.tokens) for _, seg in book.iter_segments()]
+    char_counts = [len(seg.text) for _, seg in book.iter_segments()]
+    phoneme_counts = [len(seg.phonemes) for _, seg in book.iter_segments()]
+
+    if token_counts and stats:
+        import statistics
+
+        # Token statistics
+        console.print("\n[bold]Segment Statistics:[/bold]")
+        stats_table = Table(show_header=True)
+        stats_table.add_column("Metric", style="bold")
+        stats_table.add_column("Tokens", justify="right")
+        stats_table.add_column("Characters", justify="right")
+        stats_table.add_column("Phonemes", justify="right")
+
+        stats_table.add_row(
+            "Count",
+            str(len(token_counts)),
+            str(len(char_counts)),
+            str(len(phoneme_counts)),
+        )
+        stats_table.add_row(
+            "Min",
+            str(min(token_counts)),
+            str(min(char_counts)),
+            str(min(phoneme_counts)),
+        )
+        stats_table.add_row(
+            "Max",
+            str(max(token_counts)),
+            str(max(char_counts)),
+            str(max(phoneme_counts)),
+        )
+        stats_table.add_row(
+            "Mean",
+            f"{statistics.mean(token_counts):.1f}",
+            f"{statistics.mean(char_counts):.1f}",
+            f"{statistics.mean(phoneme_counts):.1f}",
+        )
+        stats_table.add_row(
+            "Median",
+            f"{statistics.median(token_counts):.1f}",
+            f"{statistics.median(char_counts):.1f}",
+            f"{statistics.median(phoneme_counts):.1f}",
+        )
+        if len(token_counts) > 1:
+            stats_table.add_row(
+                "Std Dev",
+                f"{statistics.stdev(token_counts):.1f}",
+                f"{statistics.stdev(char_counts):.1f}",
+                f"{statistics.stdev(phoneme_counts):.1f}",
+            )
+
+        console.print(stats_table)
+
+        # Token distribution histogram (simple text-based)
+        console.print("\n[bold]Token Distribution:[/bold]")
+        # Create buckets
+        buckets = [0, 50, 100, 150, 200, 250, 300, 350, 400, 450, 500, float("inf")]
+        bucket_labels = [
+            "0-49",
+            "50-99",
+            "100-149",
+            "150-199",
+            "200-249",
+            "250-299",
+            "300-349",
+            "350-399",
+            "400-449",
+            "450-499",
+            "500+",
+        ]
+        bucket_counts = [0] * (len(buckets) - 1)
+
+        for count in token_counts:
+            for i in range(len(buckets) - 1):
+                if buckets[i] <= count < buckets[i + 1]:
+                    bucket_counts[i] += 1
+                    break
+
+        max_count = max(bucket_counts) if bucket_counts else 1
+        bar_width = 30
+
+        for label, count in zip(bucket_labels, bucket_counts):
+            if count > 0 or label in [
+                "0-49",
+                "50-99",
+                "100-149",
+            ]:  # Always show first few
+                bar_len = int((count / max_count) * bar_width) if max_count > 0 else 0
+                bar = "█" * bar_len
+                console.print(f"  {label:>8} │ {bar:<{bar_width}} {count:>4}")
 
     # Show chapters
     console.print("\n[bold]Chapters:[/bold]")
