@@ -1,7 +1,6 @@
 """Utility functions for ttsforge - config, GPU detection, encoding, etc."""
 
 import json
-import os
 import platform
 import subprocess
 import sys
@@ -58,7 +57,7 @@ def load_config() -> dict[str, Any]:
     try:
         config_path = get_user_config_path()
         if config_path.exists():
-            with open(config_path, "r", encoding="utf-8") as f:
+            with open(config_path, encoding="utf-8") as f:
                 user_config = json.load(f)
                 # Merge with defaults to ensure all keys exist
                 return {**DEFAULT_CONFIG, **user_config}
@@ -199,7 +198,7 @@ def create_process(
         stdin: stdin pipe option (e.g., subprocess.PIPE)
         text: Whether to use text mode
         capture_output: Whether to capture output
-        suppress_output: Whether to suppress all output (useful when rich progress is active)
+        suppress_output: Suppress all output (for rich progress bars)
 
     Returns:
         Popen object
@@ -210,7 +209,7 @@ def create_process(
         "bufsize": 1,
     }
 
-    # Suppress output entirely if requested (avoids interference with rich progress bars)
+    # Suppress output if requested (avoids rich progress interference)
     if suppress_output:
         kwargs["stdout"] = subprocess.DEVNULL
         kwargs["stderr"] = subprocess.DEVNULL

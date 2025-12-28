@@ -16,30 +16,26 @@ from rich.progress import (
     TimeElapsedColumn,
     TimeRemainingColumn,
 )
+from rich.prompt import Confirm
 from rich.table import Table
-from rich.prompt import Confirm, IntPrompt
-from rich import print as rprint
 
 from .constants import (
     DEFAULT_CONFIG,
+    DEFAULT_VOICE_FOR_LANG,
     LANGUAGE_DESCRIPTIONS,
-    PROGRAM_DESCRIPTION,
     PROGRAM_NAME,
     SUPPORTED_OUTPUT_FORMATS,
-    VOICES,
     VOICE_PREFIX_TO_LANG,
-    DEFAULT_VOICE_FOR_LANG,
+    VOICES,
 )
 from .conversion import (
     ConversionOptions,
     ConversionProgress,
-    SPLIT_MODES,
     TTSConverter,
     detect_language_from_iso,
     get_default_voice_for_language,
 )
 from .utils import (
-    format_duration,
     format_size,
     get_gpu_info,
     load_config,
@@ -114,7 +110,7 @@ def main(ctx: click.Context, version: bool) -> None:
 @click.option(
     "--chapters",
     type=str,
-    help="Chapters to convert (e.g., '1-5', '1,3,5', 'all'). Interactive if not specified.",
+    help="Chapters to convert (e.g., '1-5', '1,3,5', 'all').",
 )
 @click.option(
     "--silence",
@@ -152,13 +148,13 @@ def main(ctx: click.Context, version: bool) -> None:
     "split_mode",
     type=click.Choice(["auto", "line", "paragraph", "sentence", "clause"]),
     default=None,
-    help="Text splitting mode: auto (language-based), line (newlines), paragraph, sentence (spaCy), clause (sentence+comma).",
+    help="Text splitting mode: auto, line, paragraph, sentence, clause.",
 )
 @click.option(
     "--resume/--no-resume",
     "resume",
     default=True,
-    help="Enable/disable resume capability for interrupted conversions (default: enabled).",
+    help="Enable/disable resume capability (default: enabled).",
 )
 @click.option(
     "--fresh",
@@ -249,9 +245,8 @@ def convert(
     if language is None:
         if epub_language:
             language = detect_language_from_iso(epub_language)
-            console.print(
-                f"[dim]Auto-detected language: {LANGUAGE_DESCRIPTIONS.get(language, language)}[/dim]"
-            )
+            lang_desc = LANGUAGE_DESCRIPTIONS.get(language, language)
+            console.print(f"[dim]Auto-detected language: {lang_desc}[/dim]")
         else:
             language = config.get("default_language", "a")
 
@@ -343,7 +338,9 @@ def convert(
         nonlocal task_id, current_chapter_text
         if task_id is not None:
             progress.update(task_id, completed=prog.chars_processed)
-            current_chapter_text = f"Chapter {prog.current_chapter}/{prog.total_chapters}: {prog.chapter_name}"
+            ch = prog.current_chapter
+            total = prog.total_chapters
+            current_chapter_text = f"Chapter {ch}/{total}: {prog.chapter_name}"
             progress.update(task_id, description=current_chapter_text[:50])
 
     def log_callback(message: str, level: str) -> None:
@@ -594,18 +591,17 @@ def sample(
 
     # Always show settings
     console.print(f"[dim]Voice:[/dim] {options.voice}")
-    console.print(
-        f"[dim]Language:[/dim] {options.language} ({LANGUAGE_DESCRIPTIONS.get(options.language, 'Unknown')})"
-    )
+    lang_desc = LANGUAGE_DESCRIPTIONS.get(options.language, "Unknown")
+    console.print(f"[dim]Language:[/dim] {options.language} ({lang_desc})")
     console.print(f"[dim]Speed:[/dim] {options.speed}")
     console.print(f"[dim]Format:[/dim] {options.output_format}")
     console.print(f"[dim]Split mode:[/dim] {options.split_mode}")
     console.print(f"[dim]GPU:[/dim] {'enabled' if options.use_gpu else 'disabled'}")
 
     if verbose:
-        console.print(
-            f"[dim]Text:[/dim] {sample_text[:100]}{'...' if len(sample_text) > 100 else ''}"
-        )
+        text_preview = sample_text[:100]
+        ellipsis = "..." if len(sample_text) > 100 else ""
+        console.print(f"[dim]Text:[/dim] {text_preview}{ellipsis}")
         console.print(f"[dim]Output:[/dim] {output}")
 
     try:
@@ -632,7 +628,7 @@ def sample(
             import traceback
 
             console.print(traceback.format_exc())
-        raise SystemExit(1)
+        raise SystemExit(1) from None
 
 
 @main.command()
@@ -697,11 +693,11 @@ def config(show: bool, reset: bool, set_option: tuple[tuple[str, str], ...]) -> 
             # Type conversion
             default_type = type(DEFAULT_CONFIG[key])
             try:
-                if default_type == bool:
+                if default_type is bool:
                     typed_value = value.lower() in ("true", "1", "yes")
-                elif default_type == float:
+                elif default_type is float:
                     typed_value = float(value)
-                elif default_type == int:
+                elif default_type is int:
                     typed_value = int(value)
                 else:
                     typed_value = value

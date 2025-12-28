@@ -181,10 +181,10 @@ SAMPLE_TEXTS = {
     "a": "This is a sample of the selected voice.",
     "b": "This is a sample of the selected voice.",
     "e": "Este es una muestra de la voz seleccionada.",
-    "f": "Ceci est un exemple de la voix s\u00e9lectionn\u00e9e.",
-    "h": "\u092f\u0939 \u091a\u092f\u0928\u093f\u0924 \u0906\u0935\u093e\u091c\u093c \u0915\u093e \u090f\u0915 \u0928\u092e\u0942\u0928\u093e \u0939\u0948\u0964",
-    "i": "Questo \u00e8 un esempio della voce selezionata.",
-    "j": "\u3053\u308c\u306f\u9078\u629e\u3057\u305f\u58f0\u306e\u30b5\u30f3\u30d7\u30eb\u3067\u3059\u3002",
-    "p": "Este \u00e9 um exemplo da voz selecionada.",
-    "z": "\u8fd9\u662f\u6240\u9009\u8bed\u97f3\u7684\u793a\u4f8b\u3002",
+    "f": "Ceci est un exemple de la voix sélectionnée.",
+    "h": "यह चयनित आवाज़ का एक नमूना है।",  # noqa: E501
+    "i": "Questo è un esempio della voce selezionata.",
+    "j": "これは選択した声のサンプルです。",  # noqa: E501
+    "p": "Este é um exemplo da voz selecionada.",
+    "z": "这是所选语音的示例。",
 }

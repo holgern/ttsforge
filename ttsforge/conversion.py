@@ -8,21 +8,19 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Iterator, Optional
+from typing import Any, Callable, Optional
 
 import soundfile as sf
 
 from .constants import (
     DEFAULT_VOICE_FOR_LANG,
     ISO_TO_LANG_CODE,
-    LANGUAGE_DESCRIPTIONS,
     SAMPLE_RATE,
     SUPPORTED_OUTPUT_FORMATS,
     VOICE_PREFIX_TO_LANG,
 )
 from .utils import (
     create_process,
-    detect_encoding,
     ensure_ffmpeg,
     format_duration,
     get_device,
@@ -118,7 +116,7 @@ class ConversionState:
         if not state_file.exists():
             return None
         try:
-            with open(state_file, "r", encoding="utf-8") as f:
+            with open(state_file, encoding="utf-8") as f:
                 data = json.load(f)
 
             # Reconstruct ChapterState objects
@@ -936,9 +934,8 @@ class TTSConverter:
                 state.save(state_file)
             else:
                 completed = state.get_completed_count()
-                self.log(
-                    f"Resuming conversion: {completed}/{len(chapters)} chapters completed"
-                )
+                total = len(chapters)
+                self.log(f"Resuming conversion: {completed}/{total} chapters completed")
 
             # Initialize pipeline
             self._init_pipeline()
@@ -975,8 +972,9 @@ class TTSConverter:
                 if chapter_state.completed and chapter_state.audio_file:
                     chapter_file = work_dir / chapter_state.audio_file
                     if chapter_file.exists():
+                        ch_num = chapter_idx + 1
                         self.log(
-                            f"Skipping completed chapter {chapter_idx + 1}: {chapter.title}"
+                            f"Skipping completed chapter {ch_num}: {chapter.title}"
                         )
                         continue
                     else:
@@ -986,8 +984,9 @@ class TTSConverter:
                 progress.current_chapter = chapter_idx + 1
                 progress.chapter_name = chapter.title
 
+                ch_num = chapter_idx + 1
                 self.log(
-                    f"Converting chapter {chapter_idx + 1}/{len(chapters)}: {chapter.title}"
+                    f"Converting chapter {ch_num}/{len(chapters)}: {chapter.title}"
                 )
 
                 # Generate chapter filename
