@@ -194,7 +194,6 @@ class PhonemeChapter:
                 for seg in new_segments:
                     self.segments.append(seg)
                     segments.append(seg)
-                segments.append(segment)
 
         return segments
 

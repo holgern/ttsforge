@@ -366,6 +366,48 @@ class TestPhonemeChapterWithTokenizer:
         assert len(segments) == 1
         assert segments[0].lang == "en-gb"
 
+    def test_add_text_warns_on_long_phonemes(self, tokenizer):
+        """Test that add_text warns when phonemes exceed max length."""
+        chapter = PhonemeChapter(title="Chapter 1")
+        warnings = []
+
+        def warn_callback(msg):
+            warnings.append(msg)
+
+        # Create a very long text without any natural split points
+        # A single long word repeated will be hard to split
+        long_text = "Supercalifragilisticexpialidocious " * 5
+        segments = chapter.add_text(
+            long_text,
+            tokenizer,
+            max_chars=30,  # Small enough to trigger splitting
+            max_phoneme_length=20,  # Very small limit - single word phonemes will exceed this
+            warn_callback=warn_callback,
+        )
+
+        # Should have created segments
+        assert len(segments) > 0
+        # Should have issued warnings about truncation (since single words can't be split)
+        assert len(warnings) > 0
+        assert "truncating" in warnings[0].lower()
+
+    def test_add_text_splits_to_avoid_long_phonemes(self, tokenizer):
+        """Test that add_text splits text to avoid exceeding phoneme limit."""
+        chapter = PhonemeChapter(title="Chapter 1")
+
+        # Normal text with reasonable limits
+        text = "Hello world. This is a test. How are you today?"
+        segments = chapter.add_text(
+            text,
+            tokenizer,
+            split_mode="sentence",
+            max_chars=300,
+        )
+
+        # All segments should have phonemes within limit
+        for seg in segments:
+            assert len(seg.phonemes) <= 510
+
 
 class TestHelperFunctions:
     """Tests for helper functions."""

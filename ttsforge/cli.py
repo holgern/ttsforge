@@ -983,6 +983,13 @@ def phonemes_export(
 
     console.print(f"[dim]Split mode: {split_mode}, Max chars: {max_chars}[/dim]")
 
+    # Track warnings for long phonemes
+    phoneme_warnings: list[str] = []
+
+    def warn_callback(msg: str) -> None:
+        """Collect phoneme length warnings."""
+        phoneme_warnings.append(msg)
+
     # Process chapters
     with Progress(
         SpinnerColumn(),
@@ -1008,9 +1015,24 @@ def phonemes_export(
                     lang=espeak_lang,
                     split_mode=split_mode,
                     max_chars=max_chars,
+                    warn_callback=warn_callback,
                 )
 
             progress.advance(task)
+
+    # Show warnings if any
+    if phoneme_warnings:
+        console.print(
+            f"\n[yellow]Warning:[/yellow] {len(phoneme_warnings)} segment(s) had "
+            f"phonemes exceeding the 510 character limit and were truncated."
+        )
+        if len(phoneme_warnings) <= 5:
+            for w in phoneme_warnings:
+                console.print(f"  [dim]{w}[/dim]")
+        else:
+            for w in phoneme_warnings[:3]:
+                console.print(f"  [dim]{w}[/dim]")
+            console.print(f"  [dim]... and {len(phoneme_warnings) - 3} more[/dim]")
 
     # Save output
     if readable:

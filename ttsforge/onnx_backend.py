@@ -413,6 +413,7 @@ class KokoroONNX:
             voice=voice_style,
             speed=speed,
             lang="en-us",  # Language doesn't matter for phonemes
+            is_phonemes=True,  # Skip re-phonemization since input is already phonemes
         )
 
         return samples, sample_rate
