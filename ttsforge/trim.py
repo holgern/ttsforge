@@ -26,7 +26,6 @@ from __future__ import annotations
 
 import warnings
 from collections.abc import Callable
-from typing import Any
 
 import numpy as np
 from numpy.lib.stride_tricks import as_strided
@@ -285,9 +284,11 @@ def rms(
     elif S is not None:
         # Check the frame length
         if S.shape[-2] != frame_length // 2 + 1:
+            expected_a = S.shape[-2] * 2 - 2
+            expected_b = S.shape[-2] * 2 - 1
             raise ParameterError(
                 f"Since S.shape[-2] is {S.shape[-2]}, "
-                f"frame_length is expected to be {S.shape[-2] * 2 - 2} or {S.shape[-2] * 2 - 1}; "
+                f"frame_length is expected to be {expected_a} or {expected_b}; "
                 f"found {frame_length}"
             )
 

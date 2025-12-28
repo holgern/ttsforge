@@ -1,10 +1,6 @@
 """Tests for ttsforge.onnx_backend module."""
 
-import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch
-
-import pytest
 
 from ttsforge.onnx_backend import (
     LANG_CODE_TO_ONNX,

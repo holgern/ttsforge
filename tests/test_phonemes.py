@@ -1,6 +1,5 @@
 """Tests for ttsforge.phonemes module."""
 
-import json
 import tempfile
 from pathlib import Path
 
@@ -381,13 +380,13 @@ class TestPhonemeChapterWithTokenizer:
             long_text,
             tokenizer,
             max_chars=30,  # Small enough to trigger splitting
-            max_phoneme_length=20,  # Very small limit - single word phonemes will exceed this
+            max_phoneme_length=20,  # Very small limit - single words exceed this
             warn_callback=warn_callback,
         )
 
         # Should have created segments
         assert len(segments) > 0
-        # Should have issued warnings about truncation (since single words can't be split)
+        # Should have issued warnings about truncation (single words can't be split)
         assert len(warnings) > 0
         assert "truncating" in warnings[0].lower()
 

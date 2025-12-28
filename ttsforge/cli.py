@@ -37,7 +37,6 @@ from .conversion import (
 )
 from .onnx_backend import (
     ONNX_MODEL_FILES,
-    VoiceBlend,
     are_models_downloaded,
     download_model,
     get_model_dir,
@@ -728,16 +727,18 @@ def download(force: bool) -> None:
                 console.print(f"  [dim]{filename}: already downloaded[/dim]")
                 continue
 
-            task_id = progress.add_task(f"Downloading {filename}...", total=100)
+            current_task_id = progress.add_task(f"Downloading {filename}...", total=100)
 
-            def update_progress(current: int, total: int) -> None:
+            def update_progress(
+                current: int, total: int, tid: int = current_task_id
+            ) -> None:
                 if total > 0:
                     percent = (current / total) * 100
-                    progress.update(task_id, completed=percent)
+                    progress.update(tid, completed=percent)
 
             try:
                 download_model(filename, progress_callback=update_progress, force=force)
-                progress.update(task_id, completed=100)
+                progress.update(current_task_id, completed=100)
                 path = get_model_path(filename)
                 size = format_size(path.stat().st_size)
                 console.print(f"  [green]{filename}: {size}[/green]")
@@ -879,7 +880,7 @@ def phonemes() -> None:
     "split_mode",
     type=click.Choice(["paragraph", "sentence", "clause"]),
     default="sentence",
-    help="Text splitting mode: paragraph (double newlines), sentence (spaCy), clause (sentence + commas).",
+    help="Split mode: paragraph (newlines), sentence (spaCy), clause (+ commas).",
 )
 @click.option(
     "--max-chars",
@@ -1117,7 +1118,7 @@ def phonemes_export(
     "--streaming/--no-streaming",
     "streaming",
     default=False,
-    help="Use streaming mode (faster, no resume). Default: chapter-at-a-time with resume.",
+    help="Use streaming mode (faster, no resume). Default: resumable.",
 )
 @click.option(
     "--keep-chapters",
@@ -1167,13 +1168,13 @@ def phonemes_convert(
 
         ttsforge phonemes convert book.phonemes.json --streaming
     """
-    from .phonemes import PhonemeBook
     from .phoneme_conversion import (
-        PhonemeConverter,
         PhonemeConversionOptions,
         PhonemeConversionProgress,
+        PhonemeConverter,
         parse_chapter_selection,
     )
+    from .phonemes import PhonemeBook
 
     console.print(f"[bold]Loading:[/bold] {phoneme_file}")
 
@@ -1225,9 +1226,9 @@ def phonemes_convert(
     # Show info
     console.print(f"[dim]Title: {book_info['title']}[/dim]")
     if selected_indices:
+        ch_count = f"{selected_chapter_count}/{book_info['chapters']}"
         console.print(
-            f"[dim]Chapters: {selected_chapter_count}/{book_info['chapters']} (selected), "
-            f"Segments: {total_segments}[/dim]"
+            f"[dim]Chapters: {ch_count} (selected), Segments: {total_segments}[/dim]"
         )
     else:
         console.print(
@@ -1242,9 +1243,8 @@ def phonemes_convert(
         console.print(f"[dim]Voice: {voice}, Speed: {speed}x[/dim]")
 
     console.print(f"[dim]Output: {output} (format: {fmt})[/dim]")
-    console.print(
-        f"[dim]Mode: {'streaming' if streaming else 'resumable (chapter-at-a-time)'}[/dim]"
-    )
+    mode_str = "streaming" if streaming else "resumable (chapter-at-a-time)"
+    console.print(f"[dim]Mode: {mode_str}[/dim]")
 
     if not yes:
         if not Confirm.ask("Proceed with conversion?"):
@@ -1285,10 +1285,11 @@ def phonemes_convert(
         """Update progress display."""
         nonlocal progress_bar, task_id
         if progress_bar is not None and task_id is not None:
+            ch_progress = f"Ch {prog.current_chapter}/{prog.total_chapters}"
             progress_bar.update(
                 task_id,
                 completed=prog.segments_processed,
-                description=f"[cyan]Ch {prog.current_chapter}/{prog.total_chapters}[/cyan]",
+                description=f"[cyan]{ch_progress}[/cyan]",
             )
 
     # Create converter
@@ -1329,7 +1330,7 @@ def phonemes_convert(
 
     # Show result
     if result.success:
-        console.print(f"\n[green]Conversion complete![/green]")
+        console.print("\n[green]Conversion complete![/green]")
         console.print(f"[bold]Output:[/bold] {result.output_path}")
         if result.duration > 0:
             from .utils import format_duration
@@ -1378,8 +1379,8 @@ def phonemes_preview(
 
         ttsforge phonemes preview "Hello world" --language b
     """
-    from .tokenizer import Tokenizer
     from .onnx_backend import LANG_CODE_TO_ONNX
+    from .tokenizer import Tokenizer
 
     espeak_lang = LANG_CODE_TO_ONNX.get(language, "en-us")
 
@@ -1393,9 +1394,8 @@ def phonemes_preview(
     readable = tokenizer.format_readable(text, lang=espeak_lang)
 
     console.print(f"[bold]Text:[/bold] {text}")
-    console.print(
-        f"[bold]Language:[/bold] {LANGUAGE_DESCRIPTIONS.get(language, language)} ({espeak_lang})"
-    )
+    lang_desc = LANGUAGE_DESCRIPTIONS.get(language, language)
+    console.print(f"[bold]Language:[/bold] {lang_desc} ({espeak_lang})")
     console.print(f"[bold]Phonemes:[/bold] {phonemes}")
     console.print(f"[bold]Readable:[/bold] {readable}")
 

@@ -7,9 +7,10 @@ pre-tokenized book content (phonemes and tokens).
 from __future__ import annotations
 
 import json
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Iterator
+from typing import TYPE_CHECKING, Any, Callable
 
 if TYPE_CHECKING:
     from .tokenizer import Tokenizer
@@ -146,8 +147,8 @@ class PhonemeChapter:
                 else:
                     # Can't split further - warn and truncate
                     warn(
-                        f"Segment phonemes too long ({len(phonemes)} > {max_phoneme_length}), "
-                        f"truncating. Text: '{chunk[:50]}...'"
+                        f"Segment phonemes too long ({len(phonemes)} > "
+                        f"{max_phoneme_length}), truncating. Text: '{chunk[:50]}...'"
                     )
                     # Truncate phonemes to limit
                     phonemes = phonemes[:max_phoneme_length]

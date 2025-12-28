@@ -706,7 +706,7 @@ class TTSConverter:
             else:
                 # Use chunk-based generation for progress tracking
                 assert self._kokoro is not None
-                for samples, sample_rate, chunk in self._kokoro.generate_chunks(
+                for samples, _sample_rate, chunk in self._kokoro.generate_chunks(
                     chapter.content,
                     voice=self._voice_style or self.options.voice,
                     speed=self.options.speed,
@@ -1222,7 +1222,7 @@ class TTSConverter:
                 else:
                     # Use chunk-based generation for progress tracking
                     assert self._kokoro is not None
-                    for samples, sample_rate, chunk in self._kokoro.generate_chunks(
+                    for samples, _sample_rate, chunk in self._kokoro.generate_chunks(
                         chapter.content,
                         voice=self._voice_style or self.options.voice,
                         speed=self.options.speed,

@@ -1,6 +1,5 @@
 """Tests for ttsforge.phoneme_conversion module."""
 
-import json
 import tempfile
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -17,7 +16,7 @@ from ttsforge.phoneme_conversion import (
     PhonemeConverter,
     parse_chapter_selection,
 )
-from ttsforge.phonemes import PhonemeBook, PhonemeChapter, PhonemeSegment
+from ttsforge.phonemes import PhonemeBook, PhonemeSegment
 
 
 class TestParseChapterSelection:

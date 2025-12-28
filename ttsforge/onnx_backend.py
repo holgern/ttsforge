@@ -4,13 +4,12 @@ import io
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Generator, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Optional
 from urllib.request import urlretrieve
 
 import numpy as np
 
-from .tokenizer import SAMPLE_RATE, EspeakConfig, Tokenizer
-from .trim import trim
+from .tokenizer import EspeakConfig, Tokenizer
 from .utils import get_user_cache_path
 
 if TYPE_CHECKING:

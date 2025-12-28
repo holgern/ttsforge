@@ -22,7 +22,7 @@ from .onnx_backend import (
     are_models_downloaded,
     download_all_models,
 )
-from .phonemes import PhonemeBook, PhonemeChapter, PhonemeSegment
+from .phonemes import PhonemeBook, PhonemeChapter
 from .utils import (
     create_process,
     ensure_ffmpeg,
@@ -65,8 +65,8 @@ def parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
                 start_str, end_str = part.split("-", 1)
                 start = int(start_str.strip())
                 end = int(end_str.strip())
-            except ValueError:
-                raise ValueError(f"Invalid range format: {part}")
+            except ValueError as e:
+                raise ValueError(f"Invalid range format: {part}") from e
 
             if start < 1 or end < 1:
                 raise ValueError(f"Chapter numbers must be >= 1: {part}")
@@ -84,8 +84,8 @@ def parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
             # Single chapter: "3"
             try:
                 chapter_num = int(part)
-            except ValueError:
-                raise ValueError(f"Invalid chapter number: {part}")
+            except ValueError as e:
+                raise ValueError(f"Invalid chapter number: {part}") from e
 
             if chapter_num < 1:
                 raise ValueError(f"Chapter number must be >= 1: {chapter_num}")
@@ -868,9 +868,8 @@ class PhonemeConverter:
                 progress.current_segment = 0
 
                 ch_num = state_idx + 1
-                self.log(
-                    f"Converting chapter {ch_num}/{len(state.chapters)}: {chapter.title}"
-                )
+                total_ch = len(state.chapters)
+                self.log(f"Converting chapter {ch_num}/{total_ch}: {chapter.title}")
 
                 # Generate chapter filename
                 safe_title = sanitize_filename(chapter.title)[:50]
@@ -1013,9 +1012,8 @@ class PhonemeConverter:
                 progress.current_segment = 0
 
                 ch_num = chapter_idx + 1
-                self.log(
-                    f"Converting chapter {ch_num}/{len(selected_chapters)}: {chapter.title}"
-                )
+                total_ch = len(selected_chapters)
+                self.log(f"Converting chapter {ch_num}/{total_ch}: {chapter.title}")
 
                 chapter_start = current_time
 

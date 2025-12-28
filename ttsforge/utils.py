@@ -151,7 +151,8 @@ def get_device(use_gpu: bool = True) -> str:
         use_gpu: Whether to attempt GPU usage
 
     Returns:
-        Execution provider name: 'CUDAExecutionProvider', 'CoreMLExecutionProvider', or 'CPUExecutionProvider'
+        Execution provider name: 'CUDAExecutionProvider',
+        'CoreMLExecutionProvider', or 'CPUExecutionProvider'
     """
     if not use_gpu:
         return "CPUExecutionProvider"

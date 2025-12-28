@@ -144,8 +144,10 @@ class Tokenizer:
                 error_info = (
                     "Failed to load espeak-ng. Please install espeak-ng system-wide.\n"
                     "\tSee https://github.com/espeak-ng/espeak-ng/blob/master/docs/guide.md\n"
-                    "\tNote: you can specify shared library path using PHONEMIZER_ESPEAK_LIBRARY environment variable.\n"
-                    f"Environment:\n\t{platform.platform()} ({platform.release()}) | {sys.version}"
+                    "\tNote: you can specify shared library path using "
+                    "PHONEMIZER_ESPEAK_LIBRARY environment variable.\n"
+                    f"Environment:\n\t{platform.platform()} ({platform.release()}) "
+                    f"| {sys.version}"
                 )
                 raise RuntimeError(error_info) from e
 
