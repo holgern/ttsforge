@@ -81,44 +81,79 @@ class PhonemeChapter:
         text: str,
         tokenizer: Tokenizer,
         lang: str = "en-us",
+        split_mode: str = "sentence",
         max_chars: int = 300,
         language_model: str = "en_core_web_sm",
     ) -> list[PhonemeSegment]:
         """Add text by phonemizing it.
 
-        Long texts are automatically split at sentence/clause boundaries using
-        phrasplit to avoid exceeding the tokenizer's maximum phoneme length.
+        Text is split according to split_mode before phonemization to create
+        natural segment boundaries and avoid exceeding the tokenizer's maximum
+        phoneme length.
 
         Args:
             text: Text to add
             tokenizer: Tokenizer instance
             lang: Language code for phonemization
-            max_chars: Maximum characters per segment (default 300)
-            language_model: spaCy language model for sentence splitting
+            split_mode: How to split the text:
+                - "paragraph": Split on double newlines only
+                - "sentence": Split on sentence boundaries (using spaCy)
+                - "clause": Split on sentences + commas for finer segments
+            max_chars: Maximum characters per segment (default 300, used for
+                       further splitting if segments are too long)
+            language_model: spaCy language model for sentence/clause splitting
 
         Returns:
             List of created PhonemeSegments
         """
-        from phrasplit import split_long_lines
+        from phrasplit import (
+            split_clauses,
+            split_long_lines,
+            split_paragraphs,
+            split_sentences,
+        )
 
-        # Split long texts at sentence/clause boundaries
-        chunks = split_long_lines(text, max_chars, language_model)
+        # Split text according to mode
+        if split_mode == "paragraph":
+            # Split on double newlines only
+            chunks = split_paragraphs(text)
+        elif split_mode == "sentence":
+            # Split on sentence boundaries using spaCy
+            chunks = split_sentences(text, language_model)
+        elif split_mode == "clause":
+            # Split on sentences + commas for finer segments
+            chunks = split_clauses(text, language_model)
+        else:
+            # Default: treat as single chunk
+            chunks = [text] if text.strip() else []
+
         segments = []
 
         for chunk in chunks:
             chunk = chunk.strip()
             if not chunk:
                 continue
-            phonemes = tokenizer.phonemize(chunk, lang=lang)
-            tokens = tokenizer.tokenize(phonemes)
-            segment = PhonemeSegment(
-                text=chunk,
-                phonemes=phonemes,
-                tokens=tokens,
-                lang=lang,
-            )
-            self.segments.append(segment)
-            segments.append(segment)
+
+            # If chunk is still too long, split it further
+            if len(chunk) > max_chars:
+                sub_chunks = split_long_lines(chunk, max_chars, language_model)
+            else:
+                sub_chunks = [chunk]
+
+            for sub_chunk in sub_chunks:
+                sub_chunk = sub_chunk.strip()
+                if not sub_chunk:
+                    continue
+                phonemes = tokenizer.phonemize(sub_chunk, lang=lang)
+                tokens = tokenizer.tokenize(phonemes)
+                segment = PhonemeSegment(
+                    text=sub_chunk,
+                    phonemes=phonemes,
+                    tokens=tokens,
+                    lang=lang,
+                )
+                self.segments.append(segment)
+                segments.append(segment)
 
         return segments
 

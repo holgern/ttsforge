@@ -874,6 +874,19 @@ def phonemes() -> None:
     default="v1.0",
     help="Vocabulary version to use for tokenization.",
 )
+@click.option(
+    "--split-mode",
+    "split_mode",
+    type=click.Choice(["paragraph", "sentence", "clause"]),
+    default="sentence",
+    help="Text splitting mode: paragraph (double newlines), sentence (spaCy), clause (sentence + commas).",
+)
+@click.option(
+    "--max-chars",
+    type=int,
+    default=300,
+    help="Maximum characters per segment (for additional splitting of long segments).",
+)
 def phonemes_export(
     epub_file: Path,
     output: Optional[Path],
@@ -881,12 +894,19 @@ def phonemes_export(
     language: str,
     chapters: Optional[str],
     vocab_version: str,
+    split_mode: str,
+    max_chars: int,
 ) -> None:
     """Export an EPUB as pre-tokenized phoneme data.
 
     This creates a JSON file containing the book's text converted to
     phonemes and tokens, which can be later converted to audio without
     re-running the phonemization step.
+
+    Split modes:
+    - paragraph: Split only on double newlines (fewer, longer segments)
+    - sentence: Split on sentence boundaries using spaCy (recommended)
+    - clause: Split on sentences + commas (more, shorter segments)
 
     Examples:
 
@@ -895,6 +915,8 @@ def phonemes_export(
         ttsforge phonemes export book.epub --readable -o book.readable.txt
 
         ttsforge phonemes export book.epub --language b --chapters 1-5
+
+        ttsforge phonemes export book.epub --split-mode clause
     """
     from .phonemes import PhonemeBook
     from .tokenizer import Tokenizer
@@ -955,8 +977,11 @@ def phonemes_export(
         metadata={
             "source": str(epub_file),
             "author": metadata.authors[0] if metadata.authors else "Unknown",
+            "split_mode": split_mode,
         },
     )
+
+    console.print(f"[dim]Split mode: {split_mode}, Max chars: {max_chars}[/dim]")
 
     # Process chapters
     with Progress(
@@ -975,12 +1000,15 @@ def phonemes_export(
 
             chapter = book.create_chapter(ch.title)
 
-            # Split chapter text into paragraphs
-            paragraphs = ch.text.split("\n")
-            for para in paragraphs:
-                para = para.strip()
-                if para:
-                    chapter.add_text(para, tokenizer, lang=espeak_lang)
+            # Pass entire chapter text - add_text handles splitting based on split_mode
+            if ch.text.strip():
+                chapter.add_text(
+                    ch.text,
+                    tokenizer,
+                    lang=espeak_lang,
+                    split_mode=split_mode,
+                    max_chars=max_chars,
+                )
 
             progress.advance(task)
 
