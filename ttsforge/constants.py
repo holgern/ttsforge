@@ -171,6 +171,8 @@ DEFAULT_CONFIG = {
     "merge_at_end": True,
     "auto_detect_language": True,
     "default_split_mode": "auto",
+    "segment_pause_min": 0.1,
+    "segment_pause_max": 0.3,
 }
 
 # Audio settings

@@ -125,6 +125,18 @@ def main(ctx: click.Context, version: bool) -> None:
     help="Silence duration between chapters in seconds.",
 )
 @click.option(
+    "--segment-pause-min",
+    type=float,
+    default=None,
+    help="Minimum pause between segments in seconds (default: 0.1).",
+)
+@click.option(
+    "--segment-pause-max",
+    type=float,
+    default=None,
+    help="Maximum pause between segments in seconds (default: 0.3).",
+)
+@click.option(
     "--title",
     type=str,
     help="Title metadata for the audiobook.",
@@ -196,6 +208,8 @@ def convert(
     use_gpu: Optional[bool],
     chapters: Optional[str],
     silence: Optional[float],
+    segment_pause_min: Optional[float],
+    segment_pause_max: Optional[float],
     title: Optional[str],
     author: Optional[str],
     cover: Optional[Path],
@@ -339,6 +353,16 @@ def convert(
         output_dir=output.parent,
         use_gpu=use_gpu if use_gpu is not None else config.get("use_gpu", False),
         silence_between_chapters=silence or config.get("silence_between_chapters", 2.0),
+        segment_pause_min=(
+            segment_pause_min
+            if segment_pause_min is not None
+            else config.get("segment_pause_min", 0.1)
+        ),
+        segment_pause_max=(
+            segment_pause_max
+            if segment_pause_max is not None
+            else config.get("segment_pause_max", 0.3)
+        ),
         split_mode=split_mode or config.get("default_split_mode", "auto"),
         resume=resume,
         keep_chapter_files=keep_chapter_files,
@@ -1295,6 +1319,18 @@ def phonemes_export(
     help="Silence between chapters in seconds.",
 )
 @click.option(
+    "--segment-pause-min",
+    type=float,
+    default=None,
+    help="Minimum pause between segments in seconds (default: 0.1).",
+)
+@click.option(
+    "--segment-pause-max",
+    type=float,
+    default=None,
+    help="Maximum pause between segments in seconds (default: 0.3).",
+)
+@click.option(
     "--chapters",
     type=str,
     default=None,
@@ -1355,6 +1391,8 @@ def phonemes_convert(
     speed: float,
     use_gpu: Optional[bool],
     silence: float,
+    segment_pause_min: Optional[float],
+    segment_pause_max: Optional[float],
     chapters: Optional[str],
     title: Optional[str],
     author: Optional[str],
@@ -1469,11 +1507,21 @@ def phonemes_convert(
 
     # Create conversion options
     options = PhonemeConversionOptions(
-        voice=voice,
+        voice=voice or config.get("default_voice", "af_heart"),
         speed=speed,
         output_format=fmt,
         use_gpu=gpu,
         silence_between_chapters=silence,
+        segment_pause_min=(
+            segment_pause_min
+            if segment_pause_min is not None
+            else config.get("segment_pause_min", 0.1)
+        ),
+        segment_pause_max=(
+            segment_pause_max
+            if segment_pause_max is not None
+            else config.get("segment_pause_max", 0.3)
+        ),
         title=title,
         author=author,
         cover_image=cover,

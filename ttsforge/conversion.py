@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import random
 import re
 import subprocess
 import time
@@ -113,6 +114,8 @@ class ConversionState:
     split_mode: str = "auto"
     output_format: str = "m4b"
     silence_between_chapters: float = 2.0
+    segment_pause_min: float = 0.1
+    segment_pause_max: float = 0.3
     chapters: list[ChapterState] = field(default_factory=list)
     started_at: str = ""
     last_updated: str = ""
@@ -133,6 +136,10 @@ class ConversionState:
             # Handle missing fields for backward compatibility
             if "silence_between_chapters" not in data:
                 data["silence_between_chapters"] = 2.0
+            if "segment_pause_min" not in data:
+                data["segment_pause_min"] = 0.1
+            if "segment_pause_max" not in data:
+                data["segment_pause_max"] = 0.3
 
             return cls(**data)
         except (json.JSONDecodeError, TypeError, KeyError):
@@ -153,6 +160,8 @@ class ConversionState:
             "split_mode": self.split_mode,
             "output_format": self.output_format,
             "silence_between_chapters": self.silence_between_chapters,
+            "segment_pause_min": self.segment_pause_min,
+            "segment_pause_max": self.segment_pause_max,
             "chapters": [
                 {
                     "index": ch.index,
@@ -218,6 +227,9 @@ class ConversionOptions:
     output_dir: Optional[Path] = None
     use_gpu: bool = False  # GPU requires onnxruntime-gpu
     silence_between_chapters: float = 2.0
+    # Segment pause (random silence between segments within a chapter)
+    segment_pause_min: float = 0.1
+    segment_pause_max: float = 0.3
     save_chapters_separately: bool = False
     merge_at_end: bool = True
     # Split mode: auto, line, paragraph, sentence, clause
@@ -452,6 +464,15 @@ class TTSConverter:
         samples = int(duration * SAMPLE_RATE)
         return self._np.zeros(samples, dtype="float32")
 
+    def _generate_segment_pause(self) -> Any:
+        """Generate random silence for inter-segment pause."""
+        min_pause = self.options.segment_pause_min
+        max_pause = self.options.segment_pause_max
+        if min_pause <= 0 and max_pause <= 0:
+            return self._np.array([], dtype="float32")
+        duration = random.uniform(min_pause, max_pause)
+        return self._generate_silence(duration)
+
     def _write_audio_chunk(
         self,
         audio: Any,
@@ -669,11 +690,13 @@ class TTSConverter:
 
             if use_phrasplit:
                 segments = self._split_text_with_phrasplit(chapter.content)
-                for segment in segments:
+                # Filter out empty segments first to know total count
+                segments = [s for s in segments if s.strip()]
+                total_segments = len(segments)
+
+                for seg_idx, segment in enumerate(segments):
                     if self._cancelled:
                         break
-                    if not segment.strip():
-                        continue
 
                     # Use ONNX backend
                     assert self._kokoro is not None
@@ -688,6 +711,13 @@ class TTSConverter:
                         break
                     out_file.write(samples)
                     duration += len(samples) / SAMPLE_RATE
+
+                    # Add random pause between segments (not after the last segment)
+                    if seg_idx < total_segments - 1:
+                        pause_audio = self._generate_segment_pause()
+                        if len(pause_audio) > 0:
+                            out_file.write(pause_audio)
+                            duration += len(pause_audio) / SAMPLE_RATE
 
                     # Update progress
                     grapheme_len = len(segment)
@@ -706,16 +736,29 @@ class TTSConverter:
             else:
                 # Use chunk-based generation for progress tracking
                 assert self._kokoro is not None
-                for samples, _sample_rate, chunk in self._kokoro.generate_chunks(
-                    chapter.content,
-                    voice=self._voice_style or self.options.voice,
-                    speed=self.options.speed,
-                    lang=lang_code,
-                ):
+                # Collect chunks to know total count for proper pause insertion
+                chunks_data = list(
+                    self._kokoro.generate_chunks(
+                        chapter.content,
+                        voice=self._voice_style or self.options.voice,
+                        speed=self.options.speed,
+                        lang=lang_code,
+                    )
+                )
+                total_chunks = len(chunks_data)
+
+                for chunk_idx, (samples, _sample_rate, chunk) in enumerate(chunks_data):
                     if self._cancelled:
                         break
                     out_file.write(samples)
                     duration += len(samples) / SAMPLE_RATE
+
+                    # Add random pause between chunks (not after the last chunk)
+                    if chunk_idx < total_chunks - 1:
+                        pause_audio = self._generate_segment_pause()
+                        if len(pause_audio) > 0:
+                            out_file.write(pause_audio)
+                            duration += len(pause_audio) / SAMPLE_RATE
 
                     # Update progress
                     grapheme_len = len(chunk)
@@ -926,6 +969,8 @@ class TTSConverter:
                             or state.split_mode != self.options.split_mode
                             or state.silence_between_chapters
                             != self.options.silence_between_chapters
+                            or state.segment_pause_min != self.options.segment_pause_min
+                            or state.segment_pause_max != self.options.segment_pause_max
                         )
 
                         if settings_changed:
@@ -933,7 +978,8 @@ class TTSConverter:
                                 f"Restoring settings from previous session: "
                                 f"voice={state.voice}, language={state.language}, "
                                 f"speed={state.speed}, split_mode={state.split_mode}, "
-                                f"silence={state.silence_between_chapters}s",
+                                f"silence={state.silence_between_chapters}s, "
+                                f"segment_pause={state.segment_pause_min}-{state.segment_pause_max}s",
                                 "info",
                             )
 
@@ -946,6 +992,8 @@ class TTSConverter:
                         self.options.silence_between_chapters = (
                             state.silence_between_chapters
                         )
+                        self.options.segment_pause_min = state.segment_pause_min
+                        self.options.segment_pause_max = state.segment_pause_max
 
             if state is None:
                 # Create new state
@@ -961,6 +1009,8 @@ class TTSConverter:
                     split_mode=self.options.split_mode,
                     output_format=self.options.output_format,
                     silence_between_chapters=self.options.silence_between_chapters,
+                    segment_pause_min=self.options.segment_pause_min,
+                    segment_pause_max=self.options.segment_pause_max,
                     chapters=[
                         ChapterState(
                             index=i,
@@ -1179,11 +1229,13 @@ class TTSConverter:
                 if use_phrasplit:
                     # Pre-split text using phrasplit, then process each segment
                     segments = self._split_text_with_phrasplit(chapter.content)
-                    for segment in segments:
+                    # Filter out empty segments to know total count
+                    segments = [s for s in segments if s.strip()]
+                    total_segments = len(segments)
+
+                    for seg_idx, segment in enumerate(segments):
                         if self._cancelled:
                             break
-                        if not segment.strip():
-                            continue
 
                         # Process each segment using ONNX backend
                         assert self._kokoro is not None
@@ -1204,6 +1256,15 @@ class TTSConverter:
                         chunk_duration = len(samples) / SAMPLE_RATE
                         current_time += chunk_duration
 
+                        # Add random pause between segments (not after the last segment)
+                        if seg_idx < total_segments - 1:
+                            pause_audio = self._generate_segment_pause()
+                            if len(pause_audio) > 0:
+                                self._write_audio_chunk(
+                                    pause_audio, out_file, ffmpeg_proc
+                                )
+                                current_time += len(pause_audio) / SAMPLE_RATE
+
                         # Update progress
                         grapheme_len = len(segment)
                         chars_processed += grapheme_len
@@ -1222,11 +1283,19 @@ class TTSConverter:
                 else:
                     # Use chunk-based generation for progress tracking
                     assert self._kokoro is not None
-                    for samples, _sample_rate, chunk in self._kokoro.generate_chunks(
-                        chapter.content,
-                        voice=self._voice_style or self.options.voice,
-                        speed=self.options.speed,
-                        lang=lang_code,
+                    # Collect chunks to know total count for proper pause insertion
+                    chunks_data = list(
+                        self._kokoro.generate_chunks(
+                            chapter.content,
+                            voice=self._voice_style or self.options.voice,
+                            speed=self.options.speed,
+                            lang=lang_code,
+                        )
+                    )
+                    total_chunks = len(chunks_data)
+
+                    for chunk_idx, (samples, _sample_rate, chunk) in enumerate(
+                        chunks_data
                     ):
                         if self._cancelled:
                             break
@@ -1237,6 +1306,15 @@ class TTSConverter:
                         # Update timing
                         chunk_duration = len(samples) / SAMPLE_RATE
                         current_time += chunk_duration
+
+                        # Add random pause between chunks (not after the last chunk)
+                        if chunk_idx < total_chunks - 1:
+                            pause_audio = self._generate_segment_pause()
+                            if len(pause_audio) > 0:
+                                self._write_audio_chunk(
+                                    pause_audio, out_file, ffmpeg_proc
+                                )
+                                current_time += len(pause_audio) / SAMPLE_RATE
 
                         # Update progress
                         grapheme_len = len(chunk)

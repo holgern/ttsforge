@@ -6,6 +6,7 @@ bypassing text-to-phoneme conversion since phonemes/tokens are pre-computed.
 
 import json
 import os
+import random
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -161,6 +162,8 @@ class PhonemeConversionState:
     speed: float = 1.0
     output_format: str = "m4b"
     silence_between_chapters: float = 2.0
+    segment_pause_min: float = 0.1
+    segment_pause_max: float = 0.3
     chapters: list[PhonemeChapterState] = field(default_factory=list)
     started_at: str = ""
     last_updated: str = ""
@@ -189,6 +192,10 @@ class PhonemeConversionState:
                 data["silence_between_chapters"] = 2.0
             if "selected_chapters" not in data:
                 data["selected_chapters"] = []
+            if "segment_pause_min" not in data:
+                data["segment_pause_min"] = 0.1
+            if "segment_pause_max" not in data:
+                data["segment_pause_max"] = 0.3
 
             return cls(**data)
         except (json.JSONDecodeError, TypeError, KeyError):
@@ -206,6 +213,8 @@ class PhonemeConversionState:
             "speed": self.speed,
             "output_format": self.output_format,
             "silence_between_chapters": self.silence_between_chapters,
+            "segment_pause_min": self.segment_pause_min,
+            "segment_pause_max": self.segment_pause_max,
             "chapters": [
                 {
                     "index": ch.index,
@@ -234,6 +243,9 @@ class PhonemeConversionOptions:
     output_format: str = "m4b"
     use_gpu: bool = False
     silence_between_chapters: float = 2.0
+    # Segment pause (random silence between segments within a chapter)
+    segment_pause_min: float = 0.1
+    segment_pause_max: float = 0.3
     # Metadata for m4b
     title: Optional[str] = None
     author: Optional[str] = None
@@ -331,6 +343,15 @@ class PhonemeConverter:
         """Generate silence audio of given duration."""
         samples = int(duration * SAMPLE_RATE)
         return np.zeros(samples, dtype="float32")
+
+    def _generate_segment_pause(self) -> np.ndarray:
+        """Generate random silence for inter-segment pause."""
+        min_pause = self.options.segment_pause_min
+        max_pause = self.options.segment_pause_max
+        if min_pause <= 0 and max_pause <= 0:
+            return np.array([], dtype="float32")
+        duration = random.uniform(min_pause, max_pause)
+        return self._generate_silence(duration)
 
     def _setup_output(
         self, output_path: Path
@@ -527,6 +548,7 @@ class PhonemeConverter:
             Tuple of (duration in seconds, segments processed)
         """
         segments_processed = 0
+        total_segments = len(chapter.segments)
 
         # Open WAV file for writing
         with sf.SoundFile(
@@ -538,7 +560,7 @@ class PhonemeConverter:
         ) as out_file:
             duration = 0.0
 
-            for segment in chapter.segments:
+            for seg_idx, segment in enumerate(chapter.segments):
                 if self._cancelled:
                     break
 
@@ -556,6 +578,13 @@ class PhonemeConverter:
                 out_file.write(samples)
                 duration += len(samples) / SAMPLE_RATE
                 segments_processed += 1
+
+                # Add random pause between segments (not after the last segment)
+                if seg_idx < total_segments - 1:
+                    pause_audio = self._generate_segment_pause()
+                    if len(pause_audio) > 0:
+                        out_file.write(pause_audio)
+                        duration += len(pause_audio) / SAMPLE_RATE
 
                 # Update progress
                 if progress and self.progress_callback:
@@ -775,11 +804,14 @@ class PhonemeConverter:
                         or state.speed != self.options.speed
                         or state.silence_between_chapters
                         != self.options.silence_between_chapters
+                        or state.segment_pause_min != self.options.segment_pause_min
+                        or state.segment_pause_max != self.options.segment_pause_max
                     ):
                         self.log(
                             f"Restoring settings from previous session: "
                             f"voice={state.voice}, speed={state.speed}, "
-                            f"silence={state.silence_between_chapters}s",
+                            f"silence={state.silence_between_chapters}s, "
+                            f"segment_pause={state.segment_pause_min}-{state.segment_pause_max}s",
                             "info",
                         )
                         # Apply saved settings for consistency
@@ -789,6 +821,8 @@ class PhonemeConverter:
                         self.options.silence_between_chapters = (
                             state.silence_between_chapters
                         )
+                        self.options.segment_pause_min = state.segment_pause_min
+                        self.options.segment_pause_max = state.segment_pause_max
 
             if state is None:
                 # Create new state
@@ -800,6 +834,8 @@ class PhonemeConverter:
                     speed=self.options.speed,
                     output_format=self.options.output_format,
                     silence_between_chapters=self.options.silence_between_chapters,
+                    segment_pause_min=self.options.segment_pause_min,
+                    segment_pause_max=self.options.segment_pause_max,
                     chapters=[
                         PhonemeChapterState(
                             index=idx,
@@ -1016,6 +1052,7 @@ class PhonemeConverter:
                 self.log(f"Converting chapter {ch_num}/{total_ch}: {chapter.title}")
 
                 chapter_start = current_time
+                total_chapter_segments = len(chapter.segments)
 
                 for seg_idx, segment in enumerate(chapter.segments):
                     if self._cancelled:
@@ -1035,6 +1072,13 @@ class PhonemeConverter:
                     self._write_audio_chunk(samples, out_file, ffmpeg_proc)
                     current_time += len(samples) / SAMPLE_RATE
                     segments_processed += 1
+
+                    # Add random pause between segments (not after the last segment)
+                    if seg_idx < total_chapter_segments - 1:
+                        pause_audio = self._generate_segment_pause()
+                        if len(pause_audio) > 0:
+                            self._write_audio_chunk(pause_audio, out_file, ffmpeg_proc)
+                            current_time += len(pause_audio) / SAMPLE_RATE
 
                     # Update progress
                     progress.current_segment = seg_idx + 1
