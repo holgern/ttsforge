@@ -510,7 +510,7 @@ def format_filename_template(
 
     try:
         result = template.format(**format_kwargs)
-    except KeyError as e:
+    except KeyError:
         # Unknown template variable - fall back to book title
         result = safe_book_title
     except ValueError:

@@ -1,7 +1,7 @@
 ttsforge Documentation
 ======================
 
-**ttsforge** is a command-line tool for converting EPUB files to audiobooks using 
+**ttsforge** is a command-line tool for converting EPUB files to audiobooks using
 Kokoro ONNX TTS (Text-to-Speech).
 
 .. toctree::

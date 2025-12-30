@@ -1,14 +1,14 @@
 Filename Templates
 ==================
 
-ttsforge uses configurable filename templates to name output files based on book 
+ttsforge uses configurable filename templates to name output files based on book
 metadata. This allows you to organize your audiobook library with consistent naming.
 
 
 Template Syntax
 ---------------
 
-Templates use Python's format string syntax with curly braces for variable 
+Templates use Python's format string syntax with curly braces for variable
 substitution:
 
 .. code-block:: text
@@ -261,7 +261,7 @@ Simple Chapter Names
 Work Directory
 --------------
 
-During conversion, ttsforge creates a hidden work directory to store chapter files 
+During conversion, ttsforge creates a hidden work directory to store chapter files
 and state information:
 
 .. code-block:: text

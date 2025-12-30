@@ -67,9 +67,26 @@ def get_version() -> str:
 
 @click.group(invoke_without_command=True)
 @click.option("--version", is_flag=True, help="Show version and exit.")
+@click.option(
+    "--model",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to custom kokoro.onnx model file.",
+)
+@click.option(
+    "--voices",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to custom voices.bin file.",
+)
 @click.pass_context
-def main(ctx: click.Context, version: bool) -> None:
+def main(
+    ctx: click.Context, version: bool, model: Optional[Path], voices: Optional[Path]
+) -> None:
     """ttsforge - Generate audiobooks from EPUB files with TTS."""
+    ctx.ensure_object(dict)
+    ctx.obj["model_path"] = model
+    ctx.obj["voices_path"] = voices
     if version:
         console.print(f"[bold]{PROGRAM_NAME}[/bold] version {get_version()}")
         return
@@ -212,7 +229,9 @@ def main(ctx: click.Context, version: bool) -> None:
     type=click.Path(exists=True, path_type=Path),
     help="Path to custom voice database (SQLite).",
 )
+@click.pass_context
 def convert(
+    ctx: click.Context,
     epub_file: Path,
     output: Optional[Path],
     output_format: Optional[str],
@@ -243,6 +262,8 @@ def convert(
     EPUB_FILE is the path to the EPUB file to convert.
     """
     config = load_config()
+    model_path = ctx.obj.get("model_path") if ctx.obj else None
+    voices_path = ctx.obj.get("voices_path") if ctx.obj else None
 
     # Get format first (needed for output path construction)
     fmt = output_format or config.get("default_format", "m4b")
@@ -386,6 +407,7 @@ def convert(
     # Handle --fresh flag: delete existing progress
     if fresh:
         import shutil
+
         from .utils import sanitize_filename
 
         safe_book_title = sanitize_filename(effective_title)[:50]
@@ -437,6 +459,8 @@ def convert(
             "chapter_filename_template",
             "{chapter_num:03d}_{book_title}_{chapter_title}",
         ),
+        model_path=model_path,
+        voices_path=voices_path,
     )
 
     # Set up progress display
@@ -660,7 +684,9 @@ DEFAULT_SAMPLE_TEXT = (
     help="Text splitting mode for processing.",
 )
 @click.option("--verbose", is_flag=True, help="Show detailed output.")
+@click.pass_context
 def sample(
+    ctx: click.Context,
     text: Optional[str],
     output: Optional[Path],
     output_format: str,
@@ -685,6 +711,10 @@ def sample(
     """
     from .conversion import ConversionOptions, TTSConverter
 
+    # Get model path from global context
+    model_path = ctx.obj.get("model_path") if ctx.obj else None
+    voices_path = ctx.obj.get("voices_path") if ctx.obj else None
+
     # Use default text if none provided
     sample_text = text or DEFAULT_SAMPLE_TEXT
 
@@ -706,6 +736,8 @@ def sample(
         output_format=output_format,
         use_gpu=use_gpu if use_gpu is not None else user_config.get("use_gpu", True),
         split_mode=split_mode or user_config.get("split_mode", "auto"),
+        model_path=model_path,
+        voices_path=voices_path,
     )
 
     # Always show settings
@@ -875,7 +907,9 @@ VOICE_BLEND_PRESETS = [
     is_flag=True,
     help="Demo a curated set of voice blend combinations.",
 )
+@click.pass_context
 def demo(
+    ctx: click.Context,
     output: Optional[Path],
     language: Optional[str],
     voices_filter: Optional[str],
@@ -916,6 +950,8 @@ def demo(
 
     config = load_config()
     gpu = use_gpu if use_gpu is not None else config.get("use_gpu", False)
+    model_path = ctx.obj.get("model_path") if ctx.obj else None
+    voices_path = ctx.obj.get("voices_path") if ctx.obj else None
 
     # Helper function to create filename from blend string
     def blend_to_filename(blend_str: str) -> str:
@@ -956,7 +992,11 @@ def demo(
 
         # Initialize TTS engine
         try:
-            kokoro = KokoroONNX(use_gpu=gpu)
+            kokoro = KokoroONNX(
+                model_path=model_path,
+                voices_path=voices_path,
+                use_gpu=gpu,
+            )
         except Exception as e:
             console.print(f"[red]Error initializing TTS engine:[/red] {e}")
             sys.exit(1)
@@ -1056,7 +1096,11 @@ def demo(
 
     # Initialize TTS engine
     try:
-        kokoro = KokoroONNX(use_gpu=gpu)
+        kokoro = KokoroONNX(
+            model_path=model_path,
+            voices_path=voices_path,
+            use_gpu=gpu,
+        )
     except Exception as e:
         console.print(f"[red]Error initializing TTS engine:[/red] {e}")
         sys.exit(1)
@@ -1616,7 +1660,9 @@ def phonemes_export(
     is_flag=True,
     help="Skip confirmation prompts.",
 )
+@click.pass_context
 def phonemes_convert(
+    ctx: click.Context,
     phoneme_file: Path,
     output: Optional[Path],
     output_format: Optional[str],
@@ -1675,6 +1721,8 @@ def phonemes_convert(
 
     # Load config for defaults
     config = load_config()
+    model_path = ctx.obj.get("model_path") if ctx.obj else None
+    voices_path = ctx.obj.get("voices_path") if ctx.obj else None
 
     # Get book info and metadata
     book_info = book.get_info()
@@ -1807,6 +1855,8 @@ def phonemes_convert(
             "chapter_filename_template",
             "{chapter_num:03d}_{book_title}_{chapter_title}",
         ),
+        model_path=model_path,
+        voices_path=voices_path,
     )
 
     # Progress tracking with Rich

@@ -262,6 +262,10 @@ class ConversionOptions:
     voice_database: Optional[Path] = None
     # Filename template for chapter files
     chapter_filename_template: str = "{chapter_num:03d}_{book_title}_{chapter_title}"
+    # Custom ONNX model path (None = use default downloaded model)
+    model_path: Optional[Path] = None
+    # Custom voices.bin path (None = use default downloaded voices)
+    voices_path: Optional[Path] = None
 
 
 # Pattern to detect chapter markers in text
@@ -349,7 +353,11 @@ class TTSConverter:
             self.log("Model download complete.")
 
         # Initialize ONNX backend
-        self._kokoro = KokoroONNX(use_gpu=self.options.use_gpu)
+        self._kokoro = KokoroONNX(
+            model_path=self.options.model_path,
+            voices_path=self.options.voices_path,
+            use_gpu=self.options.use_gpu,
+        )
 
         # Load voice database if specified
         if self.options.voice_database and self.options.voice_database.exists():

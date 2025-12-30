@@ -1,7 +1,7 @@
 Configuration
 =============
 
-ttsforge stores its configuration in a JSON file and provides a CLI interface for 
+ttsforge stores its configuration in a JSON file and provides a CLI interface for
 managing settings.
 
 
@@ -316,7 +316,7 @@ Here's an example ``config.json`` with custom settings:
 Command-Line Override
 ---------------------
 
-Configuration values can be overridden on the command line. Command-line options 
+Configuration values can be overridden on the command line. Command-line options
 take precedence over configuration file settings:
 
 .. code-block:: bash

@@ -1,6 +1,8 @@
-"""ONNX backend for ttsforge - uses kokoro-onnx for TTS without torch dependency."""
+"""ONNX backend for ttsforge - native ONNX TTS without external dependencies."""
 
 import io
+import os
+import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
@@ -8,14 +10,22 @@ from typing import TYPE_CHECKING, Any, Callable, Optional
 from urllib.request import urlretrieve
 
 import numpy as np
+import onnxruntime as rt
 
 from .tokenizer import EspeakConfig, Tokenizer
+from .trim import trim as trim_audio
 from .utils import get_user_cache_path
 
 if TYPE_CHECKING:
     from .phonemes import PhonemeSegment
 
-# ONNX model files required for kokoro-onnx
+# Maximum phoneme length for a single inference
+MAX_PHONEME_LENGTH = 510
+
+# Sample rate for Kokoro models
+SAMPLE_RATE = 24000
+
+# ONNX model files required
 ONNX_MODEL_FILES = [
     "kokoro-v1.0.onnx",
     "voices-v1.0.bin",
@@ -162,10 +172,10 @@ def download_all_models(
 
 class KokoroONNX:
     """
-    Wrapper around kokoro-onnx for TTS generation.
+    Native ONNX backend for TTS generation.
 
-    This class provides a consistent interface for the ttsforge conversion system.
-    Now includes embedded tokenizer for phoneme/token-based generation.
+    This class provides direct ONNX inference without external dependencies.
+    Includes embedded tokenizer for phoneme/token-based generation.
     """
 
     def __init__(
@@ -186,7 +196,8 @@ class KokoroONNX:
             vocab_version: Vocabulary version for tokenizer
             espeak_config: Optional espeak-ng configuration
         """
-        self._kokoro: Any = None
+        self._session: Optional[rt.InferenceSession] = None
+        self._voices_data: Optional[dict[str, np.ndarray]] = None
         self._np = np
         self._use_gpu = use_gpu
 
@@ -225,38 +236,126 @@ class KokoroONNX:
             download_model(ONNX_MODEL_FILES[1])
 
     def _init_kokoro(self) -> None:
-        """Initialize the kokoro-onnx instance."""
-        if self._kokoro is not None:
+        """Initialize the ONNX session and load voices."""
+        if self._session is not None:
             return
 
         self._ensure_models()
 
-        from kokoro_onnx import Kokoro
-
-        # Set up execution providers based on GPU preference
+        # Set up execution providers based on GPU preference and environment
+        providers = ["CPUExecutionProvider"]
         if self._use_gpu:
-            try:
-                # Try CUDA first, then CoreML for Mac
-                self._kokoro = Kokoro(
-                    str(self._model_path),
-                    str(self._voices_path),
-                )
-            except Exception:
-                # Fall back to CPU
-                self._kokoro = Kokoro(
-                    str(self._model_path),
-                    str(self._voices_path),
-                )
+            available = rt.get_available_providers()
+            # Prefer CUDA, then CoreML, then DirectML
+            for provider in [
+                "CUDAExecutionProvider",
+                "CoreMLExecutionProvider",
+                "DmlExecutionProvider",
+            ]:
+                if provider in available:
+                    providers = [provider, "CPUExecutionProvider"]
+                    break
+
+        # Allow environment override
+        env_provider = os.getenv("ONNX_PROVIDER")
+        if env_provider:
+            providers = [env_provider]
+
+        # Load ONNX model
+        self._session = rt.InferenceSession(str(self._model_path), providers=providers)
+
+        # Load voices (numpy archive with voice style vectors)
+        self._voices_data = dict(np.load(str(self._voices_path), allow_pickle=True))
+
+    def _create_audio_internal(
+        self, phonemes: str, voice: np.ndarray, speed: float
+    ) -> tuple[np.ndarray, int]:
+        """
+        Core ONNX inference for a single phoneme batch.
+
+        Args:
+            phonemes: Phoneme string (will be truncated if > MAX_PHONEME_LENGTH)
+            voice: Voice style vector
+            speed: Speech speed multiplier
+
+        Returns:
+            Tuple of (audio samples, sample rate)
+        """
+        assert self._session is not None
+
+        # Truncate phonemes if too long
+        phonemes = phonemes[:MAX_PHONEME_LENGTH]
+        tokens = self.tokenizer.tokenize(phonemes)
+
+        # Get voice style for this token length
+        voice_style = voice[len(tokens)]
+
+        # Pad tokens with start/end tokens
+        tokens_padded = [[0, *tokens, 0]]
+
+        # Check input names to determine model version
+        input_names = [i.name for i in self._session.get_inputs()]
+
+        if "input_ids" in input_names:
+            # Newer model format (exported with input_ids, expects int32 speed)
+            # Speed is typically 1 for normal speed, convert float to int
+            speed_int = max(1, int(round(speed)))
+            inputs = {
+                "input_ids": np.array(tokens_padded, dtype=np.int64),
+                "style": np.array(voice_style, dtype=np.float32),
+                "speed": np.array([speed_int], dtype=np.int32),
+            }
         else:
-            self._kokoro = Kokoro(
-                str(self._model_path),
-                str(self._voices_path),
-            )
+            # Original model format (kokoro-onnx release model, uses float speed)
+            inputs = {
+                "tokens": tokens_padded,
+                "style": voice_style,
+                "speed": np.ones(1, dtype=np.float32) * speed,
+            }
+
+        result = self._session.run(None, inputs)[0]
+        audio: np.ndarray = np.asarray(result)
+        return audio, SAMPLE_RATE
+
+    def _split_phonemes(self, phonemes: str) -> list[str]:
+        """
+        Split phonemes into batches at punctuation marks.
+
+        Args:
+            phonemes: Full phoneme string
+
+        Returns:
+            List of phoneme batches, each <= MAX_PHONEME_LENGTH
+        """
+        # Split on punctuation marks while keeping them
+        words = re.split(r"([.,!?;])", phonemes)
+        batches = []
+        current = ""
+
+        for part in words:
+            part = part.strip()
+            if not part:
+                continue
+            if len(current) + len(part) + 1 >= MAX_PHONEME_LENGTH:
+                if current:
+                    batches.append(current.strip())
+                current = part
+            elif part in ".,!?;":
+                current += part
+            else:
+                if current:
+                    current += " "
+                current += part
+
+        if current:
+            batches.append(current.strip())
+        return batches
 
     def get_voices(self) -> list[str]:
         """Get list of available voice names."""
         self._init_kokoro()
-        return self._kokoro.get_voices()
+        assert self._voices_data is not None
+        return list(sorted(self._voices_data.keys()))
 
     def get_voice_style(self, voice_name: str) -> np.ndarray:
         """
@@ -269,7 +368,8 @@ class KokoroONNX:
             Numpy array representing the voice style
         """
         self._init_kokoro()
-        return self._kokoro.get_voice_style(voice_name)
+        assert self._voices_data is not None
+        return self._voices_data[voice_name]
 
     def create_blended_voice(self, blend: VoiceBlend) -> np.ndarray:
         """
@@ -322,22 +422,31 @@ class KokoroONNX:
         """
         self._init_kokoro()
 
-        # Resolve voice to style vector if needed
+        # Resolve voice to style vector
         if isinstance(voice, VoiceBlend):
             voice_style = self.create_blended_voice(voice)
         elif isinstance(voice, str):
-            voice_style = voice  # kokoro-onnx accepts string voice names
+            voice_style = self.get_voice_style(voice)
         else:
-            voice_style = voice  # Assume it's already a numpy array
+            voice_style = voice
 
-        samples, sample_rate = self._kokoro.create(
-            text,
-            voice=voice_style,
-            speed=speed,
-            lang=lang,
-        )
+        # Convert text to phonemes
+        phonemes = self.tokenizer.phonemize(text, lang=lang)
 
-        return samples, sample_rate
+        # Split phonemes into batches and generate audio
+        batches = self._split_phonemes(phonemes)
+        audio_parts = []
+
+        for batch in batches:
+            audio_part, _ = self._create_audio_internal(batch, voice_style, speed)
+            # Trim silence from each part
+            audio_part, _ = trim_audio(audio_part)
+            audio_parts.append(audio_part)
+
+        if not audio_parts:
+            return np.array([], dtype=np.float32), SAMPLE_RATE
+
+        return np.concatenate(audio_parts), SAMPLE_RATE
 
     def create_from_phonemes(
         self,
@@ -396,7 +505,7 @@ class KokoroONNX:
         """
         self._init_kokoro()
 
-        # Resolve voice to style vector if needed
+        # Resolve voice to style vector
         if isinstance(voice, VoiceBlend):
             voice_style = self.create_blended_voice(voice)
         elif isinstance(voice, str):
@@ -404,18 +513,23 @@ class KokoroONNX:
         else:
             voice_style = voice
 
-        # Use kokoro-onnx's create method with tokens parameter
-        # Note: kokoro-onnx may require phonemes, in which case we detokenize
+        # Detokenize to phonemes and generate audio
         phonemes = self.tokenizer.detokenize(tokens)
-        samples, sample_rate = self._kokoro.create(
-            phonemes,
-            voice=voice_style,
-            speed=speed,
-            lang="en-us",  # Language doesn't matter for phonemes
-            is_phonemes=True,  # Skip re-phonemization since input is already phonemes
-        )
 
-        return samples, sample_rate
+        # Split phonemes into batches and generate audio
+        batches = self._split_phonemes(phonemes)
+        audio_parts = []
+
+        for batch in batches:
+            audio_part, _ = self._create_audio_internal(batch, voice_style, speed)
+            # Trim silence from each part
+            audio_part, _ = trim_audio(audio_part)
+            audio_parts.append(audio_part)
+
+        if not audio_parts:
+            return np.array([], dtype=np.float32), SAMPLE_RATE
+
+        return np.concatenate(audio_parts), SAMPLE_RATE
 
     def create_from_segment(
         self,
@@ -523,7 +637,7 @@ class KokoroONNX:
         if isinstance(voice, VoiceBlend):
             voice_style = self.create_blended_voice(voice)
         elif isinstance(voice, str):
-            voice_style = voice
+            voice_style = self.get_voice_style(voice)
         else:
             voice_style = voice
 
@@ -534,14 +648,19 @@ class KokoroONNX:
             if not chunk.strip():
                 continue
 
-            samples, sample_rate = self._kokoro.create(
-                chunk,
-                voice=voice_style,
-                speed=speed,
-                lang=lang,
-            )
+            # Convert chunk to phonemes and generate audio
+            phonemes = self.tokenizer.phonemize(chunk, lang=lang)
+            batches = self._split_phonemes(phonemes)
+            audio_parts = []
 
-            yield samples, sample_rate, chunk
+            for batch in batches:
+                audio_part, _ = self._create_audio_internal(batch, voice_style, speed)
+                audio_part, _ = trim_audio(audio_part)
+                audio_parts.append(audio_part)
+
+            if audio_parts:
+                samples = np.concatenate(audio_parts)
+                yield samples, SAMPLE_RATE, chunk
 
     def _split_text(self, text: str, chunk_size: int) -> list[str]:
         """
@@ -554,9 +673,6 @@ class KokoroONNX:
         Returns:
             List of text chunks
         """
-        # Split on sentence-ending punctuation
-        import re
-
         # Split on sentence boundaries while keeping the delimiter
         sentences = re.split(r"(?<=[.!?])\s+", text)
 

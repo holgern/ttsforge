@@ -21,13 +21,14 @@ uv run scripts/export.py --config_file checkpoints/config.json --checkpoint_path
 
 import argparse
 import os
-import torch
-import onnx
+
 import onnxruntime as ort
 import sounddevice as sd
-
+import torch
 from kokoro import KModel, KPipeline
 from kokoro.model import KModelForONNX
+
+import onnx
 
 
 def export_onnx(model, output):
@@ -47,7 +48,7 @@ def export_onnx(model, output):
         verbose=True,
         input_names=["input_ids", "style", "speed"],
         output_names=["waveform", "duration"],
-        opset_version=21,
+        opset_version=20,
         dynamic_axes={
             "input_ids": {0: "batch_size", 1: "input_ids_len"},
             "style": {0: "batch_size"},

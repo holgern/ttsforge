@@ -1,7 +1,7 @@
 API Reference
 =============
 
-This section documents the Python API for ttsforge, allowing programmatic use 
+This section documents the Python API for ttsforge, allowing programmatic use
 of the library.
 
 Module Overview

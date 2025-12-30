@@ -1,7 +1,7 @@
 Voices
 ======
 
-ttsforge uses Kokoro TTS which provides 54 high-quality neural voices across 
+ttsforge uses Kokoro TTS which provides 54 high-quality neural voices across
 9 languages.
 
 
@@ -78,37 +78,37 @@ American English (a)
      - Default
    * - ``af_alloy``
      - Versatile, balanced voice
-     - 
+     -
    * - ``af_aoede``
      - Clear, pleasant tone
-     - 
+     -
    * - ``af_bella``
      - Warm, friendly voice
-     - 
+     -
    * - ``af_heart``
      - Expressive, emotional voice
      - Yes
    * - ``af_jessica``
      - Professional, articulate
-     - 
+     -
    * - ``af_kore``
      - Youthful, energetic voice
-     - 
+     -
    * - ``af_nicole``
      - Soft, gentle voice
-     - 
+     -
    * - ``af_nova``
      - Modern, dynamic voice
-     - 
+     -
    * - ``af_river``
      - Calm, flowing voice
-     - 
+     -
    * - ``af_sarah``
      - Confident, clear voice
-     - 
+     -
    * - ``af_sky``
      - Light, airy voice
-     - 
+     -
 
 **Male Voices (9):**
 
@@ -124,25 +124,25 @@ American English (a)
      - Popular for audiobooks
    * - ``am_echo``
      - Resonant, clear voice
-     - 
+     -
    * - ``am_eric``
      - Friendly, approachable voice
-     - 
+     -
    * - ``am_fenrir``
      - Strong, dramatic voice
-     - 
+     -
    * - ``am_liam``
      - Young, energetic voice
-     - 
+     -
    * - ``am_michael``
      - Professional narrator voice
-     - 
+     -
    * - ``am_onyx``
      - Deep, smooth voice
-     - 
+     -
    * - ``am_puck``
      - Playful, expressive voice
-     - 
+     -
    * - ``am_santa``
      - Warm, jolly voice
      - Seasonal character voice
@@ -161,16 +161,16 @@ British English (b)
      - Default
    * - ``bf_alice``
      - Elegant, refined voice
-     - 
+     -
    * - ``bf_emma``
      - Classic British voice
      - Yes
    * - ``bf_isabella``
      - Sophisticated voice
-     - 
+     -
    * - ``bf_lily``
      - Gentle, soft voice
-     - 
+     -
 
 **Male Voices (4):**
 
@@ -183,16 +183,16 @@ British English (b)
      - Notes
    * - ``bm_daniel``
      - Traditional British voice
-     - 
+     -
    * - ``bm_fable``
      - Storytelling voice
      - Great for narratives
    * - ``bm_george``
      - Authoritative, mature voice
-     - 
+     -
    * - ``bm_lewis``
      - Modern British voice
-     - 
+     -
 
 Spanish (e)
 ^^^^^^^^^^^
@@ -221,7 +221,7 @@ Spanish (e)
      - Notes
    * - ``em_alex``
      - Natural Spanish voice
-     - 
+     -
    * - ``em_santa``
      - Warm Spanish voice
      - Seasonal
@@ -259,7 +259,7 @@ Hindi (h)
      - Yes
    * - ``hf_beta``
      - Alternative Hindi voice
-     - 
+     -
 
 **Male Voices (2):**
 
@@ -272,10 +272,10 @@ Hindi (h)
      - Notes
    * - ``hm_omega``
      - Deep Hindi voice
-     - 
+     -
    * - ``hm_psi``
      - Natural Hindi voice
-     - 
+     -
 
 Italian (i)
 ^^^^^^^^^^^
@@ -304,7 +304,7 @@ Italian (i)
      - Notes
    * - ``im_nicola``
      - Clear Italian voice
-     - 
+     -
 
 Japanese (j)
 ^^^^^^^^^^^^
@@ -323,13 +323,13 @@ Japanese (j)
      - Yes
    * - ``jf_gongitsune``
      - Storytelling voice
-     - 
+     -
    * - ``jf_nezumi``
      - Soft Japanese voice
-     - 
+     -
    * - ``jf_tebukuro``
      - Gentle Japanese voice
-     - 
+     -
 
 **Male Voices (1):**
 
@@ -342,7 +342,7 @@ Japanese (j)
      - Notes
    * - ``jm_kumo``
      - Natural Japanese male voice
-     - 
+     -
 
 Brazilian Portuguese (p)
 ^^^^^^^^^^^^^^^^^^^^^^^^
@@ -371,7 +371,7 @@ Brazilian Portuguese (p)
      - Notes
    * - ``pm_alex``
      - Clear Portuguese voice
-     - 
+     -
    * - ``pm_santa``
      - Warm Portuguese voice
      - Seasonal
@@ -390,16 +390,16 @@ Mandarin Chinese (z)
      - Default
    * - ``zf_xiaobei``
      - Northern accent
-     - 
+     -
    * - ``zf_xiaoni``
      - Soft Chinese voice
-     - 
+     -
    * - ``zf_xiaoxiao``
      - Popular Chinese voice
      - Yes
    * - ``zf_xiaoyi``
      - Clear Chinese voice
-     - 
+     -
 
 **Male Voices (4):**
 
@@ -412,16 +412,16 @@ Mandarin Chinese (z)
      - Notes
    * - ``zm_yunjian``
      - Strong male voice
-     - 
+     -
    * - ``zm_yunxi``
      - Natural male voice
-     - 
+     -
    * - ``zm_yunxia``
      - Youthful male voice
-     - 
+     -
    * - ``zm_yunyang``
      - Mature male voice
-     - 
+     -
 
 
 Voice Blending

@@ -2,7 +2,8 @@
 
 Convert EPUB files to audiobooks using Kokoro ONNX TTS.
 
-ttsforge is a command-line tool that transforms EPUB ebooks into high-quality audiobooks with support for 54 neural voices across 9 languages.
+ttsforge is a command-line tool that transforms EPUB ebooks into high-quality audiobooks
+with support for 54 neural voices across 9 languages.
 
 ## Features
 
@@ -27,11 +28,13 @@ pip install ttsforge
 - **espeak-ng**: Required for phonemization
 
 **Ubuntu/Debian:**
+
 ```bash
 sudo apt-get install ffmpeg espeak-ng
 ```
 
 **macOS:**
+
 ```bash
 brew install ffmpeg espeak-ng
 ```
@@ -155,23 +158,24 @@ Customize output filenames with metadata:
 ttsforge config --set output_filename_template "{author} - {book_title}"
 ```
 
-Available variables: `{book_title}`, `{author}`, `{chapter_title}`, `{chapter_num}`, `{input_stem}`, `{chapters_range}`
+Available variables: `{book_title}`, `{author}`, `{chapter_title}`, `{chapter_num}`,
+`{input_stem}`, `{chapters_range}`
 
 ## Voices
 
 ttsforge includes 54 voices across 9 languages:
 
-| Language | Code | Voices | Default |
-|----------|------|--------|---------|
-| American English | `a` | 20 | `af_heart` |
-| British English | `b` | 8 | `bf_emma` |
-| Spanish | `e` | 3 | `ef_dora` |
-| French | `f` | 1 | `ff_siwis` |
-| Hindi | `h` | 4 | `hf_alpha` |
-| Italian | `i` | 2 | `if_sara` |
-| Japanese | `j` | 5 | `jf_alpha` |
-| Brazilian Portuguese | `p` | 3 | `pf_dora` |
-| Mandarin Chinese | `z` | 8 | `zf_xiaoxiao` |
+| Language             | Code | Voices | Default       |
+| -------------------- | ---- | ------ | ------------- |
+| American English     | `a`  | 20     | `af_heart`    |
+| British English      | `b`  | 8      | `bf_emma`     |
+| Spanish              | `e`  | 3      | `ef_dora`     |
+| French               | `f`  | 1      | `ff_siwis`    |
+| Hindi                | `h`  | 4      | `hf_alpha`    |
+| Italian              | `i`  | 2      | `if_sara`     |
+| Japanese             | `j`  | 5      | `jf_alpha`    |
+| Brazilian Portuguese | `p`  | 3      | `pf_dora`     |
+| Mandarin Chinese     | `z`  | 8      | `zf_xiaoxiao` |
 
 Voice naming: `{lang}{gender}_{name}` (e.g., `am_adam` = American Male "Adam")
 
@@ -196,20 +200,20 @@ ttsforge convert book.epub --voice-blend "af_nicole:50,am_michael:50"
 
 ## Commands
 
-| Command | Description |
-|---------|-------------|
-| `convert` | Convert EPUB to audiobook |
-| `list` | List chapters in EPUB |
-| `info` | Show EPUB metadata |
-| `sample` | Generate sample audio |
-| `voices` | List available voices |
-| `demo` | Generate voice demo |
-| `download` | Download ONNX models |
-| `config` | Manage configuration |
-| `phonemes export` | Export EPUB to phonemes |
+| Command            | Description               |
+| ------------------ | ------------------------- |
+| `convert`          | Convert EPUB to audiobook |
+| `list`             | List chapters in EPUB     |
+| `info`             | Show EPUB metadata        |
+| `sample`           | Generate sample audio     |
+| `voices`           | List available voices     |
+| `demo`             | Generate voice demo       |
+| `download`         | Download ONNX models      |
+| `config`           | Manage configuration      |
+| `phonemes export`  | Export EPUB to phonemes   |
 | `phonemes convert` | Convert phonemes to audio |
-| `phonemes info` | Show phoneme file info |
-| `phonemes preview` | Preview text as phonemes |
+| `phonemes info`    | Show phoneme file info    |
+| `phonemes preview` | Preview text as phonemes  |
 
 ## GPU Acceleration
 
@@ -228,18 +232,18 @@ ttsforge convert book.epub --gpu
 
 ## Configuration Options
 
-| Option | Default | Description |
-|--------|---------|-------------|
-| `default_voice` | `af_heart` | Default TTS voice |
-| `default_language` | `a` | Default language code |
-| `default_speed` | `1.0` | Speech speed (0.5-2.0) |
-| `default_format` | `m4b` | Output format |
-| `use_gpu` | `false` | Enable GPU acceleration |
-| `silence_between_chapters` | `2.0` | Chapter gap (seconds) |
-| `segment_pause_min` | `0.1` | Min sentence pause |
-| `segment_pause_max` | `0.3` | Max sentence pause |
-| `paragraph_pause_min` | `0.5` | Min paragraph pause |
-| `paragraph_pause_max` | `1.0` | Max paragraph pause |
+| Option                     | Default        | Description              |
+| -------------------------- | -------------- | ------------------------ |
+| `default_voice`            | `af_heart`     | Default TTS voice        |
+| `default_language`         | `a`            | Default language code    |
+| `default_speed`            | `1.0`          | Speech speed (0.5-2.0)   |
+| `default_format`           | `m4b`          | Output format            |
+| `use_gpu`                  | `false`        | Enable GPU acceleration  |
+| `silence_between_chapters` | `2.0`          | Chapter gap (seconds)    |
+| `segment_pause_min`        | `0.1`          | Min sentence pause       |
+| `segment_pause_max`        | `0.3`          | Max sentence pause       |
+| `paragraph_pause_min`      | `0.5`          | Min paragraph pause      |
+| `paragraph_pause_max`      | `1.0`          | Max paragraph pause      |
 | `output_filename_template` | `{book_title}` | Output filename template |
 
 ## Documentation
@@ -247,6 +251,7 @@ ttsforge convert book.epub --gpu
 Full documentation: https://ttsforge.readthedocs.io/
 
 Build locally:
+
 ```bash
 cd docs
 pip install sphinx sphinx-rtd-theme

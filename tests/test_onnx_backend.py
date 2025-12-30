@@ -166,8 +166,8 @@ class TestKokoroONNXClass:
         from ttsforge.onnx_backend import KokoroONNX
 
         kokoro = KokoroONNX()
-        # Internal kokoro instance should be None until first use
-        assert kokoro._kokoro is None
+        # Internal session should be None until first use
+        assert kokoro._session is None
 
     def test_split_text_method(self):
         """Should split text into chunks."""
