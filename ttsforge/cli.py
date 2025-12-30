@@ -44,6 +44,8 @@ from .onnx_backend import (
     is_model_downloaded,
 )
 from .utils import (
+    format_chapters_range,
+    format_filename_template,
     format_size,
     load_config,
     reset_config,
@@ -231,17 +233,6 @@ def convert(
     # Get format first (needed for output path construction)
     fmt = output_format or config.get("default_format", "m4b")
 
-    # Determine output path
-    if output is None:
-        output = epub_file.with_suffix(f".{fmt}")
-    elif output.is_dir():
-        # If output is a directory, construct filename from epub name
-        output = output / f"{epub_file.stem}.{fmt}"
-
-    # Get format from output extension if not specified
-    if output_format is None:
-        output_format = output.suffix.lstrip(".") or config.get("default_format", "m4b")
-
     # Load chapters from EPUB
     console.print(f"[bold]Loading:[/bold] {epub_file}")
 
@@ -262,9 +253,14 @@ def convert(
 
     # Get EPUB metadata
     metadata = parser.get_metadata()
-    epub_title = metadata.title or epub_file.stem
+    default_title = config.get("default_title", "Untitled")
+    epub_title = metadata.title or default_title
     epub_author = metadata.authors[0] if metadata.authors else "Unknown"
     epub_language = metadata.language
+
+    # Use CLI title/author if provided, otherwise use EPUB metadata
+    effective_title = title or epub_title
+    effective_author = author or epub_author
 
     # Extract chapters
     with console.status("Extracting chapters..."):
@@ -313,6 +309,46 @@ def convert(
         console.print("[yellow]No chapters selected. Exiting.[/yellow]")
         return
 
+    # Determine output path using filename template
+    if output is None:
+        output_template = config.get("output_filename_template", "{book_title}")
+        chapters_range = format_chapters_range(
+            selected_indices or list(range(len(epub_chapters))), len(epub_chapters)
+        )
+        output_filename = format_filename_template(
+            output_template,
+            book_title=effective_title,
+            author=effective_author,
+            input_stem=epub_file.stem,
+            chapters_range=chapters_range,
+            default_title=default_title,
+        )
+        # Append chapters range to filename if partial selection
+        if chapters_range:
+            output_filename = f"{output_filename}_{chapters_range}"
+        output = epub_file.parent / f"{output_filename}.{fmt}"
+    elif output.is_dir():
+        # If output is a directory, construct filename using template
+        output_template = config.get("output_filename_template", "{book_title}")
+        chapters_range = format_chapters_range(
+            selected_indices or list(range(len(epub_chapters))), len(epub_chapters)
+        )
+        output_filename = format_filename_template(
+            output_template,
+            book_title=effective_title,
+            author=effective_author,
+            input_stem=epub_file.stem,
+            chapters_range=chapters_range,
+            default_title=default_title,
+        )
+        if chapters_range:
+            output_filename = f"{output_filename}_{chapters_range}"
+        output = output / f"{output_filename}.{fmt}"
+
+    # Get format from output extension if not specified
+    if output_format is None:
+        output_format = output.suffix.lstrip(".") or config.get("default_format", "m4b")
+
     # Show conversion summary
     _show_conversion_summary(
         epub_file=epub_file,
@@ -323,8 +359,8 @@ def convert(
         speed=speed or config.get("default_speed", 1.0),
         use_gpu=use_gpu if use_gpu is not None else config.get("use_gpu", False),
         num_chapters=len(selected_indices) if selected_indices else len(epub_chapters),
-        title=title or epub_title,
-        author=author or epub_author,
+        title=effective_title,
+        author=effective_author,
     )
 
     # Confirm
@@ -336,8 +372,10 @@ def convert(
     # Handle --fresh flag: delete existing progress
     if fresh:
         import shutil
+        from .utils import sanitize_filename
 
-        work_dir = output.parent / f".{output.stem}_chapters"
+        safe_book_title = sanitize_filename(effective_title)[:50]
+        work_dir = output.parent / f".{safe_book_title}_chapters"
         if work_dir.exists():
             console.print(f"[yellow]Removing previous progress:[/yellow] {work_dir}")
             shutil.rmtree(work_dir)
@@ -366,11 +404,15 @@ def convert(
         split_mode=split_mode or config.get("default_split_mode", "auto"),
         resume=resume,
         keep_chapter_files=keep_chapter_files,
-        title=title or epub_title,
-        author=author or epub_author,
+        title=effective_title,
+        author=effective_author,
         cover_image=cover,
         voice_blend=voice_blend,
         voice_database=voice_database,
+        chapter_filename_template=config.get(
+            "chapter_filename_template",
+            "{chapter_num:03d}_{book_title}_{chapter_title}",
+        ),
     )
 
     # Set up progress display
@@ -728,6 +770,22 @@ DEMO_TEXT = {
     "z": "Ni hao! Zhe ge yinpin shi you {voice} shengcheng de.",
 }
 
+# Preset voice blends for demo command
+# Format: (blend_string, description)
+VOICE_BLEND_PRESETS = [
+    # Same language, different gender
+    ("af_nicole:50,am_michael:50", "American female + male blend"),
+    ("bf_emma:50,bm_george:50", "British female + male blend"),
+    # Same gender, different accent
+    ("af_heart:50,bf_emma:50", "American + British female blend"),
+    ("am_adam:50,bm_daniel:50", "American + British male blend"),
+    # Same gender, different voice
+    ("af_nicole:50,af_bella:50", "Two American females blend"),
+    ("am_adam:50,am_eric:50", "Two American males blend"),
+    # Multi-voice blend
+    ("af_heart:33,af_nicole:33,af_bella:34", "Three American females blend"),
+]
+
 
 @main.command()
 @click.option(
@@ -782,6 +840,17 @@ DEMO_TEXT = {
     is_flag=True,
     help="Save each voice as a separate file instead of concatenating.",
 )
+@click.option(
+    "--blend",
+    type=str,
+    default=None,
+    help="Voice blend to demo (e.g., 'af_nicole:50,am_michael:50').",
+)
+@click.option(
+    "--blend-presets",
+    is_flag=True,
+    help="Demo a curated set of voice blend combinations.",
+)
 def demo(
     output: Optional[Path],
     language: Optional[str],
@@ -791,11 +860,15 @@ def demo(
     silence: float,
     text: Optional[str],
     separate: bool,
+    blend: Optional[str],
+    blend_presets: bool,
 ) -> None:
     """Generate a demo audio file with all available voices.
 
     Creates a single audio file with samples from each voice, or separate files
     for each voice with --separate. Great for previewing and comparing voices.
+
+    Supports voice blending with --blend or --blend-presets options.
 
     Examples:
 
@@ -808,14 +881,114 @@ def demo(
         ttsforge demo --separate -o ./voices/  # Separate files in directory
 
         ttsforge demo --text "Custom message from {voice}!"
+
+        ttsforge demo --blend "af_nicole:50,am_michael:50"  # Custom voice blend
+
+        ttsforge demo --blend-presets  # Demo all preset voice blends
     """
     import numpy as np
 
-    from .onnx_backend import KokoroONNX
+    from .onnx_backend import KokoroONNX, VoiceBlend
 
     config = load_config()
     gpu = use_gpu if use_gpu is not None else config.get("use_gpu", False)
 
+    # Helper function to create filename from blend string
+    def blend_to_filename(blend_str: str) -> str:
+        """Convert blend string to filename-safe format."""
+        # e.g., "af_nicole:50,am_michael:50" -> "blend_af_nicole_50_am_michael_50"
+        parts = []
+        for part in blend_str.split(","):
+            part = part.strip()
+            if ":" in part:
+                voice_name, weight = part.split(":", 1)
+                parts.append(f"{voice_name.strip()}_{weight.strip()}")
+            else:
+                parts.append(part.strip())
+        return "blend_" + "_".join(parts)
+
+    # Handle blend modes (--blend or --blend-presets)
+    if blend or blend_presets:
+        # Collect blends to process
+        blends_to_process: list[tuple[str, str]] = []  # (blend_string, description)
+
+        if blend:
+            # Custom blend specified
+            blends_to_process.append((blend, f"Custom blend: {blend}"))
+
+        if blend_presets:
+            # Add all preset blends
+            blends_to_process.extend(VOICE_BLEND_PRESETS)
+
+        # Determine output directory
+        if output is None:
+            output = Path("./voice_blends")
+        output.mkdir(parents=True, exist_ok=True)
+
+        console.print(f"[bold]Output directory:[/bold] {output}")
+        console.print(f"[dim]Voice blends: {len(blends_to_process)}[/dim]")
+        console.print(f"[dim]Speed: {speed}x[/dim]")
+        console.print(f"[dim]GPU: {'enabled' if gpu else 'disabled'}[/dim]")
+
+        # Initialize TTS engine
+        try:
+            kokoro = KokoroONNX(use_gpu=gpu)
+        except Exception as e:
+            console.print(f"[red]Error initializing TTS engine:[/red] {e}")
+            sys.exit(1)
+
+        sample_rate = 24000
+
+        with Progress(
+            SpinnerColumn(),
+            TextColumn("[progress.description]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
+            TimeElapsedColumn(),
+            console=console,
+        ) as progress:
+            task = progress.add_task(
+                "Generating voice blend demos...", total=len(blends_to_process)
+            )
+
+            for blend_str, description in blends_to_process:
+                try:
+                    # Parse the blend
+                    voice_blend = VoiceBlend.parse(blend_str)
+
+                    # Create demo text describing the blend
+                    voice_names = [v for v, _ in voice_blend.voices]
+                    if text:
+                        demo_text = text.format(voice=" and ".join(voice_names))
+                    else:
+                        demo_text = f"This is a blend of {' and '.join(voice_names)} speaking together."
+
+                    # Generate audio with blended voice
+                    samples, sr = kokoro.create(
+                        demo_text, voice=voice_blend, speed=speed
+                    )
+
+                    # Save to file
+                    import soundfile as sf
+
+                    filename = blend_to_filename(blend_str) + ".wav"
+                    voice_file = output / filename
+                    sf.write(str(voice_file), samples, sr)
+                    progress.console.print(
+                        f"  [green]{description}[/green]: {voice_file}"
+                    )
+
+                except Exception as e:
+                    console.print(f"  [red]{blend_str}[/red]: Failed - {e}")
+
+                progress.advance(task)
+
+        console.print(
+            f"\n[green]Saved {len(blends_to_process)} voice blend demos to:[/green] {output}"
+        )
+        return
+
+    # Regular voice demo mode (no blending)
     # Determine which voices to use
     selected_voices: list[str] = []
 
@@ -1162,12 +1335,7 @@ def phonemes_export(
     from .phonemes import PhonemeBook
     from .tokenizer import Tokenizer
 
-    # Determine output path
-    if output is None:
-        if readable:
-            output = epub_file.with_suffix(".readable.txt")
-        else:
-            output = epub_file.with_suffix(".phonemes.json")
+    config = load_config()
 
     console.print(f"[bold]Loading:[/bold] {epub_file}")
 
@@ -1197,6 +1365,33 @@ def phonemes_export(
     if chapters:
         selected_indices = _parse_chapter_selection(chapters, len(epub_chapters))
 
+    # Get effective title and author
+    default_title = config.get("default_title", "Untitled")
+    effective_title = metadata.title or default_title
+    effective_author = metadata.authors[0] if metadata.authors else "Unknown"
+
+    # Compute chapters range for filename and metadata
+    chapters_range = format_chapters_range(
+        selected_indices or list(range(len(epub_chapters))), len(epub_chapters)
+    )
+
+    # Determine output path using template
+    if output is None:
+        output_template = config.get("phoneme_export_template", "{book_title}")
+        output_filename = format_filename_template(
+            output_template,
+            book_title=effective_title,
+            author=effective_author,
+            input_stem=epub_file.stem,
+            chapters_range=chapters_range,
+            default_title=default_title,
+        )
+        # Append chapters range to filename if partial selection
+        if chapters_range:
+            output_filename = f"{output_filename}_{chapters_range}"
+        suffix = ".readable.txt" if readable else ".phonemes.json"
+        output = epub_file.parent / f"{output_filename}{suffix}"
+
     # Get language code for espeak
     from .onnx_backend import LANG_CODE_TO_ONNX
 
@@ -1210,15 +1405,17 @@ def phonemes_export(
         console.print(f"[red]Error initializing tokenizer:[/red] {e}")
         sys.exit(1)
 
-    # Create PhonemeBook
+    # Create PhonemeBook with chapters_range in metadata
     book = PhonemeBook(
-        title=metadata.title or epub_file.stem,
+        title=effective_title,
         vocab_version=vocab_version,
         lang=espeak_lang,
         metadata={
             "source": str(epub_file),
-            "author": metadata.authors[0] if metadata.authors else "Unknown",
+            "author": effective_author,
             "split_mode": split_mode,
+            "chapters_range": chapters_range,
+            "total_source_chapters": len(epub_chapters),
         },
     )
 
@@ -1441,24 +1638,18 @@ def phonemes_convert(
     # Load config for defaults
     config = load_config()
 
-    # Determine output format and path
-    fmt = output_format or config.get("default_format", "m4b")
-    if output is None:
-        output = phoneme_file.with_suffix(f".{fmt}")
-
-    # Get voice
-    if voice is None:
-        voice = config.get("default_voice", "af_heart")
-
-    # Get GPU setting
-    gpu = use_gpu if use_gpu is not None else config.get("use_gpu", False)
-
-    # Use book title/author as defaults for metadata
+    # Get book info and metadata
     book_info = book.get_info()
-    if title is None:
-        title = book_info.get("title")
-    if author is None:
-        author = book_info.get("metadata", {}).get("author")
+    book_metadata = book_info.get("metadata", {})
+    default_title = config.get("default_title", "Untitled")
+
+    # Use CLI title/author if provided, otherwise use book metadata
+    effective_title = (
+        title if title is not None else book_info.get("title", default_title)
+    )
+    effective_author = (
+        author if author is not None else book_metadata.get("author", "Unknown")
+    )
 
     # Validate chapter selection if provided
     selected_indices: list[int] = []
@@ -1469,6 +1660,40 @@ def phonemes_convert(
             console.print(f"[red]Invalid chapter selection:[/red] {e}")
             sys.exit(1)
 
+    # Compute chapters range for filename
+    # Use metadata chapters_range if converting all chapters from a partial export
+    stored_chapters_range = book_metadata.get("chapters_range", "")
+    if selected_indices:
+        # New selection on top of potentially partial export
+        chapters_range = format_chapters_range(selected_indices, len(book.chapters))
+    else:
+        # Use stored range if available
+        chapters_range = stored_chapters_range
+
+    # Determine output format and path
+    fmt = output_format or config.get("default_format", "m4b")
+    if output is None:
+        output_template = config.get("output_filename_template", "{book_title}")
+        output_filename = format_filename_template(
+            output_template,
+            book_title=effective_title,
+            author=effective_author,
+            input_stem=phoneme_file.stem,
+            chapters_range=chapters_range,
+            default_title=default_title,
+        )
+        # Append chapters range to filename if partial selection
+        if chapters_range:
+            output_filename = f"{output_filename}_{chapters_range}"
+        output = phoneme_file.parent / f"{output_filename}.{fmt}"
+
+    # Get voice
+    if voice is None:
+        voice = config.get("default_voice", "af_heart")
+
+    # Get GPU setting
+    gpu = use_gpu if use_gpu is not None else config.get("use_gpu", False)
+
     # Calculate total segments for selected chapters
     if selected_indices:
         selected_chapter_count = len(selected_indices)
@@ -1478,7 +1703,7 @@ def phonemes_convert(
         total_segments = book.total_segments
 
     # Show info
-    console.print(f"[dim]Title: {book_info['title']}[/dim]")
+    console.print(f"[dim]Title: {effective_title}[/dim]")
     if selected_indices:
         ch_count = f"{selected_chapter_count}/{book_info['chapters']}"
         console.print(
@@ -1522,14 +1747,18 @@ def phonemes_convert(
             if segment_pause_max is not None
             else config.get("segment_pause_max", 0.3)
         ),
-        title=title,
-        author=author,
+        title=effective_title,
+        author=effective_author,
         cover_image=cover,
         voice_blend=voice_blend,
         voice_database=voice_database,
         chapters=chapters,
         resume=not streaming,  # Resume only in chapter-at-a-time mode
         keep_chapter_files=keep_chapters,
+        chapter_filename_template=config.get(
+            "chapter_filename_template",
+            "{chapter_num:03d}_{book_title}_{chapter_title}",
+        ),
     )
 
     # Progress tracking with Rich

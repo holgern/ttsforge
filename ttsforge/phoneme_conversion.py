@@ -28,6 +28,7 @@ from .utils import (
     create_process,
     ensure_ffmpeg,
     format_duration,
+    format_filename_template,
     prevent_sleep_end,
     prevent_sleep_start,
     sanitize_filename,
@@ -260,6 +261,8 @@ class PhonemeConversionOptions:
     resume: bool = True
     # Keep chapter files after merge
     keep_chapter_files: bool = False
+    # Filename template for chapter files
+    chapter_filename_template: str = "{chapter_num:03d}_{book_title}_{chapter_title}"
 
 
 class PhonemeConverter:
@@ -781,10 +784,13 @@ class PhonemeConverter:
         prevent_sleep_start()
 
         try:
-            # Set up work directory for chapter files
-            work_dir = output_path.parent / f".{output_path.stem}_chapters"
+            # Set up work directory for chapter files (use book title)
+            safe_book_title = sanitize_filename(
+                self.options.title or self.book.title or output_path.stem
+            )[:50]
+            work_dir = output_path.parent / f".{safe_book_title}_chapters"
             work_dir.mkdir(parents=True, exist_ok=True)
-            state_file = work_dir / "phoneme_conversion_state.json"
+            state_file = work_dir / f"{safe_book_title}_state.json"
 
             # Load or create state
             state: Optional[PhonemeConversionState] = None
@@ -907,9 +913,16 @@ class PhonemeConverter:
                 total_ch = len(state.chapters)
                 self.log(f"Converting chapter {ch_num}/{total_ch}: {chapter.title}")
 
-                # Generate chapter filename
-                safe_title = sanitize_filename(chapter.title)[:50]
-                chapter_filename = f"{state_idx + 1:03d}_{safe_title}.wav"
+                # Generate chapter filename using template
+                chapter_filename = (
+                    format_filename_template(
+                        self.options.chapter_filename_template,
+                        book_title=self.options.title or self.book.title or "Untitled",
+                        chapter_title=chapter.title,
+                        chapter_num=state_idx + 1,
+                    )
+                    + ".wav"
+                )
                 chapter_file = work_dir / chapter_filename
 
                 # Convert chapter to WAV

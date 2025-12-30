@@ -32,6 +32,7 @@ from .utils import (
     create_process,
     ensure_ffmpeg,
     format_duration,
+    format_filename_template,
     prevent_sleep_end,
     prevent_sleep_start,
     sanitize_filename,
@@ -245,6 +246,8 @@ class ConversionOptions:
     voice_blend: Optional[str] = None
     # Voice database for custom/synthetic voices
     voice_database: Optional[Path] = None
+    # Filename template for chapter files
+    chapter_filename_template: str = "{chapter_num:03d}_{book_title}_{chapter_title}"
 
 
 # Pattern to detect chapter markers in text
@@ -942,10 +945,13 @@ class TTSConverter:
         prevent_sleep_start()
 
         try:
-            # Set up work directory for chapter files
-            work_dir = output_path.parent / f".{output_path.stem}_chapters"
+            # Set up work directory for chapter files (use book title)
+            safe_book_title = sanitize_filename(self.options.title or output_path.stem)[
+                :50
+            ]
+            work_dir = output_path.parent / f".{safe_book_title}_chapters"
             work_dir.mkdir(parents=True, exist_ok=True)
-            state_file = work_dir / "conversion_state.json"
+            state_file = work_dir / f"{safe_book_title}_state.json"
 
             # Load or create state
             state: Optional[ConversionState] = None
@@ -1080,9 +1086,16 @@ class TTSConverter:
                     f"Converting chapter {ch_num}/{len(chapters)}: {chapter.title}"
                 )
 
-                # Generate chapter filename
-                safe_title = sanitize_filename(chapter.title)[:50]
-                chapter_filename = f"{chapter_idx + 1:03d}_{safe_title}.wav"
+                # Generate chapter filename using template
+                chapter_filename = (
+                    format_filename_template(
+                        self.options.chapter_filename_template,
+                        book_title=self.options.title or "Untitled",
+                        chapter_title=chapter.title,
+                        chapter_num=chapter_idx + 1,
+                    )
+                    + ".wav"
+                )
                 chapter_file = work_dir / chapter_filename
 
                 # Convert chapter to WAV

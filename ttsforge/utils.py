@@ -401,3 +401,124 @@ def format_size(size_bytes: int) -> str:
             return f"{size:.1f} {unit}"
         size /= 1024
     return f"{size:.1f} TB"
+
+
+def format_chapters_range(indices: list[int], total_chapters: int) -> str:
+    """
+    Format chapter indices into a range string for filenames.
+
+    Returns empty string if all chapters are selected.
+    Returns "chapters_X-Y" style string for partial selection (using min-max).
+
+    Args:
+        indices: 0-based chapter indices
+        total_chapters: Total number of chapters in book
+
+    Returns:
+        Range string (e.g., "chapters_1-5") or empty string if all chapters
+    """
+    if not indices:
+        return ""
+
+    # Check if all chapters are selected
+    if len(indices) == total_chapters and set(indices) == set(range(total_chapters)):
+        return ""
+
+    # Convert to 1-based and get min/max
+    min_chapter = min(indices) + 1
+    max_chapter = max(indices) + 1
+
+    if min_chapter == max_chapter:
+        return f"chapters_{min_chapter}"
+    return f"chapters_{min_chapter}-{max_chapter}"
+
+
+def format_filename_template(
+    template: str,
+    book_title: str = "",
+    author: str = "",
+    chapter_title: str = "",
+    chapter_num: int = 0,
+    input_stem: str = "",
+    chapters_range: str = "",
+    default_title: str = "Untitled",
+    max_length: int = 100,
+) -> str:
+    """
+    Format a filename template with the given variables.
+
+    All values are sanitized before substitution.
+    Falls back to input_stem or default_title if book_title is empty.
+
+    Template variables:
+        {book_title} - Sanitized book title
+        {author} - Sanitized author name
+        {chapter_title} - Sanitized chapter title
+        {chapter_num} - Chapter number (1-based), supports format specs like {chapter_num:03d}
+        {input_stem} - Original input filename without extension
+        {chapters_range} - Chapter range string (e.g., "chapters_1-5") or empty
+
+    Args:
+        template: Python format string (e.g., "{book_title}_{chapter_num:03d}")
+        book_title: Book title from metadata
+        author: Author name from metadata
+        chapter_title: Chapter title
+        chapter_num: 1-based chapter number
+        input_stem: Original input filename without extension
+        chapters_range: Chapter range string or empty
+        default_title: Fallback title if book_title is empty
+        max_length: Maximum length of final filename
+
+    Returns:
+        Formatted and sanitized filename (without extension)
+
+    Examples:
+        >>> format_filename_template("{book_title}", book_title="My Book")
+        'My_Book'
+        >>> format_filename_template("{chapter_num:03d}_{chapter_title}", chapter_num=1, chapter_title="Intro")
+        '001_Intro'
+        >>> format_filename_template("{author}_{book_title}", author="John Doe", book_title="")
+        'John_Doe_Untitled'
+    """
+    # Determine effective book title with fallback
+    effective_title = book_title.strip() if book_title else ""
+    if not effective_title:
+        effective_title = input_stem.strip() if input_stem else default_title
+
+    # Sanitize all string values (but don't truncate yet - do that at the end)
+    safe_book_title = sanitize_filename(effective_title, max_length=200)
+    safe_author = sanitize_filename(author, max_length=100) if author else ""
+    safe_chapter_title = (
+        sanitize_filename(chapter_title, max_length=100) if chapter_title else ""
+    )
+    safe_input_stem = (
+        sanitize_filename(input_stem, max_length=100) if input_stem else ""
+    )
+    safe_chapters_range = (
+        sanitize_filename(chapters_range, max_length=50) if chapters_range else ""
+    )
+
+    # Build the format kwargs
+    format_kwargs = {
+        "book_title": safe_book_title,
+        "author": safe_author,
+        "chapter_title": safe_chapter_title,
+        "chapter_num": chapter_num,
+        "input_stem": safe_input_stem,
+        "chapters_range": safe_chapters_range,
+    }
+
+    try:
+        result = template.format(**format_kwargs)
+    except KeyError as e:
+        # Unknown template variable - fall back to book title
+        result = safe_book_title
+    except ValueError:
+        # Invalid format spec - fall back to book title
+        result = safe_book_title
+
+    # Final sanitization and truncation
+    result = sanitize_filename(result, max_length=max_length)
+
+    # Ensure we have something
+    return result or default_title

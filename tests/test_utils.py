@@ -8,7 +8,9 @@ from unittest.mock import patch
 from ttsforge.utils import (
     DEFAULT_ENCODING,
     detect_encoding,
+    format_chapters_range,
     format_duration,
+    format_filename_template,
     format_size,
     get_device,
     get_gpu_info,
@@ -266,3 +268,199 @@ class TestDefaultEncoding:
         """DEFAULT_ENCODING should be a valid encoding."""
         # Should not raise an exception
         "test".encode(DEFAULT_ENCODING)
+
+
+class TestFormatChaptersRange:
+    """Tests for format_chapters_range function."""
+
+    def test_all_chapters_returns_empty(self):
+        """All chapters selected should return empty string."""
+        assert format_chapters_range([0, 1, 2, 3, 4], 5) == ""
+
+    def test_all_chapters_unordered_returns_empty(self):
+        """All chapters selected in any order should return empty string."""
+        assert format_chapters_range([4, 2, 0, 1, 3], 5) == ""
+
+    def test_partial_range_returns_chapters_range(self):
+        """Partial selection should return chapters_X-Y format."""
+        assert format_chapters_range([0, 1, 2], 5) == "chapters_1-3"
+
+    def test_single_chapter(self):
+        """Single chapter should return chapters_X format."""
+        assert format_chapters_range([2], 5) == "chapters_3"
+
+    def test_non_contiguous_uses_min_max(self):
+        """Non-contiguous selection should use min-max range."""
+        assert format_chapters_range([0, 2, 4], 5) == "chapters_1-5"
+
+    def test_first_chapter_only(self):
+        """First chapter only should return chapters_1."""
+        assert format_chapters_range([0], 10) == "chapters_1"
+
+    def test_last_chapter_only(self):
+        """Last chapter only should return correct chapter number."""
+        assert format_chapters_range([9], 10) == "chapters_10"
+
+    def test_empty_list_returns_empty(self):
+        """Empty list should return empty string."""
+        assert format_chapters_range([], 5) == ""
+
+    def test_middle_range(self):
+        """Middle range selection should work correctly."""
+        assert format_chapters_range([2, 3, 4], 10) == "chapters_3-5"
+
+    def test_two_chapters_at_ends(self):
+        """Two chapters at opposite ends should show full range."""
+        assert format_chapters_range([0, 9], 10) == "chapters_1-10"
+
+
+class TestFormatFilenameTemplate:
+    """Tests for format_filename_template function."""
+
+    def test_book_title_only(self):
+        """Simple book title template should work."""
+        result = format_filename_template("{book_title}", book_title="My Book")
+        assert result == "My_Book"
+
+    def test_author_and_title(self):
+        """Author and title template should work."""
+        result = format_filename_template(
+            "{author}_{book_title}", book_title="My Book", author="John Doe"
+        )
+        assert result == "John_Doe_My_Book"
+
+    def test_chapter_number_formatting(self):
+        """Chapter number with format spec should work."""
+        result = format_filename_template(
+            "{chapter_num:03d}_{chapter_title}",
+            chapter_num=1,
+            chapter_title="Introduction",
+        )
+        assert result == "001_Introduction"
+
+    def test_full_chapter_template(self):
+        """Full chapter template with book title should work."""
+        result = format_filename_template(
+            "{chapter_num:03d}_{book_title}_{chapter_title}",
+            book_title="My Book",
+            chapter_title="Chapter One",
+            chapter_num=5,
+        )
+        assert result == "005_My_Book_Chapter_One"
+
+    def test_empty_book_title_fallback_to_input_stem(self):
+        """Empty book title should fall back to input_stem."""
+        result = format_filename_template(
+            "{book_title}", book_title="", input_stem="my_file"
+        )
+        assert result == "my_file"
+
+    def test_empty_book_title_fallback_to_default(self):
+        """Empty book title with no input_stem should fall back to default."""
+        result = format_filename_template(
+            "{book_title}", book_title="", default_title="Untitled"
+        )
+        assert result == "Untitled"
+
+    def test_special_characters_sanitized(self):
+        """Special characters in values should be sanitized."""
+        result = format_filename_template("{book_title}", book_title="Test: Book/Name?")
+        assert result == "Test_BookName"
+
+    def test_spaces_replaced_with_underscores(self):
+        """Spaces should be replaced with underscores."""
+        result = format_filename_template("{book_title}", book_title="The Great Book")
+        assert result == "The_Great_Book"
+
+    def test_chapters_range_included(self):
+        """Chapters range variable should work."""
+        result = format_filename_template(
+            "{book_title}_{chapters_range}",
+            book_title="My Book",
+            chapters_range="chapters_1-5",
+        )
+        assert result == "My_Book_chapters_1-5"
+
+    def test_empty_chapters_range(self):
+        """Empty chapters range should produce clean filename."""
+        result = format_filename_template(
+            "{book_title}", book_title="My Book", chapters_range=""
+        )
+        assert result == "My_Book"
+
+    def test_input_stem_variable(self):
+        """Input stem variable should work."""
+        result = format_filename_template(
+            "{input_stem}_{book_title}",
+            book_title="My Book",
+            input_stem="original_file",
+        )
+        assert result == "original_file_My_Book"
+
+    def test_max_length_truncation(self):
+        """Long filenames should be truncated to max_length."""
+        result = format_filename_template(
+            "{book_title}", book_title="A" * 200, max_length=50
+        )
+        assert len(result) <= 50
+
+    def test_invalid_template_variable_fallback(self):
+        """Invalid template variable should fall back gracefully."""
+        result = format_filename_template("{invalid_var}", book_title="My Book")
+        # Should fall back to book title
+        assert result == "My_Book"
+
+    def test_invalid_format_spec_fallback(self):
+        """Invalid format spec should fall back gracefully."""
+        result = format_filename_template("{book_title:invalid}", book_title="My Book")
+        # Should fall back to book title
+        assert result == "My_Book"
+
+    def test_chapter_num_without_format_spec(self):
+        """Chapter number without format spec should work."""
+        result = format_filename_template(
+            "{chapter_num}_{chapter_title}", chapter_num=7, chapter_title="Test"
+        )
+        assert result == "7_Test"
+
+    def test_all_variables_together(self):
+        """All variables used together should work."""
+        result = format_filename_template(
+            "{author}_{book_title}_{chapter_num:03d}_{chapter_title}",
+            book_title="Epic Story",
+            author="Jane Smith",
+            chapter_title="The Beginning",
+            chapter_num=1,
+            input_stem="file",
+            chapters_range="",
+        )
+        assert result == "Jane_Smith_Epic_Story_001_The_Beginning"
+
+    def test_unicode_characters(self):
+        """Unicode characters should be handled properly."""
+        result = format_filename_template("{book_title}", book_title="Über die Kunst")
+        # Should sanitize but preserve valid unicode
+        assert "ber" in result or "Uber" in result.lower()
+
+    def test_empty_author(self):
+        """Empty author should not cause issues."""
+        result = format_filename_template(
+            "{author}_{book_title}", book_title="My Book", author=""
+        )
+        # Empty author gets sanitized, result should still be valid
+        assert "My_Book" in result
+
+    def test_whitespace_only_title(self):
+        """Whitespace-only title should fall back to default."""
+        result = format_filename_template(
+            "{book_title}", book_title="   ", default_title="Untitled"
+        )
+        assert result == "Untitled"
+
+    def test_result_never_empty(self):
+        """Result should never be empty string."""
+        result = format_filename_template(
+            "{book_title}", book_title="", input_stem="", default_title="Fallback"
+        )
+        assert result == "Fallback"
+        assert len(result) > 0

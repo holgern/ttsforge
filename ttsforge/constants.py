@@ -173,6 +173,14 @@ DEFAULT_CONFIG = {
     "default_split_mode": "auto",
     "segment_pause_min": 0.1,
     "segment_pause_max": 0.3,
+    # Filename templates (Python format string syntax)
+    # Available variables: {book_title}, {author}, {chapter_title}, {chapter_num},
+    #                      {input_stem}, {chapters_range}
+    "output_filename_template": "{book_title}",
+    "chapter_filename_template": "{chapter_num:03d}_{book_title}_{chapter_title}",
+    "phoneme_export_template": "{book_title}",
+    # Fallback title when metadata is missing
+    "default_title": "Untitled",
 }
 
 # Audio settings
