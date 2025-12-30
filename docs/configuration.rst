@@ -133,6 +133,21 @@ Audio Timing Settings
    - Default: ``0.3``
    - Example: ``ttsforge config --set segment_pause_max 0.5``
 
+``paragraph_pause_min``
+   Minimum pause between paragraphs in seconds. Paragraph pauses are typically
+   longer than sentence pauses to create natural breaks in the audio.
+
+   - Type: float
+   - Default: ``0.5``
+   - Example: ``ttsforge config --set paragraph_pause_min 0.6``
+
+``paragraph_pause_max``
+   Maximum pause between paragraphs in seconds.
+
+   - Type: float
+   - Default: ``1.0``
+   - Example: ``ttsforge config --set paragraph_pause_max 1.5``
+
 File Output Settings
 ^^^^^^^^^^^^^^^^^^^^
 
@@ -227,6 +242,14 @@ Complete Configuration Reference
      - float
      - ``0.3``
      - Maximum segment pause (seconds)
+   * - ``paragraph_pause_min``
+     - float
+     - ``0.5``
+     - Minimum paragraph pause (seconds)
+   * - ``paragraph_pause_max``
+     - float
+     - ``1.0``
+     - Maximum paragraph pause (seconds)
    * - ``save_chapters_separately``
      - boolean
      - ``false``
@@ -277,6 +300,8 @@ Here's an example ``config.json`` with custom settings:
      "silence_between_chapters": 2.5,
      "segment_pause_min": 0.1,
      "segment_pause_max": 0.3,
+     "paragraph_pause_min": 0.5,
+     "paragraph_pause_max": 1.0,
      "save_chapters_separately": false,
      "merge_at_end": true,
      "auto_detect_language": true,

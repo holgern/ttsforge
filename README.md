@@ -238,6 +238,8 @@ ttsforge convert book.epub --gpu
 | `silence_between_chapters` | `2.0` | Chapter gap (seconds) |
 | `segment_pause_min` | `0.1` | Min sentence pause |
 | `segment_pause_max` | `0.3` | Max sentence pause |
+| `paragraph_pause_min` | `0.5` | Min paragraph pause |
+| `paragraph_pause_max` | `1.0` | Max paragraph pause |
 | `output_filename_template` | `{book_title}` | Output filename template |
 
 ## Documentation

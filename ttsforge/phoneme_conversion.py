@@ -165,6 +165,8 @@ class PhonemeConversionState:
     silence_between_chapters: float = 2.0
     segment_pause_min: float = 0.1
     segment_pause_max: float = 0.3
+    paragraph_pause_min: float = 0.5
+    paragraph_pause_max: float = 1.0
     chapters: list[PhonemeChapterState] = field(default_factory=list)
     started_at: str = ""
     last_updated: str = ""
@@ -197,6 +199,10 @@ class PhonemeConversionState:
                 data["segment_pause_min"] = 0.1
             if "segment_pause_max" not in data:
                 data["segment_pause_max"] = 0.3
+            if "paragraph_pause_min" not in data:
+                data["paragraph_pause_min"] = 0.5
+            if "paragraph_pause_max" not in data:
+                data["paragraph_pause_max"] = 1.0
 
             return cls(**data)
         except (json.JSONDecodeError, TypeError, KeyError):
@@ -216,6 +222,8 @@ class PhonemeConversionState:
             "silence_between_chapters": self.silence_between_chapters,
             "segment_pause_min": self.segment_pause_min,
             "segment_pause_max": self.segment_pause_max,
+            "paragraph_pause_min": self.paragraph_pause_min,
+            "paragraph_pause_max": self.paragraph_pause_max,
             "chapters": [
                 {
                     "index": ch.index,
@@ -244,9 +252,12 @@ class PhonemeConversionOptions:
     output_format: str = "m4b"
     use_gpu: bool = False
     silence_between_chapters: float = 2.0
-    # Segment pause (random silence between segments within a chapter)
+    # Segment pause (random silence between sentences within a paragraph)
     segment_pause_min: float = 0.1
     segment_pause_max: float = 0.3
+    # Paragraph pause (random silence between paragraphs - longer than segment pause)
+    paragraph_pause_min: float = 0.5
+    paragraph_pause_max: float = 1.0
     # Metadata for m4b
     title: Optional[str] = None
     author: Optional[str] = None
@@ -348,9 +359,18 @@ class PhonemeConverter:
         return np.zeros(samples, dtype="float32")
 
     def _generate_segment_pause(self) -> np.ndarray:
-        """Generate random silence for inter-segment pause."""
+        """Generate random silence for inter-segment (sentence) pause."""
         min_pause = self.options.segment_pause_min
         max_pause = self.options.segment_pause_max
+        if min_pause <= 0 and max_pause <= 0:
+            return np.array([], dtype="float32")
+        duration = random.uniform(min_pause, max_pause)
+        return self._generate_silence(duration)
+
+    def _generate_paragraph_pause(self) -> np.ndarray:
+        """Generate random silence for inter-paragraph pause (longer than segment)."""
+        min_pause = self.options.paragraph_pause_min
+        max_pause = self.options.paragraph_pause_max
         if min_pause <= 0 and max_pause <= 0:
             return np.array([], dtype="float32")
         duration = random.uniform(min_pause, max_pause)
@@ -582,9 +602,16 @@ class PhonemeConverter:
                 duration += len(samples) / SAMPLE_RATE
                 segments_processed += 1
 
-                # Add random pause between segments (not after the last segment)
+                # Add pause between segments (not after the last segment)
+                # Use longer pause for paragraph boundaries, shorter for sentences
                 if seg_idx < total_segments - 1:
-                    pause_audio = self._generate_segment_pause()
+                    next_segment = chapter.segments[seg_idx + 1]
+                    if next_segment.paragraph != segment.paragraph:
+                        # Paragraph change - use longer pause
+                        pause_audio = self._generate_paragraph_pause()
+                    else:
+                        # Same paragraph - use shorter sentence pause
+                        pause_audio = self._generate_segment_pause()
                     if len(pause_audio) > 0:
                         out_file.write(pause_audio)
                         duration += len(pause_audio) / SAMPLE_RATE
@@ -812,12 +839,15 @@ class PhonemeConverter:
                         != self.options.silence_between_chapters
                         or state.segment_pause_min != self.options.segment_pause_min
                         or state.segment_pause_max != self.options.segment_pause_max
+                        or state.paragraph_pause_min != self.options.paragraph_pause_min
+                        or state.paragraph_pause_max != self.options.paragraph_pause_max
                     ):
                         self.log(
                             f"Restoring settings from previous session: "
                             f"voice={state.voice}, speed={state.speed}, "
                             f"silence={state.silence_between_chapters}s, "
-                            f"segment_pause={state.segment_pause_min}-{state.segment_pause_max}s",
+                            f"segment_pause={state.segment_pause_min}-{state.segment_pause_max}s, "
+                            f"paragraph_pause={state.paragraph_pause_min}-{state.paragraph_pause_max}s",
                             "info",
                         )
                         # Apply saved settings for consistency
@@ -829,6 +859,8 @@ class PhonemeConverter:
                         )
                         self.options.segment_pause_min = state.segment_pause_min
                         self.options.segment_pause_max = state.segment_pause_max
+                        self.options.paragraph_pause_min = state.paragraph_pause_min
+                        self.options.paragraph_pause_max = state.paragraph_pause_max
 
             if state is None:
                 # Create new state
@@ -842,6 +874,8 @@ class PhonemeConverter:
                     silence_between_chapters=self.options.silence_between_chapters,
                     segment_pause_min=self.options.segment_pause_min,
                     segment_pause_max=self.options.segment_pause_max,
+                    paragraph_pause_min=self.options.paragraph_pause_min,
+                    paragraph_pause_max=self.options.paragraph_pause_max,
                     chapters=[
                         PhonemeChapterState(
                             index=idx,
@@ -1086,9 +1120,16 @@ class PhonemeConverter:
                     current_time += len(samples) / SAMPLE_RATE
                     segments_processed += 1
 
-                    # Add random pause between segments (not after the last segment)
+                    # Add pause between segments (not after the last segment)
+                    # Use longer pause for paragraph boundaries, shorter for sentences
                     if seg_idx < total_chapter_segments - 1:
-                        pause_audio = self._generate_segment_pause()
+                        next_segment = chapter.segments[seg_idx + 1]
+                        if next_segment.paragraph != segment.paragraph:
+                            # Paragraph change - use longer pause
+                            pause_audio = self._generate_paragraph_pause()
+                        else:
+                            # Same paragraph - use shorter sentence pause
+                            pause_audio = self._generate_segment_pause()
                         if len(pause_audio) > 0:
                             self._write_audio_chunk(pause_audio, out_file, ffmpeg_proc)
                             current_time += len(pause_audio) / SAMPLE_RATE

@@ -28,12 +28,16 @@ class PhonemeSegment:
         phonemes: IPA phoneme string
         tokens: Token IDs
         lang: Language code used for phonemization
+        paragraph: Paragraph index (0-based) for pause calculation
+        sentence: Sentence index within paragraph (0-based, or None)
     """
 
     text: str
     phonemes: str
     tokens: list[int]
     lang: str = "en-us"
+    paragraph: int = 0
+    sentence: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Convert to dictionary for JSON serialization."""
@@ -42,6 +46,8 @@ class PhonemeSegment:
             "phonemes": self.phonemes,
             "tokens": self.tokens,
             "lang": self.lang,
+            "paragraph": self.paragraph,
+            "sentence": self.sentence,
         }
 
     @classmethod
@@ -52,6 +58,8 @@ class PhonemeSegment:
             phonemes=data["phonemes"],
             tokens=data["tokens"],
             lang=data.get("lang", "en-us"),
+            paragraph=data.get("paragraph", 0),
+            sentence=data.get("sentence"),
         )
 
     def format_readable(self) -> str:
@@ -111,12 +119,7 @@ class PhonemeChapter:
         Returns:
             List of created PhonemeSegments
         """
-        from phrasplit import (
-            split_clauses,
-            split_long_lines,
-            split_paragraphs,
-            split_sentences,
-        )
+        from phrasplit import split_long_lines, split_text
 
         def warn(msg: str) -> None:
             """Issue a warning."""
@@ -124,7 +127,10 @@ class PhonemeChapter:
                 warn_callback(msg)
 
         def phonemize_with_split(
-            chunk: str, current_max_chars: int
+            chunk: str,
+            current_max_chars: int,
+            paragraph_idx: int = 0,
+            sentence_idx: int | None = None,
         ) -> list[PhonemeSegment]:
             """Phonemize a chunk, splitting further if phonemes exceed limit."""
             chunk = chunk.strip()
@@ -142,7 +148,11 @@ class PhonemeChapter:
                     sub_chunks = split_long_lines(chunk, new_max_chars, language_model)
                     results = []
                     for sub in sub_chunks:
-                        results.extend(phonemize_with_split(sub, new_max_chars))
+                        results.extend(
+                            phonemize_with_split(
+                                sub, new_max_chars, paragraph_idx, sentence_idx
+                            )
+                        )
                     return results
                 else:
                     # Can't split further - warn and truncate
@@ -160,27 +170,32 @@ class PhonemeChapter:
                     phonemes=phonemes,
                     tokens=tokens,
                     lang=lang,
+                    paragraph=paragraph_idx,
+                    sentence=sentence_idx,
                 )
             ]
 
-        # Split text according to mode
-        if split_mode == "paragraph":
-            # Split on double newlines only
-            chunks = split_paragraphs(text)
-        elif split_mode == "sentence":
-            # Split on sentence boundaries using spaCy
-            chunks = split_sentences(text, language_model)
-        elif split_mode == "clause":
-            # Split on sentences + commas for finer segments
-            chunks = split_clauses(text, language_model)
+        # Use the new unified split_text function
+        if split_mode in ["paragraph", "sentence", "clause"]:
+            phrasplit_segments = split_text(
+                text,
+                mode=split_mode,
+                language_model=language_model,
+                apply_corrections=True,
+                split_on_colon=True,
+            )
         else:
-            # Default: treat as single chunk
-            chunks = [text] if text.strip() else []
+            # Default: treat as single chunk with paragraph 0
+            from phrasplit import Segment
+
+            phrasplit_segments = (
+                [Segment(text=text, paragraph=0, sentence=0)] if text.strip() else []
+            )
 
         segments = []
 
-        for chunk in chunks:
-            chunk = chunk.strip()
+        for phrasplit_seg in phrasplit_segments:
+            chunk = phrasplit_seg.text.strip()
             if not chunk:
                 continue
 
@@ -191,7 +206,12 @@ class PhonemeChapter:
                 sub_chunks = [chunk]
 
             for sub_chunk in sub_chunks:
-                new_segments = phonemize_with_split(sub_chunk, max_chars)
+                new_segments = phonemize_with_split(
+                    sub_chunk,
+                    max_chars,
+                    paragraph_idx=phrasplit_seg.paragraph,
+                    sentence_idx=phrasplit_seg.sentence,
+                )
                 for seg in new_segments:
                     self.segments.append(seg)
                     segments.append(seg)

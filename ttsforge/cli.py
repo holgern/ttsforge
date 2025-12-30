@@ -130,13 +130,25 @@ def main(ctx: click.Context, version: bool) -> None:
     "--segment-pause-min",
     type=float,
     default=None,
-    help="Minimum pause between segments in seconds (default: 0.1).",
+    help="Minimum pause between sentences in seconds (default: 0.1).",
 )
 @click.option(
     "--segment-pause-max",
     type=float,
     default=None,
-    help="Maximum pause between segments in seconds (default: 0.3).",
+    help="Maximum pause between sentences in seconds (default: 0.3).",
+)
+@click.option(
+    "--paragraph-pause-min",
+    type=float,
+    default=None,
+    help="Minimum pause between paragraphs in seconds (default: 0.5).",
+)
+@click.option(
+    "--paragraph-pause-max",
+    type=float,
+    default=None,
+    help="Maximum pause between paragraphs in seconds (default: 1.0).",
 )
 @click.option(
     "--title",
@@ -212,6 +224,8 @@ def convert(
     silence: Optional[float],
     segment_pause_min: Optional[float],
     segment_pause_max: Optional[float],
+    paragraph_pause_min: Optional[float],
+    paragraph_pause_max: Optional[float],
     title: Optional[str],
     author: Optional[str],
     cover: Optional[Path],
@@ -400,6 +414,16 @@ def convert(
             segment_pause_max
             if segment_pause_max is not None
             else config.get("segment_pause_max", 0.3)
+        ),
+        paragraph_pause_min=(
+            paragraph_pause_min
+            if paragraph_pause_min is not None
+            else config.get("paragraph_pause_min", 0.5)
+        ),
+        paragraph_pause_max=(
+            paragraph_pause_max
+            if paragraph_pause_max is not None
+            else config.get("paragraph_pause_max", 1.0)
         ),
         split_mode=split_mode or config.get("default_split_mode", "auto"),
         resume=resume,
@@ -1519,13 +1543,25 @@ def phonemes_export(
     "--segment-pause-min",
     type=float,
     default=None,
-    help="Minimum pause between segments in seconds (default: 0.1).",
+    help="Minimum pause between sentences in seconds (default: 0.1).",
 )
 @click.option(
     "--segment-pause-max",
     type=float,
     default=None,
-    help="Maximum pause between segments in seconds (default: 0.3).",
+    help="Maximum pause between sentences in seconds (default: 0.3).",
+)
+@click.option(
+    "--paragraph-pause-min",
+    type=float,
+    default=None,
+    help="Minimum pause between paragraphs in seconds (default: 0.5).",
+)
+@click.option(
+    "--paragraph-pause-max",
+    type=float,
+    default=None,
+    help="Maximum pause between paragraphs in seconds (default: 1.0).",
 )
 @click.option(
     "--chapters",
@@ -1590,6 +1626,8 @@ def phonemes_convert(
     silence: float,
     segment_pause_min: Optional[float],
     segment_pause_max: Optional[float],
+    paragraph_pause_min: Optional[float],
+    paragraph_pause_max: Optional[float],
     chapters: Optional[str],
     title: Optional[str],
     author: Optional[str],
@@ -1746,6 +1784,16 @@ def phonemes_convert(
             segment_pause_max
             if segment_pause_max is not None
             else config.get("segment_pause_max", 0.3)
+        ),
+        paragraph_pause_min=(
+            paragraph_pause_min
+            if paragraph_pause_min is not None
+            else config.get("paragraph_pause_min", 0.5)
+        ),
+        paragraph_pause_max=(
+            paragraph_pause_max
+            if paragraph_pause_max is not None
+            else config.get("paragraph_pause_max", 1.0)
         ),
         title=effective_title,
         author=effective_author,

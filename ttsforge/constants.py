@@ -173,6 +173,8 @@ DEFAULT_CONFIG = {
     "default_split_mode": "auto",
     "segment_pause_min": 0.1,
     "segment_pause_max": 0.3,
+    "paragraph_pause_min": 0.5,
+    "paragraph_pause_max": 1.0,
     # Filename templates (Python format string syntax)
     # Available variables: {book_title}, {author}, {chapter_title}, {chapter_num},
     #                      {input_stem}, {chapters_range}

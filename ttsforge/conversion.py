@@ -9,7 +9,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 import numpy as np
 import soundfile as sf
@@ -37,6 +37,9 @@ from .utils import (
     prevent_sleep_start,
     sanitize_filename,
 )
+
+if TYPE_CHECKING:
+    from phrasplit import Segment
 
 
 @dataclass
@@ -117,6 +120,8 @@ class ConversionState:
     silence_between_chapters: float = 2.0
     segment_pause_min: float = 0.1
     segment_pause_max: float = 0.3
+    paragraph_pause_min: float = 0.5
+    paragraph_pause_max: float = 1.0
     chapters: list[ChapterState] = field(default_factory=list)
     started_at: str = ""
     last_updated: str = ""
@@ -141,6 +146,10 @@ class ConversionState:
                 data["segment_pause_min"] = 0.1
             if "segment_pause_max" not in data:
                 data["segment_pause_max"] = 0.3
+            if "paragraph_pause_min" not in data:
+                data["paragraph_pause_min"] = 0.5
+            if "paragraph_pause_max" not in data:
+                data["paragraph_pause_max"] = 1.0
 
             return cls(**data)
         except (json.JSONDecodeError, TypeError, KeyError):
@@ -163,6 +172,8 @@ class ConversionState:
             "silence_between_chapters": self.silence_between_chapters,
             "segment_pause_min": self.segment_pause_min,
             "segment_pause_max": self.segment_pause_max,
+            "paragraph_pause_min": self.paragraph_pause_min,
+            "paragraph_pause_max": self.paragraph_pause_max,
             "chapters": [
                 {
                     "index": ch.index,
@@ -228,9 +239,12 @@ class ConversionOptions:
     output_dir: Optional[Path] = None
     use_gpu: bool = False  # GPU requires onnxruntime-gpu
     silence_between_chapters: float = 2.0
-    # Segment pause (random silence between segments within a chapter)
+    # Segment pause (random silence between sentences within a paragraph)
     segment_pause_min: float = 0.1
     segment_pause_max: float = 0.3
+    # Paragraph pause (random silence between paragraphs - longer than segment pause)
+    paragraph_pause_min: float = 0.5
+    paragraph_pause_max: float = 1.0
     save_chapters_separately: bool = False
     merge_at_end: bool = True
     # Split mode: auto, line, paragraph, sentence, clause
@@ -394,68 +408,73 @@ class TTSConverter:
         }
         return lang_to_spacy.get(lang, "en_core_web_sm")
 
-    def _split_text_with_phrasplit(self, text: str) -> list[str]:
+    def _split_text_with_phrasplit(self, text: str) -> list["Segment"]:
         """
-        Split text using phrasplit based on split_mode.
+        Split text using phrasplit's split_text function.
+
+        Uses the unified split_text function which returns Segment namedtuples
+        containing text, paragraph index, and sentence index. This allows for
+        different pause lengths between paragraphs vs. sentences.
 
         Args:
             text: Text to split
 
         Returns:
-            List of text segments
+            List of Segment namedtuples with text, paragraph, and sentence info
         """
         mode = self.options.split_mode
 
         if mode == "line":
-            # Simple line splitting
-            return [line for line in text.split("\n") if line.strip()]
+            # Simple line splitting - create pseudo-segments
+            # Each line is its own paragraph
+            from phrasplit import Segment
 
-        if mode == "paragraph":
+            segments = []
+            for i, line in enumerate(text.split("\n")):
+                if line.strip():
+                    segments.append(Segment(text=line.strip(), paragraph=i, sentence=0))
+            return segments
+
+        if mode in ["paragraph", "sentence", "clause"]:
             try:
-                from phrasplit import split_paragraphs
-
-                return split_paragraphs(text)
-            except ImportError:
-                self.log(
-                    "phrasplit not installed, falling back to line mode", "warning"
-                )
-                return [line for line in text.split("\n") if line.strip()]
-
-        if mode == "sentence":
-            try:
-                from phrasplit import split_sentences
+                from phrasplit import split_text
 
                 spacy_model = self._get_spacy_model()
-                return split_sentences(text, language_model=spacy_model)
+                return split_text(
+                    text,
+                    mode=mode,
+                    language_model=spacy_model,
+                    apply_corrections=True,
+                    split_on_colon=True,
+                )
             except ImportError:
                 self.log(
                     "phrasplit not installed, falling back to line mode", "warning"
                 )
-                return [line for line in text.split("\n") if line.strip()]
+                from phrasplit import Segment
+
+                segments = []
+                for i, line in enumerate(text.split("\n")):
+                    if line.strip():
+                        segments.append(
+                            Segment(text=line.strip(), paragraph=i, sentence=0)
+                        )
+                return segments
             except OSError as e:
                 self.log(
                     f"spaCy model error: {e}, falling back to line mode", "warning"
                 )
-                return [line for line in text.split("\n") if line.strip()]
+                from phrasplit import Segment
 
-        if mode == "clause":
-            try:
-                from phrasplit import split_clauses
+                segments = []
+                for i, line in enumerate(text.split("\n")):
+                    if line.strip():
+                        segments.append(
+                            Segment(text=line.strip(), paragraph=i, sentence=0)
+                        )
+                return segments
 
-                spacy_model = self._get_spacy_model()
-                return split_clauses(text, language_model=spacy_model)
-            except ImportError:
-                self.log(
-                    "phrasplit not installed, falling back to line mode", "warning"
-                )
-                return [line for line in text.split("\n") if line.strip()]
-            except OSError as e:
-                self.log(
-                    f"spaCy model error: {e}, falling back to line mode", "warning"
-                )
-                return [line for line in text.split("\n") if line.strip()]
-
-        # "auto" mode - return None to use pattern-based splitting
+        # "auto" mode - return empty to use pattern-based splitting
         return []
 
     def _use_phrasplit_mode(self) -> bool:
@@ -468,9 +487,18 @@ class TTSConverter:
         return self._np.zeros(samples, dtype="float32")
 
     def _generate_segment_pause(self) -> Any:
-        """Generate random silence for inter-segment pause."""
+        """Generate random silence for inter-segment (sentence) pause."""
         min_pause = self.options.segment_pause_min
         max_pause = self.options.segment_pause_max
+        if min_pause <= 0 and max_pause <= 0:
+            return self._np.array([], dtype="float32")
+        duration = random.uniform(min_pause, max_pause)
+        return self._generate_silence(duration)
+
+    def _generate_paragraph_pause(self) -> Any:
+        """Generate random silence for inter-paragraph pause (longer than segment)."""
+        min_pause = self.options.paragraph_pause_min
+        max_pause = self.options.paragraph_pause_max
         if min_pause <= 0 and max_pause <= 0:
             return self._np.array([], dtype="float32")
         duration = random.uniform(min_pause, max_pause)
@@ -694,7 +722,7 @@ class TTSConverter:
             if use_phrasplit:
                 segments = self._split_text_with_phrasplit(chapter.content)
                 # Filter out empty segments first to know total count
-                segments = [s for s in segments if s.strip()]
+                segments = [s for s in segments if s.text.strip()]
                 total_segments = len(segments)
 
                 for seg_idx, segment in enumerate(segments):
@@ -704,7 +732,7 @@ class TTSConverter:
                     # Use ONNX backend
                     assert self._kokoro is not None
                     samples, sample_rate = self._kokoro.create(
-                        segment,
+                        segment.text,
                         voice=self._voice_style or self.options.voice,
                         speed=self.options.speed,
                         lang=lang_code,
@@ -715,19 +743,26 @@ class TTSConverter:
                     out_file.write(samples)
                     duration += len(samples) / SAMPLE_RATE
 
-                    # Add random pause between segments (not after the last segment)
+                    # Add pause between segments (not after the last segment)
+                    # Use longer pause for paragraph boundaries, shorter for sentences
                     if seg_idx < total_segments - 1:
-                        pause_audio = self._generate_segment_pause()
+                        next_segment = segments[seg_idx + 1]
+                        if next_segment.paragraph != segment.paragraph:
+                            # Paragraph change - use longer pause
+                            pause_audio = self._generate_paragraph_pause()
+                        else:
+                            # Same paragraph - use shorter sentence pause
+                            pause_audio = self._generate_segment_pause()
                         if len(pause_audio) > 0:
                             out_file.write(pause_audio)
                             duration += len(pause_audio) / SAMPLE_RATE
 
                     # Update progress
-                    grapheme_len = len(segment)
+                    grapheme_len = len(segment.text)
                     chars_processed += grapheme_len
                     if progress and self.progress_callback:
                         progress.chars_processed = chars_before + chars_processed
-                        progress.current_text = segment[:100]
+                        progress.current_text = segment.text[:100]
                         if start_time and total_chars > 0:
                             elapsed = time.time() - start_time
                             if chars_processed > 0 and elapsed > 0.5:
@@ -977,6 +1012,10 @@ class TTSConverter:
                             != self.options.silence_between_chapters
                             or state.segment_pause_min != self.options.segment_pause_min
                             or state.segment_pause_max != self.options.segment_pause_max
+                            or state.paragraph_pause_min
+                            != self.options.paragraph_pause_min
+                            or state.paragraph_pause_max
+                            != self.options.paragraph_pause_max
                         )
 
                         if settings_changed:
@@ -985,7 +1024,8 @@ class TTSConverter:
                                 f"voice={state.voice}, language={state.language}, "
                                 f"speed={state.speed}, split_mode={state.split_mode}, "
                                 f"silence={state.silence_between_chapters}s, "
-                                f"segment_pause={state.segment_pause_min}-{state.segment_pause_max}s",
+                                f"segment_pause={state.segment_pause_min}-{state.segment_pause_max}s, "
+                                f"paragraph_pause={state.paragraph_pause_min}-{state.paragraph_pause_max}s",
                                 "info",
                             )
 
@@ -1000,6 +1040,8 @@ class TTSConverter:
                         )
                         self.options.segment_pause_min = state.segment_pause_min
                         self.options.segment_pause_max = state.segment_pause_max
+                        self.options.paragraph_pause_min = state.paragraph_pause_min
+                        self.options.paragraph_pause_max = state.paragraph_pause_max
 
             if state is None:
                 # Create new state
@@ -1017,6 +1059,8 @@ class TTSConverter:
                     silence_between_chapters=self.options.silence_between_chapters,
                     segment_pause_min=self.options.segment_pause_min,
                     segment_pause_max=self.options.segment_pause_max,
+                    paragraph_pause_min=self.options.paragraph_pause_min,
+                    paragraph_pause_max=self.options.paragraph_pause_max,
                     chapters=[
                         ChapterState(
                             index=i,
@@ -1243,7 +1287,7 @@ class TTSConverter:
                     # Pre-split text using phrasplit, then process each segment
                     segments = self._split_text_with_phrasplit(chapter.content)
                     # Filter out empty segments to know total count
-                    segments = [s for s in segments if s.strip()]
+                    segments = [s for s in segments if s.text.strip()]
                     total_segments = len(segments)
 
                     for seg_idx, segment in enumerate(segments):
@@ -1253,7 +1297,7 @@ class TTSConverter:
                         # Process each segment using ONNX backend
                         assert self._kokoro is not None
                         samples, sample_rate = self._kokoro.create(
-                            segment,
+                            segment.text,
                             voice=self._voice_style or self.options.voice,
                             speed=self.options.speed,
                             lang=lang_code,
@@ -1269,9 +1313,16 @@ class TTSConverter:
                         chunk_duration = len(samples) / SAMPLE_RATE
                         current_time += chunk_duration
 
-                        # Add random pause between segments (not after the last segment)
+                        # Add pause between segments (not after the last segment)
+                        # Use longer pause for paragraph boundaries, shorter for sentences
                         if seg_idx < total_segments - 1:
-                            pause_audio = self._generate_segment_pause()
+                            next_segment = segments[seg_idx + 1]
+                            if next_segment.paragraph != segment.paragraph:
+                                # Paragraph change - use longer pause
+                                pause_audio = self._generate_paragraph_pause()
+                            else:
+                                # Same paragraph - use shorter sentence pause
+                                pause_audio = self._generate_segment_pause()
                             if len(pause_audio) > 0:
                                 self._write_audio_chunk(
                                     pause_audio, out_file, ffmpeg_proc
@@ -1279,10 +1330,10 @@ class TTSConverter:
                                 current_time += len(pause_audio) / SAMPLE_RATE
 
                         # Update progress
-                        grapheme_len = len(segment)
+                        grapheme_len = len(segment.text)
                         chars_processed += grapheme_len
                         progress.chars_processed = chars_processed
-                        progress.current_text = segment[:100]
+                        progress.current_text = segment.text[:100]
 
                         elapsed = time.time() - start_time
                         if chars_processed > 0 and elapsed > 0.5:
