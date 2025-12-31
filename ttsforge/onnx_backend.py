@@ -268,7 +268,7 @@ class KokoroONNX:
         self._voices_data = dict(np.load(str(self._voices_path), allow_pickle=True))
 
     def _create_audio_internal(
-        self, phonemes: str, voice: np.ndarray, speed: float
+        self, phonemes: str, voice: np.ndarray, speed: float, new_format: bool = True
     ) -> tuple[np.ndarray, int]:
         """
         Core ONNX inference for a single phoneme batch.
@@ -295,8 +295,7 @@ class KokoroONNX:
 
         # Check input names to determine model version
         input_names = [i.name for i in self._session.get_inputs()]
-
-        if "input_ids" in input_names:
+        if "input_ids" in input_names and not new_format:
             # Newer model format (exported with input_ids, expects int32 speed)
             # Speed is typically 1 for normal speed, convert float to int
             speed_int = max(1, int(round(speed)))
@@ -305,6 +304,15 @@ class KokoroONNX:
                 "style": np.array(voice_style, dtype=np.float32),
                 "speed": np.array([speed_int], dtype=np.int32),
             }
+        elif "input_ids" in input_names and new_format:
+            # Original model format (kokoro-onnx release model, uses float speed)
+            inputs = {
+                "input_ids": tokens_padded,
+                "style": voice_style,
+                "speed": np.ones(1, dtype=np.float32) * speed,
+            }
+
+
         else:
             # Original model format (kokoro-onnx release model, uses float speed)
             inputs = {
@@ -314,7 +322,10 @@ class KokoroONNX:
             }
 
         result = self._session.run(None, inputs)[0]
-        audio: np.ndarray = np.asarray(result)
+        if new_format:
+            audio: np.ndarray = np.asarray(result).T
+        else:
+            audio: np.ndarray = np.asarray(result)
         return audio, SAMPLE_RATE
 
     def _split_phonemes(self, phonemes: str) -> list[str]:
