@@ -1405,7 +1405,7 @@ def download(force: bool, quality: Optional[str]) -> None:
         # Download voices
         if not are_voices_downloaded() or force:
             voices_task = progress.add_task(
-                "Downloading voices (0/{})...".format(len(VOICE_NAMES)), total=100
+                f"Downloading voices (0/{len(VOICE_NAMES)})...", total=100
             )
 
             def voices_progress(voice_name: str, current: int, total: int) -> None:
@@ -2441,6 +2441,599 @@ def _show_conversion_summary(
 
     console.print(table)
     console.print()
+
+
+@main.command()
+@click.argument(
+    "input_file",
+    type=click.Path(path_type=Path),
+    required=False,
+    default=None,
+)
+@click.option(
+    "-v",
+    "--voice",
+    type=click.Choice(VOICES),
+    help="TTS voice to use.",
+)
+@click.option(
+    "-l",
+    "--language",
+    type=click.Choice(list(LANGUAGE_DESCRIPTIONS.keys())),
+    help="Language for TTS.",
+)
+@click.option(
+    "-s",
+    "--speed",
+    type=float,
+    help="Speech speed (default: 1.0).",
+)
+@click.option(
+    "--gpu/--no-gpu",
+    "use_gpu",
+    default=None,
+    help="Use GPU acceleration if available.",
+)
+@click.option(
+    "-c",
+    "--chapters",
+    type=str,
+    help="Chapter selection (e.g., '1-5', '1,3,5', '3-').",
+)
+@click.option(
+    "--start-chapter",
+    type=int,
+    help="Start from specific chapter number (1-indexed).",
+)
+@click.option(
+    "--resume",
+    is_flag=True,
+    help="Resume from last saved position.",
+)
+@click.option(
+    "--list-chapters",
+    is_flag=True,
+    help="List chapters and exit without reading.",
+)
+@click.option(
+    "--split",
+    "split_mode",
+    type=click.Choice(["sentence", "paragraph"]),
+    default=None,
+    help="Text splitting mode: sentence (shorter) or paragraph (grouped).",
+)
+@click.option(
+    "--segment-pause-min",
+    type=float,
+    default=None,
+    help="Minimum pause between sentences in seconds.",
+)
+@click.option(
+    "--segment-pause-max",
+    type=float,
+    default=None,
+    help="Maximum pause between sentences in seconds.",
+)
+@click.option(
+    "--paragraph-pause-min",
+    type=float,
+    default=None,
+    help="Minimum pause between paragraphs in seconds.",
+)
+@click.option(
+    "--paragraph-pause-max",
+    type=float,
+    default=None,
+    help="Maximum pause between paragraphs in seconds.",
+)
+@click.pass_context
+def read(
+    ctx: click.Context,
+    input_file: Optional[Path],
+    voice: Optional[str],
+    language: Optional[str],
+    speed: Optional[float],
+    use_gpu: Optional[bool],
+    chapters: Optional[str],
+    start_chapter: Optional[int],
+    resume: bool,
+    list_chapters: bool,
+    split_mode: Optional[str],
+    segment_pause_min: Optional[float],
+    segment_pause_max: Optional[float],
+    paragraph_pause_min: Optional[float],
+    paragraph_pause_max: Optional[float],
+) -> None:
+    """Read an EPUB or text file aloud with streaming playback.
+
+    Streams audio in real-time without creating output files.
+    Supports chapter selection, position saving, and resume.
+
+    \b
+    Examples:
+        ttsforge read book.epub
+        ttsforge read book.epub --chapters "1-5"
+        ttsforge read book.epub --start-chapter 3
+        ttsforge read book.epub --resume
+        ttsforge read book.epub --split sentence
+        ttsforge read story.txt
+        cat story.txt | ttsforge read -
+
+    \b
+    Controls:
+        Ctrl+C - Stop reading (position is saved for resume)
+    """
+    import random
+    import signal
+    import sys
+    import time
+
+    from .audio_player import (
+        PlaybackPosition,
+        clear_playback_position,
+        load_playback_position,
+        save_playback_position,
+    )
+    from .onnx_backend import LANG_CODE_TO_ONNX, KokoroONNX
+
+    # Get model path from global context
+    model_path = ctx.obj.get("model_path") if ctx.obj else None
+    voices_path = ctx.obj.get("voices_path") if ctx.obj else None
+
+    # Load config for defaults
+    config = load_config()
+    effective_voice = voice or config.get("default_voice", "af_heart")
+    effective_language = language or config.get("default_language", "a")
+    effective_speed = speed if speed is not None else config.get("default_speed", 1.0)
+    effective_use_gpu = (
+        use_gpu if use_gpu is not None else config.get("default_use_gpu", False)
+    )
+    # Use default_split_mode from config, map "auto" to "sentence" for streaming
+    config_split_mode = split_mode or config.get("default_split_mode", "sentence")
+    # Map auto/clause/line to sentence for the read command
+    if config_split_mode in ("auto", "clause", "line"):
+        effective_split_mode = "sentence"
+    else:
+        effective_split_mode = config_split_mode
+    # Pause settings
+    effective_segment_pause_min = (
+        segment_pause_min
+        if segment_pause_min is not None
+        else config.get("segment_pause_min", 0.1)
+    )
+    effective_segment_pause_max = (
+        segment_pause_max
+        if segment_pause_max is not None
+        else config.get("segment_pause_max", 0.3)
+    )
+    effective_paragraph_pause_min = (
+        paragraph_pause_min
+        if paragraph_pause_min is not None
+        else config.get("paragraph_pause_min", 0.5)
+    )
+    effective_paragraph_pause_max = (
+        paragraph_pause_max
+        if paragraph_pause_max is not None
+        else config.get("paragraph_pause_max", 1.0)
+    )
+
+    # Get language code for TTS
+    espeak_lang = LANG_CODE_TO_ONNX.get(effective_language, "en-us")
+
+    # Handle stdin input
+    if input_file is None or str(input_file) == "-":
+        if sys.stdin.isatty():
+            console.print(
+                "[red]Error:[/red] No input provided. Provide a file or pipe text."
+            )
+            console.print("[dim]Usage: ttsforge read book.epub[/dim]")
+            console.print("[dim]       cat story.txt | ttsforge read -[/dim]")
+            sys.exit(1)
+
+        # Read from stdin
+        text_content = sys.stdin.read().strip()
+        if not text_content:
+            console.print("[red]Error:[/red] No text received from stdin.")
+            sys.exit(1)
+
+        # Create a simple structure for stdin text
+        chapters_data = [{"title": "Text", "text": text_content, "index": 0}]
+        file_identifier = "stdin"
+    else:
+        # Validate file exists (removed exists=True from click.Path for stdin)
+        if not input_file.exists():
+            console.print(f"[red]Error:[/red] File not found: {input_file}")
+            sys.exit(1)
+
+        file_identifier = str(input_file.resolve())
+
+        # Handle different file types
+        if input_file.suffix.lower() == ".epub":
+            try:
+                from epub2text import EPUBParser
+            except ImportError:
+                console.print(
+                    "[red]Error:[/red] epub2text is not installed. Run: pip install epub2text"
+                )
+                sys.exit(1)
+
+            try:
+                parser = EPUBParser(str(input_file))
+                metadata = parser.get_metadata()
+                epub_chapters = parser.get_chapters()
+            except Exception as e:
+                console.print(f"[red]Error loading EPUB:[/red] {e}")
+                sys.exit(1)
+
+            if not epub_chapters:
+                console.print("[red]Error:[/red] No chapters found in EPUB file.")
+                sys.exit(1)
+
+            # Convert to our format
+            chapters_data = [
+                {"title": ch.title or f"Chapter {i + 1}", "text": ch.text, "index": i}
+                for i, ch in enumerate(epub_chapters)
+            ]
+
+            # Show book info
+            title = metadata.title or input_file.stem
+            author = metadata.authors[0] if metadata.authors else "Unknown"
+            console.print(f"[bold]{title}[/bold] by {author}")
+            console.print(f"[dim]{len(chapters_data)} chapters[/dim]")
+
+        elif input_file.suffix.lower() in (".txt", ".text"):
+            # Plain text file
+            try:
+                text_content = input_file.read_text(encoding="utf-8")
+            except Exception as e:
+                console.print(f"[red]Error reading file:[/red] {e}")
+                sys.exit(1)
+
+            if not text_content.strip():
+                console.print("[red]Error:[/red] File is empty.")
+                sys.exit(1)
+
+            chapters_data = [
+                {"title": input_file.stem, "text": text_content, "index": 0}
+            ]
+        else:
+            console.print(
+                f"[red]Error:[/red] Unsupported file type: {input_file.suffix}"
+            )
+            console.print("[dim]Supported formats: .epub, .txt[/dim]")
+            sys.exit(1)
+
+    # List chapters and exit if requested
+    if list_chapters:
+        console.print()
+        for ch in chapters_data:
+            idx = ch["index"] + 1
+            title = ch["title"]
+            text_preview = ch["text"][:80].replace("\n", " ").strip()
+            if len(ch["text"]) > 80:
+                text_preview += "..."
+            console.print(f"[bold]{idx:3}.[/bold] {title}")
+            console.print(f"     [dim]{text_preview}[/dim]")
+        return
+
+    # Chapter selection
+    selected_indices: Optional[list[int]] = None
+
+    if chapters:
+        selected_indices = _parse_chapter_selection(chapters, len(chapters_data))
+    elif start_chapter:
+        if start_chapter < 1 or start_chapter > len(chapters_data):
+            console.print(
+                f"[red]Error:[/red] Invalid chapter number {start_chapter}. "
+                f"Valid range: 1-{len(chapters_data)}"
+            )
+            sys.exit(1)
+        selected_indices = list(range(start_chapter - 1, len(chapters_data)))
+
+    # Handle resume
+    start_segment_index = 0
+    if resume:
+        saved_position = load_playback_position()
+        if saved_position and saved_position.file_path == file_identifier:
+            # Resume from saved position
+            resume_chapter = saved_position.chapter_index
+            start_segment_index = saved_position.segment_index
+
+            if selected_indices is None:
+                selected_indices = list(range(resume_chapter, len(chapters_data)))
+            else:
+                # Filter to only include chapters from resume point
+                selected_indices = [i for i in selected_indices if i >= resume_chapter]
+
+            console.print(
+                f"[yellow]Resuming from chapter {resume_chapter + 1}, "
+                f"segment {start_segment_index + 1}[/yellow]"
+            )
+        else:
+            console.print(
+                "[dim]No saved position found for this file, starting from beginning.[/dim]"
+            )
+
+    # Final chapter list
+    if selected_indices is None:
+        selected_indices = list(range(len(chapters_data)))
+
+    if not selected_indices:
+        console.print("[yellow]No chapters to read.[/yellow]")
+        return
+
+    console.print()
+    console.print(
+        f"[dim]Voice: {effective_voice} | Language: {LANGUAGE_DESCRIPTIONS.get(effective_language, effective_language)} | Speed: {effective_speed}x[/dim]"
+    )
+    console.print()
+
+    # Initialize TTS model
+    console.print("[dim]Loading TTS model...[/dim]")
+    try:
+        kokoro = KokoroONNX(
+            model_path=model_path,
+            voices_path=voices_path,
+            use_gpu=effective_use_gpu,
+        )
+    except Exception as e:
+        console.print(f"[red]Error initializing TTS:[/red] {e}")
+        sys.exit(1)
+
+    # Track current position for saving
+    current_chapter_idx = selected_indices[0]
+    current_segment_idx = 0
+    stop_requested = False
+
+    def signal_handler(signum, frame):
+        """Handle Ctrl+C gracefully."""
+        nonlocal stop_requested
+        console.print("\n[yellow]Stopping... (position saved)[/yellow]")
+        stop_requested = True
+
+    # Set up signal handler
+    original_handler = signal.signal(signal.SIGINT, signal_handler)
+
+    try:
+        import concurrent.futures
+
+        import sounddevice as sd
+
+        # Create a thread pool for TTS generation (1 worker for lookahead)
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+
+        def generate_audio(text_segment: str) -> tuple:
+            """Generate audio for a text segment."""
+            return kokoro.create(
+                text_segment,
+                voice=effective_voice,
+                speed=effective_speed,
+                lang=espeak_lang,
+            )
+
+        # Collect all segments across chapters with their metadata
+        all_segments: list[
+            tuple[int, int, str, str]
+        ] = []  # (chapter_idx, seg_idx, text, display)
+
+        for chapter_position, chapter_idx in enumerate(selected_indices):
+            chapter = chapters_data[chapter_idx]
+            text = chapter["text"].strip()
+            if not text:
+                continue
+
+            segments = _split_text_into_segments(text, split_mode=effective_split_mode)
+
+            # Skip segments if resuming mid-chapter
+            seg_offset = 0
+            if chapter_position == 0 and start_segment_index > 0:
+                segments = segments[start_segment_index:]
+                seg_offset = start_segment_index
+
+            for seg_idx, segment in enumerate(segments):
+                actual_seg_idx = seg_idx + seg_offset
+                # Clean up text for display (normalize whitespace)
+                display_text = " ".join(segment.split())
+                all_segments.append(
+                    (chapter_idx, actual_seg_idx, segment, display_text)
+                )
+
+        if not all_segments:
+            console.print("[yellow]No text to read.[/yellow]")
+            return
+
+        # Pre-generate first segment
+        current_future = executor.submit(generate_audio, all_segments[0][2])
+        next_future = None
+
+        last_chapter_idx = -1
+
+        for i, (chapter_idx, seg_idx, segment_text, display_text) in enumerate(
+            all_segments
+        ):
+            if stop_requested:
+                break
+
+            current_chapter_idx = chapter_idx
+            current_segment_idx = seg_idx
+
+            # Detect chapter change for paragraph pause
+            chapter_changed = chapter_idx != last_chapter_idx
+
+            # Show chapter header when chapter changes
+            if chapter_changed:
+                chapter = chapters_data[chapter_idx]
+                console.print()
+                console.print(
+                    f"[bold cyan]Chapter {chapter_idx + 1}:[/bold cyan] {chapter['title']}"
+                )
+                console.print("-" * 60)
+                if last_chapter_idx == -1 and start_segment_index > 0:
+                    console.print(
+                        f"[dim](resuming from segment {start_segment_index + 1})[/dim]"
+                    )
+                last_chapter_idx = chapter_idx
+
+            # Display current segment
+            console.print(f"[dim]{display_text}[/dim]")
+
+            # Start generating next segment while we wait for current
+            if i + 1 < len(all_segments):
+                next_future = executor.submit(generate_audio, all_segments[i + 1][2])
+
+            # Wait for current audio to be ready
+            try:
+                audio, sample_rate = current_future.result(timeout=60)
+            except Exception as e:
+                console.print(f"[red]TTS error:[/red] {e}")
+                # Move to next segment's future
+                if next_future:
+                    current_future = next_future
+                    next_future = None
+                continue
+
+            # Play audio
+            if not stop_requested:
+                sd.play(audio, sample_rate)
+                sd.wait()
+
+                # Add pause after segment (if not the last segment)
+                if i + 1 < len(all_segments) and not stop_requested:
+                    next_chapter_idx = all_segments[i + 1][0]
+                    if next_chapter_idx != chapter_idx:
+                        # Paragraph pause (between chapters)
+                        pause = random.uniform(
+                            effective_paragraph_pause_min, effective_paragraph_pause_max
+                        )
+                    else:
+                        # Segment pause (within chapter)
+                        pause = random.uniform(
+                            effective_segment_pause_min, effective_segment_pause_max
+                        )
+                    time.sleep(pause)
+
+            # Swap futures: next becomes current
+            if next_future:
+                current_future = next_future
+                next_future = None
+
+        executor.shutdown(wait=False)
+
+        # Finished
+        if not stop_requested:
+            # Clear saved position on successful completion
+            clear_playback_position()
+            console.print("\n[green]Finished reading.[/green]")
+        else:
+            # Save position for resume
+            position = PlaybackPosition(
+                file_path=file_identifier,
+                chapter_index=current_chapter_idx,
+                segment_index=current_segment_idx,
+            )
+            save_playback_position(position)
+            console.print(
+                f"[dim]Position saved: Chapter {current_chapter_idx + 1}, "
+                f"Segment {current_segment_idx + 1}[/dim]"
+            )
+            console.print("[dim]Use --resume to continue from this position.[/dim]")
+
+    except Exception as e:
+        console.print(f"[red]Error during playback:[/red] {e}")
+        # Save position on error too
+        position = PlaybackPosition(
+            file_path=file_identifier,
+            chapter_index=current_chapter_idx,
+            segment_index=current_segment_idx,
+        )
+        save_playback_position(position)
+        raise
+    finally:
+        # Restore original signal handler
+        signal.signal(signal.SIGINT, original_handler)
+        kokoro.close()
+
+
+def _split_text_into_segments(
+    text: str, split_mode: str = "paragraph", max_length: int = 500
+) -> list[str]:
+    """Split text into readable segments for streaming.
+
+    Args:
+        text: Text to split
+        split_mode: "sentence" for individual sentences, "paragraph" for grouped
+        max_length: Maximum segment length (used for paragraph mode)
+
+    Returns:
+        List of text segments
+    """
+    import re
+
+    # First split on sentence-ending punctuation
+    sentence_pattern = r"(?<=[.!?])\s+"
+    sentences = re.split(sentence_pattern, text)
+    sentences = [s.strip() for s in sentences if s.strip()]
+
+    if split_mode == "sentence":
+        # Return individual sentences, but split very long ones
+        result = []
+        for sentence in sentences:
+            if len(sentence) > max_length:
+                # Split long sentences on clause boundaries
+                clause_parts = re.split(r"(?<=[,;:])\s+", sentence)
+                for part in clause_parts:
+                    part = part.strip()
+                    if part:
+                        result.append(part)
+            else:
+                result.append(sentence)
+        return result
+
+    # Paragraph mode: group sentences up to max_length
+    segments = []
+    current_segment = ""
+
+    for sentence in sentences:
+        # If adding this sentence would exceed max_length
+        if len(current_segment) + len(sentence) + 1 > max_length:
+            if current_segment:
+                segments.append(current_segment.strip())
+
+            # If single sentence is too long, split it further
+            if len(sentence) > max_length:
+                # Split on clause boundaries
+                clause_parts = re.split(r"(?<=[,;:])\s+", sentence)
+                for part in clause_parts:
+                    part = part.strip()
+                    if len(part) > max_length:
+                        # Last resort: split at word boundaries
+                        words = part.split()
+                        sub_segment = ""
+                        for word in words:
+                            if len(sub_segment) + len(word) + 1 > max_length:
+                                if sub_segment:
+                                    segments.append(sub_segment.strip())
+                                sub_segment = word
+                            else:
+                                sub_segment = (
+                                    f"{sub_segment} {word}" if sub_segment else word
+                                )
+                        if sub_segment:
+                            current_segment = sub_segment
+                    else:
+                        segments.append(part)
+                current_segment = ""
+            else:
+                current_segment = sentence
+        else:
+            current_segment = (
+                f"{current_segment} {sentence}" if current_segment else sentence
+            )
+
+    if current_segment.strip():
+        segments.append(current_segment.strip())
+
+    return [s for s in segments if s.strip()]
 
 
 if __name__ == "__main__":

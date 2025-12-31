@@ -1,9 +1,11 @@
 """ONNX backend for ttsforge - native ONNX TTS without external dependencies."""
 
+import asyncio
 import io
 import os
 import re
 import sqlite3
+from collections.abc import AsyncGenerator, Generator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable, Literal, Optional
@@ -107,7 +109,7 @@ VOICE_NAMES = [
     "zm_yunjian",
     "zm_yunxi",
     "zm_yunxia",
-    "zm_yunyang"
+    "zm_yunyang",
 ]
 
 
@@ -1085,6 +1087,116 @@ class KokoroONNX:
         diff_vector = style2 - style1
         midpoint = (style1 + style2) / 2
         return midpoint + (diff_vector * factor / 2)
+
+    async def create_stream(
+        self,
+        text: str,
+        voice: str | np.ndarray | VoiceBlend,
+        speed: float = 1.0,
+        lang: str = "en-us",
+    ) -> AsyncGenerator[tuple[np.ndarray, int, str], None]:
+        """
+        Stream audio creation asynchronously, yielding chunks as they are processed.
+
+        This method generates audio in the background and yields chunks as soon as
+        they're ready, enabling real-time playback while generation continues.
+
+        Args:
+            text: Text to synthesize
+            voice: Voice name, style vector, or VoiceBlend
+            speed: Speech speed (1.0 = normal)
+            lang: Language code (e.g., 'en-us', 'en-gb')
+
+        Yields:
+            Tuple of (audio samples as numpy array, sample rate, text chunk)
+        """
+        self._init_kokoro()
+
+        # Resolve voice to style vector
+        if isinstance(voice, VoiceBlend):
+            voice_style = self.create_blended_voice(voice)
+        elif isinstance(voice, str):
+            voice_style = self.get_voice_style(voice)
+        else:
+            voice_style = voice
+
+        # Convert text to phonemes
+        phonemes = self.tokenizer.phonemize(text, lang=lang)
+
+        # Split phonemes into batches
+        batched_phonemes = self._split_phonemes(phonemes)
+
+        # Create a queue for passing audio chunks
+        queue: asyncio.Queue[tuple[np.ndarray, int, str] | None] = asyncio.Queue()
+
+        async def process_batches() -> None:
+            """Process phoneme batches in the background."""
+            loop = asyncio.get_event_loop()
+            for phoneme_batch in batched_phonemes:
+                # Execute blocking ONNX inference in a thread executor
+                audio_part, sample_rate = await loop.run_in_executor(
+                    None, self._create_audio_internal, phoneme_batch, voice_style, speed
+                )
+                # Trim silence
+                audio_part, _ = trim_audio(audio_part)
+                await queue.put((audio_part, sample_rate, phoneme_batch))
+            await queue.put(None)  # Signal end of stream
+
+        # Start processing in the background
+        asyncio.create_task(process_batches())
+
+        # Yield chunks as they become available
+        while True:
+            chunk = await queue.get()
+            if chunk is None:
+                break
+            yield chunk
+
+    def create_stream_sync(
+        self,
+        text: str,
+        voice: str | np.ndarray | VoiceBlend,
+        speed: float = 1.0,
+        lang: str = "en-us",
+    ) -> Generator[tuple[np.ndarray, int, str], None, None]:
+        """
+        Stream audio creation synchronously, yielding chunks as they are processed.
+
+        This is a synchronous version of create_stream for use in non-async contexts.
+        It yields audio chunks immediately as they're generated.
+
+        Args:
+            text: Text to synthesize
+            voice: Voice name, style vector, or VoiceBlend
+            speed: Speech speed (1.0 = normal)
+            lang: Language code (e.g., 'en-us', 'en-gb')
+
+        Yields:
+            Tuple of (audio samples as numpy array, sample rate, text chunk)
+        """
+        self._init_kokoro()
+
+        # Resolve voice to style vector
+        if isinstance(voice, VoiceBlend):
+            voice_style = self.create_blended_voice(voice)
+        elif isinstance(voice, str):
+            voice_style = self.get_voice_style(voice)
+        else:
+            voice_style = voice
+
+        # Convert text to phonemes
+        phonemes = self.tokenizer.phonemize(text, lang=lang)
+
+        # Split phonemes into batches
+        batched_phonemes = self._split_phonemes(phonemes)
+
+        for phoneme_batch in batched_phonemes:
+            audio_part, sample_rate = self._create_audio_internal(
+                phoneme_batch, voice_style, speed
+            )
+            # Trim silence
+            audio_part, _ = trim_audio(audio_part)
+            yield audio_part, sample_rate, phoneme_batch
 
     def close(self) -> None:
         """Clean up resources."""
