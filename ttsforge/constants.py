@@ -166,6 +166,7 @@ DEFAULT_CONFIG = {
     "default_speed": 1.0,
     "default_format": "m4b",
     "use_gpu": False,  # GPU requires onnxruntime-gpu
+    "model_quality": "fp32",  # Model quality: fp32, fp16, q8, q8f16, q4, q4f16, uint8, uint8f16
     "silence_between_chapters": 2.0,
     "save_chapters_separately": False,
     "merge_at_end": True,

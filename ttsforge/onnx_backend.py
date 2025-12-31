@@ -6,7 +6,7 @@ import re
 import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional
+from typing import TYPE_CHECKING, Any, Callable, Literal, Optional
 from urllib.request import urlretrieve
 
 import numpy as np
@@ -25,16 +25,90 @@ MAX_PHONEME_LENGTH = 510
 # Sample rate for Kokoro models
 SAMPLE_RATE = 24000
 
-# ONNX model files required
-ONNX_MODEL_FILES = [
-    "kokoro-v1.0.onnx",
-    "voices-v1.0.bin",
+# Model quality type
+ModelQuality = Literal[
+    "fp32", "fp16", "q8", "q8f16", "q4", "q4f16", "uint8", "uint8f16"
 ]
+DEFAULT_MODEL_QUALITY: ModelQuality = "fp32"
 
-# URLs for model files
+# Quality to filename mapping
+MODEL_QUALITY_FILES: dict[str, str] = {
+    "fp32": "model.onnx",
+    "fp16": "model_fp16.onnx",
+    "q8": "model_quantized.onnx",
+    "q8f16": "model_q8f16.onnx",
+    "q4": "model_q4.onnx",
+    "q4f16": "model_q4f16.onnx",
+    "uint8": "model_uint8.onnx",
+    "uint8f16": "model_uint8f16.onnx",
+}
+
+# URLs for model files (Hugging Face)
 MODEL_BASE_URL = (
-    "https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0"
+    "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/onnx"
 )
+VOICES_BASE_URL = (
+    "https://huggingface.co/onnx-community/Kokoro-82M-v1.0-ONNX/resolve/main/voices"
+)
+CONFIG_URL = "https://huggingface.co/hexgrad/Kokoro-82M/resolve/main/config.json"
+
+# All available voice names
+VOICE_NAMES = [
+    "af",
+    "af_alloy",
+    "af_aoede",
+    "af_bella",
+    "af_heart",
+    "af_jessica",
+    "af_kore",
+    "af_nicole",
+    "af_nova",
+    "af_river",
+    "af_sarah",
+    "af_sky",
+    "am_adam",
+    "am_echo",
+    "am_eric",
+    "am_fenrir",
+    "am_liam",
+    "am_michael",
+    "am_onyx",
+    "am_puck",
+    "am_santa",
+    "bf_alice",
+    "bf_emma",
+    "bf_isabella",
+    "bf_lily",
+    "bm_daniel",
+    "bm_fable",
+    "bm_george",
+    "bm_lewis",
+    "ef_dora",
+    "em_alex",
+    "em_santa",
+    "ff_siwis",
+    "hf_alpha",
+    "hf_beta",
+    "hm_omega",
+    "hm_psi",
+    "if_sara",
+    "im_nicola",
+    "jf_alpha",
+    "jf_gongitsune",
+    "jf_nezumi",
+    "jf_tebukuro",
+    "jm_kumo",
+    "pf_dora",
+    "pm_alex",
+    "pm_santa",
+    "zf_xiaobei",
+    "zf_xiaoni",
+    "zf_xiaoxiao",
+    "zm_yunjian",
+    "zm_yunxi",
+    "zm_yunxia",
+    "zm_yunyang"
+]
 
 
 @dataclass
@@ -72,54 +146,115 @@ class VoiceBlend:
         return cls(voices=voices)
 
 
+# =============================================================================
+# Path helper functions
+# =============================================================================
+
+
 def get_model_dir() -> Path:
     """Get the directory for storing ONNX model files."""
     return get_user_cache_path("models")
 
 
-def get_model_path(filename: str) -> Path:
-    """Get the full path to a model file."""
+def get_voices_dir() -> Path:
+    """Get the directory for storing voice files."""
+    return get_user_cache_path("voices")
+
+
+def get_config_path() -> Path:
+    """Get the path to the cached config.json."""
+    return get_user_cache_path() / "config.json"
+
+
+def get_voices_bin_path() -> Path:
+    """Get the path to the combined voices.bin.npz file."""
+    return get_user_cache_path() / "voices.bin.npz"
+
+
+def get_model_filename(quality: ModelQuality = DEFAULT_MODEL_QUALITY) -> str:
+    """Get the model filename for a quality level."""
+    return MODEL_QUALITY_FILES[quality]
+
+
+def get_model_path(quality: ModelQuality = DEFAULT_MODEL_QUALITY) -> Path:
+    """Get the full path to a model file for a given quality."""
+    filename = get_model_filename(quality)
     return get_model_dir() / filename
 
 
-def is_model_downloaded(filename: str) -> bool:
-    """Check if a model file is already downloaded."""
-    model_path = get_model_path(filename)
+def get_voice_path(voice_name: str) -> Path:
+    """Get the full path to an individual voice file."""
+    return get_voices_dir() / f"{voice_name}.bin"
+
+
+# =============================================================================
+# Download check functions
+# =============================================================================
+
+
+def is_config_downloaded() -> bool:
+    """Check if config.json is downloaded."""
+    config_path = get_config_path()
+    return config_path.exists() and config_path.stat().st_size > 0
+
+
+def is_model_downloaded(quality: ModelQuality = DEFAULT_MODEL_QUALITY) -> bool:
+    """Check if a model file is already downloaded for a given quality."""
+    model_path = get_model_path(quality)
     return model_path.exists() and model_path.stat().st_size > 0
 
 
-def are_models_downloaded() -> bool:
-    """Check if all required model files are downloaded."""
-    return all(is_model_downloaded(f) for f in ONNX_MODEL_FILES)
+def is_voice_downloaded(voice_name: str) -> bool:
+    """Check if an individual voice file is already downloaded."""
+    voice_path = get_voice_path(voice_name)
+    return voice_path.exists() and voice_path.stat().st_size > 0
 
 
-def download_model(
-    filename: str,
+def are_voices_downloaded() -> bool:
+    """Check if the combined voices.bin file exists."""
+    voices_bin_path = get_voices_bin_path()
+    return voices_bin_path.exists() and voices_bin_path.stat().st_size > 0
+
+
+def are_models_downloaded(quality: ModelQuality = DEFAULT_MODEL_QUALITY) -> bool:
+    """Check if model, config, and voices.bin are downloaded."""
+    return (
+        is_config_downloaded()
+        and is_model_downloaded(quality)
+        and are_voices_downloaded()
+    )
+
+
+# =============================================================================
+# Download functions
+# =============================================================================
+
+
+def _download_file(
+    url: str,
+    dest_path: Path,
     progress_callback: Optional[Callable[[int, int], None]] = None,
     force: bool = False,
 ) -> Path:
     """
-    Download a model file if not already present.
+    Download a file from URL to destination path.
 
     Args:
-        filename: Name of the model file to download
+        url: URL to download from
+        dest_path: Destination path for the file
         progress_callback: Optional callback for progress updates (current, total)
         force: Force re-download even if file exists
 
     Returns:
         Path to the downloaded file
     """
-    model_path = get_model_path(filename)
+    if dest_path.exists() and not force:
+        return dest_path
 
-    if model_path.exists() and not force:
-        return model_path
-
-    url = f"{MODEL_BASE_URL}/{filename}"
-    model_dir = get_model_dir()
-    model_dir.mkdir(parents=True, exist_ok=True)
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Download with progress
-    temp_path = model_path.with_suffix(".tmp")
+    temp_path = dest_path.with_suffix(".tmp")
 
     def _report_progress(block_num: int, block_size: int, total_size: int) -> None:
         if progress_callback and total_size > 0:
@@ -128,44 +263,156 @@ def download_model(
 
     try:
         urlretrieve(url, temp_path, reporthook=_report_progress)
-        temp_path.rename(model_path)
+        temp_path.rename(dest_path)
     except Exception:
         temp_path.unlink(missing_ok=True)
         raise
 
-    return model_path
+    return dest_path
+
+
+def download_config(
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    force: bool = False,
+) -> Path:
+    """
+    Download config.json from Hugging Face.
+
+    Args:
+        progress_callback: Optional callback for progress updates (current, total)
+        force: Force re-download even if file exists
+
+    Returns:
+        Path to the downloaded config file
+    """
+    return _download_file(CONFIG_URL, get_config_path(), progress_callback, force)
+
+
+def download_model(
+    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    force: bool = False,
+) -> Path:
+    """
+    Download a model file for the specified quality.
+
+    Args:
+        quality: Model quality/quantization level
+        progress_callback: Optional callback for progress updates (current, total)
+        force: Force re-download even if file exists
+
+    Returns:
+        Path to the downloaded model file
+    """
+    filename = get_model_filename(quality)
+    url = f"{MODEL_BASE_URL}/{filename}"
+    return _download_file(url, get_model_path(quality), progress_callback, force)
+
+
+def download_voice(
+    voice_name: str,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
+    force: bool = False,
+) -> Path:
+    """
+    Download a single voice file.
+
+    Args:
+        voice_name: Name of the voice to download
+        progress_callback: Optional callback for progress updates (current, total)
+        force: Force re-download even if file exists
+
+    Returns:
+        Path to the downloaded voice file
+    """
+    url = f"{VOICES_BASE_URL}/{voice_name}.bin"
+    return _download_file(url, get_voice_path(voice_name), progress_callback, force)
+
+
+def download_all_voices(
+    progress_callback: Optional[Callable[[str, int, int], None]] = None,
+    force: bool = False,
+) -> Path:
+    """
+    Download all voice files and config, then combine into a single voices.bin file.
+
+    Downloads individual voice .bin files and config.json from Hugging Face,
+    loads them, and saves them as a combined numpy archive (voices.bin) for
+    efficient loading.
+
+    Args:
+        progress_callback: Optional callback (voice_name, current_index, total_count)
+        force: Force re-download even if files exist
+
+    Returns:
+        Path to the combined voices.bin file
+    """
+    voices_bin_path = get_voices_bin_path()
+
+    # If voices.bin already exists and not forcing, skip download
+    if voices_bin_path.exists() and not force:
+        return voices_bin_path
+
+    voices_dir = get_voices_dir()
+    voices_dir.mkdir(parents=True, exist_ok=True)
+
+    # Download config.json first
+    if progress_callback:
+        progress_callback("config.json", 0, len(VOICE_NAMES) + 1)
+    download_config(force=force)
+
+    total = len(VOICE_NAMES)
+    voices: dict[str, np.ndarray] = {}
+
+    for idx, voice_name in enumerate(VOICE_NAMES):
+        if progress_callback:
+            progress_callback(voice_name, idx + 1, total)
+
+        # Download individual voice file
+        voice_path = download_voice(voice_name, force=force)
+
+        # Load the voice data from .bin file
+        voice_data = np.fromfile(voice_path, dtype=np.float32).reshape(-1, 1, 256)
+        voices[voice_name] = voice_data
+
+    # Save all voices to a single .bin file using np.savez
+    voices_bin_path.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(str(voices_bin_path), **voices)  # type: ignore[arg-type]
+
+    return voices_bin_path
 
 
 def download_all_models(
+    quality: ModelQuality = DEFAULT_MODEL_QUALITY,
     progress_callback: Optional[Callable[[str, int, int], None]] = None,
     force: bool = False,
 ) -> dict[str, Path]:
     """
-    Download all required model files.
+    Download config, model, and all voice files.
 
     Args:
+        quality: Model quality/quantization level
         progress_callback: Optional callback (filename, current, total)
         force: Force re-download even if files exist
 
     Returns:
         Dict mapping filename to path
     """
-    paths = {}
-    for filename in ONNX_MODEL_FILES:
-        file_progress: Optional[Callable[[int, int], None]] = None
-        if progress_callback:
+    paths: dict[str, Path] = {}
 
-            def make_file_progress(
-                fname: str,
-            ) -> Callable[[int, int], None]:
-                def inner(current: int, total: int) -> None:
-                    progress_callback(fname, current, total)
+    # Download config
+    if progress_callback:
+        progress_callback("config.json", 0, 0)
+    paths["config.json"] = download_config(force=force)
 
-                return inner
+    # Download model
+    model_filename = get_model_filename(quality)
+    if progress_callback:
+        progress_callback(model_filename, 0, 0)
+    paths[model_filename] = download_model(quality, force=force)
 
-            file_progress = make_file_progress(filename)
-
-        paths[filename] = download_model(filename, file_progress, force)
+    # Download all voices and combine into voices.bin
+    paths["voices.bin"] = download_all_voices(progress_callback, force)
 
     return paths
 
@@ -185,6 +432,7 @@ class KokoroONNX:
         use_gpu: bool = False,
         vocab_version: str = "v1.0",
         espeak_config: Optional[EspeakConfig] = None,
+        model_quality: Optional[ModelQuality] = None,
     ) -> None:
         """
         Initialize the Kokoro ONNX backend.
@@ -195,17 +443,32 @@ class KokoroONNX:
             use_gpu: Whether to use GPU acceleration (requires onnxruntime-gpu)
             vocab_version: Vocabulary version for tokenizer
             espeak_config: Optional espeak-ng configuration
+            model_quality: Model quality/quantization level (default from config)
         """
         self._session: Optional[rt.InferenceSession] = None
         self._voices_data: Optional[dict[str, np.ndarray]] = None
         self._np = np
         self._use_gpu = use_gpu
 
+        # Resolve model quality from config if not specified
+        resolved_quality: ModelQuality = DEFAULT_MODEL_QUALITY
+        if model_quality is not None:
+            resolved_quality = model_quality
+        else:
+            from .utils import load_config
+
+            cfg = load_config()
+            quality_from_cfg = cfg.get("model_quality", DEFAULT_MODEL_QUALITY)
+            # Validate it's a valid quality option and cast to ModelQuality
+            if quality_from_cfg in MODEL_QUALITY_FILES:
+                resolved_quality = str(quality_from_cfg)  # type: ignore[assignment]
+        self._model_quality: ModelQuality = resolved_quality
+
         # Resolve paths
         if model_path is None:
-            model_path = get_model_path(ONNX_MODEL_FILES[0])
+            model_path = get_model_path(self._model_quality)
         if voices_path is None:
-            voices_path = get_model_path(ONNX_MODEL_FILES[1])
+            voices_path = get_voices_bin_path()
 
         self._model_path = model_path
         self._voices_path = voices_path
@@ -229,11 +492,13 @@ class KokoroONNX:
         return self._tokenizer
 
     def _ensure_models(self) -> None:
-        """Ensure model files are downloaded."""
+        """Ensure model and voice files are downloaded."""
         if not self._model_path.exists():
-            download_model(ONNX_MODEL_FILES[0])
+            download_model(self._model_quality)
         if not self._voices_path.exists():
-            download_model(ONNX_MODEL_FILES[1])
+            download_all_voices()
+        if not is_config_downloaded():
+            download_config()
 
     def _init_kokoro(self) -> None:
         """Initialize the ONNX session and load voices."""
@@ -311,7 +576,6 @@ class KokoroONNX:
                 "style": voice_style,
                 "speed": np.ones(1, dtype=np.float32) * speed,
             }
-
 
         else:
             # Original model format (kokoro-onnx release model, uses float speed)

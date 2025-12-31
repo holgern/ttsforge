@@ -2,7 +2,7 @@
 
 import sys
 from pathlib import Path
-from typing import Optional
+from typing import Optional, cast
 
 import click
 from rich.console import Console
@@ -36,11 +36,21 @@ from .conversion import (
     get_default_voice_for_language,
 )
 from .onnx_backend import (
-    ONNX_MODEL_FILES,
+    DEFAULT_MODEL_QUALITY,
+    MODEL_QUALITY_FILES,
+    VOICE_NAMES,
+    ModelQuality,
     are_models_downloaded,
+    are_voices_downloaded,
+    download_all_voices,
+    download_config,
     download_model,
+    get_config_path,
     get_model_dir,
+    get_model_filename,
     get_model_path,
+    get_voices_bin_path,
+    is_config_downloaded,
     is_model_downloaded,
 )
 from .utils import (
@@ -684,6 +694,13 @@ DEFAULT_SAMPLE_TEXT = (
     help="Text splitting mode for processing.",
 )
 @click.option("--verbose", is_flag=True, help="Show detailed output.")
+@click.option(
+    "-p",
+    "--play",
+    "play_audio",
+    is_flag=True,
+    help="Play audio directly (also saves to file if -o specified).",
+)
 @click.pass_context
 def sample(
     ctx: click.Context,
@@ -696,6 +713,7 @@ def sample(
     use_gpu: Optional[bool],
     split_mode: Optional[str],
     verbose: bool,
+    play_audio: bool,
 ) -> None:
     """Generate a sample audio file to test TTS settings.
 
@@ -708,7 +726,13 @@ def sample(
         ttsforge sample "Hello, this is a test."
 
         ttsforge sample --voice am_adam --speed 1.2 -o test.wav
+
+        ttsforge sample --play  # Play directly without saving
+
+        ttsforge sample --play -o test.wav  # Play and save to file
     """
+    import tempfile
+
     from .conversion import ConversionOptions, TTSConverter
 
     # Get model path from global context
@@ -718,8 +742,16 @@ def sample(
     # Use default text if none provided
     sample_text = text or DEFAULT_SAMPLE_TEXT
 
-    # Determine output path
-    if output is None:
+    # Handle output path for playback mode
+    temp_dir: Optional[str] = None
+    save_output = output is not None or not play_audio
+
+    if play_audio and output is None:
+        # Create temp file for playback only
+        temp_dir = tempfile.mkdtemp()
+        output = Path(temp_dir) / "sample.wav"
+        output_format = "wav"  # Force WAV for playback
+    elif output is None:
         output = Path(f"./sample.{output_format}")
     elif output.suffix == "":
         # If no extension provided, add the format
@@ -753,7 +785,8 @@ def sample(
         text_preview = sample_text[:100]
         ellipsis = "..." if len(sample_text) > 100 else ""
         console.print(f"[dim]Text:[/dim] {text_preview}{ellipsis}")
-        console.print(f"[dim]Output:[/dim] {output}")
+        if save_output:
+            console.print(f"[dim]Output:[/dim] {output}")
 
     try:
         converter = TTSConverter(options)
@@ -768,7 +801,26 @@ def sample(
             result = converter.convert_text(sample_text, output)
 
         if result.success:
-            console.print(f"[green]Sample saved to:[/green] {output}")
+            # Handle playback if requested
+            if play_audio:
+                import sounddevice as sd  # type: ignore[import-untyped]
+                import soundfile as sf
+
+                audio_data, sample_rate = sf.read(str(output))
+                console.print("[dim]Playing audio...[/dim]")
+                sd.play(audio_data, sample_rate)
+                sd.wait()
+                console.print("[green]Playback complete.[/green]")
+
+            # Report save location (if not temp file)
+            if save_output:
+                console.print(f"[green]Sample saved to:[/green] {output}")
+
+            # Cleanup temp file if needed
+            if temp_dir is not None:
+                import shutil
+
+                shutil.rmtree(temp_dir)
         else:
             console.print(f"[red]Error:[/red] {result.error_message}")
             raise SystemExit(1)
@@ -779,6 +831,11 @@ def sample(
             import traceback
 
             console.print(traceback.format_exc())
+        # Cleanup temp dir on error
+        if temp_dir is not None:
+            import shutil
+
+            shutil.rmtree(temp_dir, ignore_errors=True)
         raise SystemExit(1) from None
 
 
@@ -907,6 +964,13 @@ VOICE_BLEND_PRESETS = [
     is_flag=True,
     help="Demo a curated set of voice blend combinations.",
 )
+@click.option(
+    "-p",
+    "--play",
+    "play_audio",
+    is_flag=True,
+    help="Play audio directly (also saves to file if -o specified).",
+)
 @click.pass_context
 def demo(
     ctx: click.Context,
@@ -920,6 +984,7 @@ def demo(
     separate: bool,
     blend: Optional[str],
     blend_presets: bool,
+    play_audio: bool,
 ) -> None:
     """Generate a demo audio file with all available voices.
 
@@ -943,6 +1008,10 @@ def demo(
         ttsforge demo --blend "af_nicole:50,am_michael:50"  # Custom voice blend
 
         ttsforge demo --blend-presets  # Demo all preset voice blends
+
+        ttsforge demo --play  # Play directly without saving
+
+        ttsforge demo -v af_heart --play  # Play a single voice demo
     """
     import numpy as np
 
@@ -952,6 +1021,20 @@ def demo(
     gpu = use_gpu if use_gpu is not None else config.get("use_gpu", False)
     model_path = ctx.obj.get("model_path") if ctx.obj else None
     voices_path = ctx.obj.get("voices_path") if ctx.obj else None
+
+    # Playback is not compatible with --separate or --blend-presets (multiple files)
+    if play_audio and separate:
+        console.print(
+            "[red]Error:[/red] --play is not compatible with --separate. "
+            "Use --play without --separate to play a combined demo."
+        )
+        sys.exit(1)
+    if play_audio and blend_presets:
+        console.print(
+            "[red]Error:[/red] --play is not compatible with --blend-presets. "
+            "Use --play with a single --blend instead."
+        )
+        sys.exit(1)
 
     # Helper function to create filename from blend string
     def blend_to_filename(blend_str: str) -> str:
@@ -980,12 +1063,16 @@ def demo(
             # Add all preset blends
             blends_to_process.extend(VOICE_BLEND_PRESETS)
 
-        # Determine output directory
-        if output is None:
-            output = Path("./voice_blends")
-        output.mkdir(parents=True, exist_ok=True)
+        # For playback with single blend, we don't need an output directory
+        save_output = output is not None or not play_audio
 
-        console.print(f"[bold]Output directory:[/bold] {output}")
+        if save_output:
+            # Determine output directory
+            if output is None:
+                output = Path("./voice_blends")
+            output.mkdir(parents=True, exist_ok=True)
+            console.print(f"[bold]Output directory:[/bold] {output}")
+
         console.print(f"[dim]Voice blends: {len(blends_to_process)}[/dim]")
         console.print(f"[dim]Speed: {speed}x[/dim]")
         console.print(f"[dim]GPU: {'enabled' if gpu else 'disabled'}[/dim]")
@@ -1032,24 +1119,40 @@ def demo(
                         demo_text, voice=voice_blend, speed=speed
                     )
 
-                    # Save to file
-                    import soundfile as sf
+                    # Handle playback
+                    if play_audio:
+                        import sounddevice as sd  # type: ignore[import-untyped]
 
-                    filename = blend_to_filename(blend_str) + ".wav"
-                    voice_file = output / filename
-                    sf.write(str(voice_file), samples, sr)
-                    progress.console.print(
-                        f"  [green]{description}[/green]: {voice_file}"
-                    )
+                        progress.console.print(f"  [dim]Playing {description}...[/dim]")
+                        sd.play(samples, sr)
+                        sd.wait()
+                        progress.console.print(
+                            f"  [green]{description}[/green]: Playback complete"
+                        )
+
+                    # Save to file if output specified
+                    if save_output and output is not None:
+                        import soundfile as sf
+
+                        filename = blend_to_filename(blend_str) + ".wav"
+                        voice_file = output / filename
+                        sf.write(str(voice_file), samples, sr)
+                        if not play_audio:
+                            progress.console.print(
+                                f"  [green]{description}[/green]: {voice_file}"
+                            )
 
                 except Exception as e:
                     console.print(f"  [red]{blend_str}[/red]: Failed - {e}")
 
                 progress.advance(task)
 
-        console.print(
-            f"\n[green]Saved {len(blends_to_process)} voice blend demos to:[/green] {output}"
-        )
+        if save_output:
+            console.print(
+                f"\n[green]Saved {len(blends_to_process)} voice blend demos to:[/green] {output}"
+            )
+        elif play_audio:
+            console.print("\n[green]Playback complete.[/green]")
         return
 
     # Regular voice demo mode (no blending)
@@ -1079,13 +1182,15 @@ def demo(
         console.print("[red]Error:[/red] No voices selected.")
         sys.exit(1)
 
-    # Determine output path
+    # Determine output path and whether to save
+    save_output = output is not None or not play_audio
+
     if separate:
         if output is None:
             output = Path("./voice_demos")
         output.mkdir(parents=True, exist_ok=True)
         console.print(f"[bold]Output directory:[/bold] {output}")
-    else:
+    elif save_output:
         if output is None:
             output = Path("./voices_demo.wav")
         console.print(f"[bold]Output file:[/bold] {output}")
@@ -1137,7 +1242,7 @@ def demo(
             try:
                 samples, sr = kokoro.create(demo_text, voice=voice, speed=speed)
 
-                if separate:
+                if separate and output is not None:
                     # Save individual file
                     import soundfile as sf
 
@@ -1154,13 +1259,25 @@ def demo(
 
             progress.advance(task)
 
-    # Concatenate and save if not separate
+    # Handle combined output (not separate mode)
     if not separate and all_samples:
-        import soundfile as sf
-
         combined = np.concatenate(all_samples)
-        sf.write(str(output), combined, sample_rate)
-        console.print(f"\n[green]Demo saved to:[/green] {output}")
+
+        # Play audio if requested
+        if play_audio:
+            import sounddevice as sd  # type: ignore[import-untyped]
+
+            console.print("[dim]Playing audio...[/dim]")
+            sd.play(combined, sample_rate)
+            sd.wait()
+            console.print("[green]Playback complete.[/green]")
+
+        # Save to file if output specified or not in play-only mode
+        if save_output and output is not None:
+            import soundfile as sf
+
+            sf.write(str(output), combined, sample_rate)
+            console.print(f"[green]Demo saved to:[/green] {output}")
 
         # Show duration
         duration_secs = len(combined) / sample_rate
@@ -1174,27 +1291,62 @@ def demo(
 
 @main.command()
 @click.option("--force", is_flag=True, help="Force re-download even if files exist.")
-def download(force: bool) -> None:
-    """Download ONNX model files required for TTS.
+@click.option(
+    "--quality",
+    "-q",
+    type=click.Choice(list(MODEL_QUALITY_FILES.keys())),
+    default=None,
+    help="Model quality/quantization level. Default: from config or fp32.",
+)
+def download(force: bool, quality: Optional[str]) -> None:
+    """Download ONNX model and voice files required for TTS.
 
-    Downloads the kokoro-onnx model files (~330MB total) to the cache directory.
-    This is required before using ttsforge for the first time.
+    Downloads from Hugging Face (onnx-community/Kokoro-82M-v1.0-ONNX).
 
-    The models will be downloaded automatically on first use, but you can use
-    this command to download them proactively.
+    Quality options:
+      fp32     - Full precision (326 MB) - Best quality, default
+      fp16     - Half precision (163 MB) - Good quality, smaller
+      q8       - 8-bit quantized (92 MB) - Good quality, compact
+      q8f16    - 8-bit with fp16 (86 MB) - Smallest file
+      q4       - 4-bit quantized (305 MB)
+      q4f16    - 4-bit with fp16 (155 MB)
+      uint8    - Unsigned 8-bit (177 MB)
+      uint8f16 - Unsigned 8-bit with fp16 (114 MB)
     """
+    # Get quality from config if not specified
+    if quality is None:
+        cfg = load_config()
+        quality = cfg.get("model_quality", DEFAULT_MODEL_QUALITY)
+
+    # Cast to ModelQuality - safe because click.Choice validates input
+    # and config uses a valid default
+    model_quality = cast(ModelQuality, quality)
+
     model_dir = get_model_dir()
     console.print(f"[bold]Model directory:[/bold] {model_dir}")
+    console.print(f"[bold]Model quality:[/bold] {model_quality}")
 
-    if are_models_downloaded() and not force:
+    # Check if already downloaded
+    if are_models_downloaded(model_quality) and not force:
         console.print("[green]All model files are already downloaded.[/green]")
-        for filename in ONNX_MODEL_FILES:
-            path = get_model_path(filename)
-            size = format_size(path.stat().st_size) if path.exists() else "N/A"
-            console.print(f"  {filename}: {size}")
+        model_path = get_model_path(model_quality)
+        voices_path = get_voices_bin_path()
+        config_path = get_config_path()
+
+        if model_path.exists():
+            console.print(
+                f"  {get_model_filename(model_quality)}: "
+                f"{format_size(model_path.stat().st_size)}"
+            )
+        if voices_path.exists():
+            console.print(
+                f"  voices.bin.npz: {format_size(voices_path.stat().st_size)}"
+            )
+        if config_path.exists():
+            console.print(f"  config.json: {format_size(config_path.stat().st_size)}")
         return
 
-    console.print("Downloading ONNX model files...")
+    console.print("Downloading ONNX model files from Hugging Face...")
 
     with Progress(
         SpinnerColumn(),
@@ -1203,29 +1355,77 @@ def download(force: bool) -> None:
         TaskProgressColumn(),
         console=console,
     ) as progress:
-        for filename in ONNX_MODEL_FILES:
-            if is_model_downloaded(filename) and not force:
-                console.print(f"  [dim]{filename}: already downloaded[/dim]")
-                continue
+        # Download config.json
+        if not is_config_downloaded() or force:
+            config_task = progress.add_task("Downloading config.json...", total=100)
 
-            current_task_id = progress.add_task(f"Downloading {filename}...", total=100)
-
-            def update_progress(
-                current: int, total: int, tid: int = current_task_id
-            ) -> None:
+            def config_progress(current: int, total: int) -> None:
                 if total > 0:
-                    percent = (current / total) * 100
-                    progress.update(tid, completed=percent)
+                    progress.update(config_task, completed=(current / total) * 100)
 
             try:
-                download_model(filename, progress_callback=update_progress, force=force)
-                progress.update(current_task_id, completed=100)
-                path = get_model_path(filename)
-                size = format_size(path.stat().st_size)
-                console.print(f"  [green]{filename}: {size}[/green]")
+                download_config(progress_callback=config_progress, force=force)
+                progress.update(config_task, completed=100)
+                config_path = get_config_path()
+                size = format_size(config_path.stat().st_size)
+                console.print(f"  [green]config.json: {size}[/green]")
             except Exception as e:
-                console.print(f"  [red]{filename}: Failed - {e}[/red]")
+                console.print(f"  [red]config.json: Failed - {e}[/red]")
                 sys.exit(1)
+        else:
+            console.print("  [dim]config.json: already downloaded[/dim]")
+
+        # Download model
+        model_filename = get_model_filename(model_quality)
+        if not is_model_downloaded(model_quality) or force:
+            model_task = progress.add_task(
+                f"Downloading {model_filename}...", total=100
+            )
+
+            def model_progress(current: int, total: int) -> None:
+                if total > 0:
+                    progress.update(model_task, completed=(current / total) * 100)
+
+            try:
+                download_model(
+                    model_quality,
+                    progress_callback=model_progress,
+                    force=force,
+                )
+                progress.update(model_task, completed=100)
+                model_path = get_model_path(model_quality)
+                size = format_size(model_path.stat().st_size)
+                console.print(f"  [green]{model_filename}: {size}[/green]")
+            except Exception as e:
+                console.print(f"  [red]{model_filename}: Failed - {e}[/red]")
+                sys.exit(1)
+        else:
+            console.print(f"  [dim]{model_filename}: already downloaded[/dim]")
+
+        # Download voices
+        if not are_voices_downloaded() or force:
+            voices_task = progress.add_task(
+                "Downloading voices (0/{})...".format(len(VOICE_NAMES)), total=100
+            )
+
+            def voices_progress(voice_name: str, current: int, total: int) -> None:
+                progress.update(
+                    voices_task,
+                    description=f"Downloading voices ({current}/{total})...",
+                    completed=(current / total) * 100,
+                )
+
+            try:
+                download_all_voices(progress_callback=voices_progress, force=force)
+                progress.update(voices_task, completed=100)
+                voices_path = get_voices_bin_path()
+                size = format_size(voices_path.stat().st_size)
+                console.print(f"  [green]voices.bin.npz: {size}[/green]")
+            except Exception as e:
+                console.print(f"  [red]voices: Failed - {e}[/red]")
+                sys.exit(1)
+        else:
+            console.print("  [dim]voices.bin.npz: already downloaded[/dim]")
 
     console.print("\n[green]All model files downloaded successfully![/green]")
 

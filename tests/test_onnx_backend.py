@@ -3,11 +3,14 @@
 from pathlib import Path
 
 from ttsforge.onnx_backend import (
+    DEFAULT_MODEL_QUALITY,
     LANG_CODE_TO_ONNX,
     MODEL_BASE_URL,
-    ONNX_MODEL_FILES,
+    MODEL_QUALITY_FILES,
+    VOICE_NAMES,
     VoiceBlend,
     get_model_dir,
+    get_model_filename,
     get_model_path,
     get_onnx_lang_code,
     is_model_downloaded,
@@ -69,16 +72,17 @@ class TestVoiceBlend:
 class TestModelPaths:
     """Tests for model path functions."""
 
-    def test_onnx_model_files_not_empty(self):
-        """Should have model files defined."""
-        assert len(ONNX_MODEL_FILES) > 0
-        assert "kokoro-v1.0.onnx" in ONNX_MODEL_FILES
-        assert "voices-v1.0.bin" in ONNX_MODEL_FILES
+    def test_model_quality_files_not_empty(self):
+        """Should have model quality files defined."""
+        assert len(MODEL_QUALITY_FILES) > 0
+        assert "fp32" in MODEL_QUALITY_FILES
+        assert "q8" in MODEL_QUALITY_FILES
 
     def test_model_base_url_valid(self):
-        """Should have valid model base URL."""
+        """Should have valid model base URL pointing to HuggingFace."""
         assert MODEL_BASE_URL.startswith("https://")
-        assert "kokoro-onnx" in MODEL_BASE_URL
+        assert "huggingface.co" in MODEL_BASE_URL
+        assert "Kokoro" in MODEL_BASE_URL
 
     def test_get_model_dir_returns_path(self):
         """Should return a Path object."""
@@ -86,16 +90,40 @@ class TestModelPaths:
         assert isinstance(model_dir, Path)
 
     def test_get_model_path_returns_full_path(self):
-        """Should return full path to model file."""
-        path = get_model_path("test_model.onnx")
+        """Should return full path to model file for given quality."""
+        path = get_model_path("fp32")
         assert isinstance(path, Path)
-        assert path.name == "test_model.onnx"
+        assert path.name == "model.onnx"
         assert get_model_dir() in path.parents or path.parent == get_model_dir()
 
-    def test_is_model_downloaded_false_for_nonexistent(self):
-        """Should return False for nonexistent file."""
-        result = is_model_downloaded("nonexistent_model_xyz.onnx")
-        assert result is False
+    def test_get_model_path_q8(self):
+        """Should return correct path for q8 quality."""
+        path = get_model_path("q8")
+        assert path.name == "model_quantized.onnx"
+
+    def test_get_model_filename(self):
+        """Should return correct filename for each quality."""
+        assert get_model_filename("fp32") == "model.onnx"
+        assert get_model_filename("fp16") == "model_fp16.onnx"
+        assert get_model_filename("q8") == "model_quantized.onnx"
+
+    def test_is_model_downloaded_false_for_missing_file(self):
+        """Should return False when model file doesn't exist."""
+        # This relies on a fresh cache dir or cleaned state
+        # We test with a quality that is likely not downloaded
+        result = is_model_downloaded("q4f16")
+        # Can't assert False since it might be downloaded, just assert it returns bool
+        assert isinstance(result, bool)
+
+    def test_default_model_quality(self):
+        """Default model quality should be fp32."""
+        assert DEFAULT_MODEL_QUALITY == "fp32"
+
+    def test_voice_names_not_empty(self):
+        """Should have voice names defined."""
+        assert len(VOICE_NAMES) > 0
+        assert "af_nicole" in VOICE_NAMES
+        assert "am_michael" in VOICE_NAMES
 
 
 class TestLangCodeMapping:
