@@ -46,7 +46,7 @@ VOICE = "af_bella"  # American Female voice
 VOICE = "ef_dora"  # American Female voice
 VOICE = "if_sara"  # American Female voice
 VOICE = "jf_alpha"  # American Female voice
-BLEND = "jf_alpha:50,ef_dora:50"  # Blend of three voices
+BLEND = "ff_siwis:50,ef_dora:50"  # Blend of three voices
 LANG = "de"  # German
 
 

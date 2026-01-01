@@ -1535,10 +1535,17 @@ class TTSConverter:
             ]
 
         # Convert to our Chapter format - epub2text Chapter has .text attribute
-        chapters = [
-            Chapter(title=ch.title, content=ch.text, index=i)
-            for i, ch in enumerate(epub_chapters)
-        ]
+        # Remove <<CHAPTER: ...>> markers that epub2text adds at the start of content
+        # since we now announce chapter titles separately
+        chapters = []
+        for i, ch in enumerate(epub_chapters):
+            # Remove the <<CHAPTER: title>> marker from the beginning of content
+            content = ch.text
+            # Pattern matches: <<CHAPTER: anything>> followed by optional whitespace/newlines
+            content = re.sub(
+                r"^<<CHAPTER:[^>]*>>\s*\n*", "", content, count=1, flags=re.MULTILINE
+            )
+            chapters.append(Chapter(title=ch.title, content=content, index=i))
 
         self.log(f"Found {len(chapters)} chapters")
 
