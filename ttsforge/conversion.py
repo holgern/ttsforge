@@ -252,6 +252,9 @@ class ConversionOptions:
     # Paragraph pause (random silence between paragraphs - longer than segment pause)
     paragraph_pause_min: float = 0.5
     paragraph_pause_max: float = 1.0
+    # Chapter announcement settings
+    announce_chapters: bool = True  # Read chapter titles aloud before content
+    chapter_pause_after_title: float = 2.0  # Pause after chapter title (seconds)
     save_chapters_separately: bool = False
     merge_at_end: bool = True
     # Split mode: auto, line, paragraph, sentence, clause
@@ -737,6 +740,28 @@ class TTSConverter:
             format="wav",
         ) as out_file:
             duration = 0.0
+
+            # Announce chapter title if enabled
+            if self.options.announce_chapters and chapter.title:
+                # Format: "Chapter N. Title"
+                announcement_text = f"Chapter {chapter.index + 1}. {chapter.title}"
+                assert self._kokoro is not None
+                title_samples, _ = self._kokoro.create(
+                    announcement_text,
+                    voice=self._voice_style or self.options.voice,
+                    speed=self.options.speed,
+                    lang=lang_code,
+                )
+                out_file.write(title_samples)
+                duration += len(title_samples) / SAMPLE_RATE
+
+                # Add pause after chapter title
+                pause_duration = self.options.chapter_pause_after_title
+                if pause_duration > 0:
+                    pause_samples = int(pause_duration * SAMPLE_RATE)
+                    pause_audio = self._np.zeros(pause_samples, dtype="float32")
+                    out_file.write(pause_audio)
+                    duration += pause_duration
 
             if use_phrasplit:
                 segments = self._split_text_with_phrasplit(chapter.content)

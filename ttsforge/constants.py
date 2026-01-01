@@ -182,6 +182,9 @@ DEFAULT_CONFIG = {
     # Language override for phonemization (e.g., 'de', 'fr', 'en-us')
     # If None, language is determined from voice prefix
     "phonemization_lang": None,
+    # Chapter announcement settings
+    "announce_chapters": True,  # Read chapter titles aloud before content
+    "chapter_pause_after_title": 2.0,  # Pause after chapter title (seconds)
     "output_filename_template": "{book_title}",
     "chapter_filename_template": "{chapter_num:03d}_{book_title}_{chapter_title}",
     "phoneme_export_template": "{book_title}",

@@ -15,7 +15,7 @@ Output:
 
 import soundfile as sf
 
-from ttsforge.onnx_backend import SAMPLE_RATE, KokoroONNX
+from ttsforge.onnx_backend import SAMPLE_RATE, KokoroONNX, VoiceBlend
 
 # German text samples
 TEXT = """
@@ -45,6 +45,8 @@ Auf Wiedersehen und vielen Dank fürs Zuhören!
 VOICE = "af_bella"  # American Female voice
 VOICE = "ef_dora"  # American Female voice
 VOICE = "if_sara"  # American Female voice
+VOICE = "jf_alpha"  # American Female voice
+BLEND = "jf_alpha:50,ef_dora:50"  # Blend of three voices
 LANG = "de"  # German
 
 
@@ -52,19 +54,21 @@ def main():
     """Generate German speech using English-trained voice."""
     print("Initializing TTS engine...")
     kokoro = KokoroONNX()
+    
 
     print("=" * 60)
     print("NOTE: Kokoro was NOT explicitly trained on German.")
     print("The model will attempt German phonemization via espeak-ng.")
     print("Pronunciation may not be perfect or native-sounding.")
     print("=" * 60)
-    print(f"\nVoice: {VOICE}")
+    print(f"\nVoice: {BLEND}")
     print(f"Language: {LANG}")
 
+    blend = VoiceBlend.parse(BLEND)
     print("\nGenerating audio...")
     samples, _ = kokoro.create(
         TEXT,
-        voice=VOICE,
+        voice=blend,
         speed=1.0,
         lang=LANG,
     )

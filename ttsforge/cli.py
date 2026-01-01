@@ -185,6 +185,18 @@ def main(
     help="Maximum pause between paragraphs in seconds (default: 1.0).",
 )
 @click.option(
+    "--announce-chapters/--no-announce-chapters",
+    "announce_chapters",
+    default=None,
+    help="Read chapter titles aloud before chapter content (default: enabled).",
+)
+@click.option(
+    "--chapter-pause",
+    type=float,
+    default=None,
+    help="Pause duration after chapter title announcement in seconds (default: 2.0).",
+)
+@click.option(
     "--title",
     type=str,
     help="Title metadata for the audiobook.",
@@ -263,6 +275,8 @@ def convert(
     segment_pause_max: Optional[float],
     paragraph_pause_min: Optional[float],
     paragraph_pause_max: Optional[float],
+    announce_chapters: Optional[bool],
+    chapter_pause: Optional[float],
     title: Optional[str],
     author: Optional[str],
     cover: Optional[Path],
@@ -466,6 +480,16 @@ def convert(
             paragraph_pause_max
             if paragraph_pause_max is not None
             else config.get("paragraph_pause_max", 1.0)
+        ),
+        announce_chapters=(
+            announce_chapters
+            if announce_chapters is not None
+            else config.get("announce_chapters", True)
+        ),
+        chapter_pause_after_title=(
+            chapter_pause
+            if chapter_pause is not None
+            else config.get("chapter_pause_after_title", 2.0)
         ),
         split_mode=split_mode or config.get("default_split_mode", "auto"),
         resume=resume,
@@ -1832,6 +1856,18 @@ def phonemes_export(
     help="Maximum pause between paragraphs in seconds (default: 1.0).",
 )
 @click.option(
+    "--announce-chapters/--no-announce-chapters",
+    "announce_chapters",
+    default=None,
+    help="Read chapter titles aloud before chapter content (default: enabled).",
+)
+@click.option(
+    "--chapter-pause",
+    type=float,
+    default=None,
+    help="Pause duration after chapter title announcement in seconds (default: 2.0).",
+)
+@click.option(
     "--chapters",
     type=str,
     default=None,
@@ -1898,6 +1934,8 @@ def phonemes_convert(
     segment_pause_max: Optional[float],
     paragraph_pause_min: Optional[float],
     paragraph_pause_max: Optional[float],
+    announce_chapters: Optional[bool],
+    chapter_pause: Optional[float],
     chapters: Optional[str],
     title: Optional[str],
     author: Optional[str],
@@ -2066,6 +2104,16 @@ def phonemes_convert(
             paragraph_pause_max
             if paragraph_pause_max is not None
             else config.get("paragraph_pause_max", 1.0)
+        ),
+        announce_chapters=(
+            announce_chapters
+            if announce_chapters is not None
+            else config.get("announce_chapters", True)
+        ),
+        chapter_pause_after_title=(
+            chapter_pause
+            if chapter_pause is not None
+            else config.get("chapter_pause_after_title", 2.0)
         ),
         title=effective_title,
         author=effective_author,

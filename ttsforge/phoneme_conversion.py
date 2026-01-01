@@ -265,6 +265,9 @@ class PhonemeConversionOptions:
     # Paragraph pause (random silence between paragraphs - longer than segment pause)
     paragraph_pause_min: float = 0.5
     paragraph_pause_max: float = 1.0
+    # Chapter announcement settings
+    announce_chapters: bool = True  # Read chapter titles aloud before content
+    chapter_pause_after_title: float = 2.0  # Pause after chapter title (seconds)
     # Metadata for m4b
     title: Optional[str] = None
     author: Optional[str] = None
@@ -597,6 +600,43 @@ class PhonemeConverter:
             format="wav",
         ) as out_file:
             duration = 0.0
+
+            # Announce chapter title if enabled
+            # Only announce if there are segments to follow
+            if self.options.announce_chapters and chapter.title and chapter.segments:
+                # Format: "Chapter N. Title"
+                announcement_text = (
+                    f"Chapter {chapter.chapter_index + 1}. {chapter.title}"
+                )
+                assert self._kokoro is not None
+
+                # Get language code for announcement
+                # Use lang override if provided, otherwise detect from first segment
+                if self.options.lang:
+                    from .conversion import get_onnx_lang_code
+
+                    lang_code = get_onnx_lang_code(self.options.lang)
+                elif chapter.segments:
+                    lang_code = chapter.segments[0].lang
+                else:
+                    lang_code = "en-us"  # Default fallback
+
+                title_samples, _ = self._kokoro.create(
+                    announcement_text,
+                    voice=self._voice_style or self.options.voice,
+                    speed=self.options.speed,
+                    lang=lang_code,
+                )
+                out_file.write(title_samples)
+                duration += len(title_samples) / SAMPLE_RATE
+
+                # Add pause after chapter title
+                pause_duration = self.options.chapter_pause_after_title
+                if pause_duration > 0:
+                    pause_samples = int(pause_duration * SAMPLE_RATE)
+                    pause_audio = np.zeros(pause_samples, dtype=np.float32)
+                    out_file.write(pause_audio)
+                    duration += pause_duration
 
             for seg_idx, segment in enumerate(chapter.segments):
                 if self._cancelled:
