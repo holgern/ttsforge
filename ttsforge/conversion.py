@@ -122,6 +122,7 @@ class ConversionState:
     segment_pause_max: float = 0.3
     paragraph_pause_min: float = 0.5
     paragraph_pause_max: float = 1.0
+    lang: Optional[str] = None  # Language override for phonemization
     chapters: list[ChapterState] = field(default_factory=list)
     started_at: str = ""
     last_updated: str = ""
@@ -150,6 +151,8 @@ class ConversionState:
                 data["paragraph_pause_min"] = 0.5
             if "paragraph_pause_max" not in data:
                 data["paragraph_pause_max"] = 1.0
+            if "lang" not in data:
+                data["lang"] = None
 
             return cls(**data)
         except (json.JSONDecodeError, TypeError, KeyError):
@@ -174,6 +177,7 @@ class ConversionState:
             "segment_pause_max": self.segment_pause_max,
             "paragraph_pause_min": self.paragraph_pause_min,
             "paragraph_pause_max": self.paragraph_pause_max,
+            "lang": self.lang,
             "chapters": [
                 {
                     "index": ch.index,
@@ -239,6 +243,9 @@ class ConversionOptions:
     output_dir: Optional[Path] = None
     use_gpu: bool = False  # GPU requires onnxruntime-gpu
     silence_between_chapters: float = 2.0
+    # Language override for phonemization (e.g., 'de', 'en-us', 'fr')
+    # If None, language is determined from voice prefix
+    lang: Optional[str] = None
     # Segment pause (random silence between sentences within a paragraph)
     segment_pause_min: float = 0.1
     segment_pause_max: float = 0.3
@@ -715,7 +722,11 @@ class TTSConverter:
         chars_processed = 0
 
         # Get language code for ONNX
-        lang_code = get_onnx_lang_code(self.options.language)
+        # Use lang override if provided, otherwise use language from options
+        effective_lang = (
+            self.options.lang if self.options.lang else self.options.language
+        )
+        lang_code = get_onnx_lang_code(effective_lang)
 
         # Open WAV file for writing
         with sf.SoundFile(
@@ -1024,12 +1035,14 @@ class TTSConverter:
                             != self.options.paragraph_pause_min
                             or state.paragraph_pause_max
                             != self.options.paragraph_pause_max
+                            or state.lang != self.options.lang
                         )
 
                         if settings_changed:
                             self.log(
                                 f"Restoring settings from previous session: "
                                 f"voice={state.voice}, language={state.language}, "
+                                f"lang_override={state.lang}, "
                                 f"speed={state.speed}, split_mode={state.split_mode}, "
                                 f"silence={state.silence_between_chapters}s, "
                                 f"segment_pause={state.segment_pause_min}-"
@@ -1052,6 +1065,7 @@ class TTSConverter:
                         self.options.segment_pause_max = state.segment_pause_max
                         self.options.paragraph_pause_min = state.paragraph_pause_min
                         self.options.paragraph_pause_max = state.paragraph_pause_max
+                        self.options.lang = state.lang
 
             if state is None:
                 # Create new state
@@ -1071,6 +1085,7 @@ class TTSConverter:
                     segment_pause_max=self.options.segment_pause_max,
                     paragraph_pause_min=self.options.paragraph_pause_min,
                     paragraph_pause_max=self.options.paragraph_pause_max,
+                    lang=self.options.lang,
                     chapters=[
                         ChapterState(
                             index=i,
@@ -1290,7 +1305,11 @@ class TTSConverter:
                 self.log(f"Chapter {chapter_idx + 1}/{len(chapters)}: {chapter.title}")
 
                 # Get language code for ONNX
-                lang_code = get_onnx_lang_code(self.options.language)
+                # Use lang override if provided, otherwise use language from options
+                effective_lang = (
+                    self.options.lang if self.options.lang else self.options.language
+                )
+                lang_code = get_onnx_lang_code(effective_lang)
 
                 # Generate TTS for this chapter
                 if use_phrasplit:

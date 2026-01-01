@@ -167,6 +167,7 @@ class PhonemeConversionState:
     segment_pause_max: float = 0.3
     paragraph_pause_min: float = 0.5
     paragraph_pause_max: float = 1.0
+    lang: Optional[str] = None  # Language override for phonemization
     chapters: list[PhonemeChapterState] = field(default_factory=list)
     started_at: str = ""
     last_updated: str = ""
@@ -203,6 +204,8 @@ class PhonemeConversionState:
                 data["paragraph_pause_min"] = 0.5
             if "paragraph_pause_max" not in data:
                 data["paragraph_pause_max"] = 1.0
+            if "lang" not in data:
+                data["lang"] = None
 
             return cls(**data)
         except (json.JSONDecodeError, TypeError, KeyError):
@@ -224,6 +227,7 @@ class PhonemeConversionState:
             "segment_pause_max": self.segment_pause_max,
             "paragraph_pause_min": self.paragraph_pause_min,
             "paragraph_pause_max": self.paragraph_pause_max,
+            "lang": self.lang,
             "chapters": [
                 {
                     "index": ch.index,
@@ -252,6 +256,9 @@ class PhonemeConversionOptions:
     output_format: str = "m4b"
     use_gpu: bool = False
     silence_between_chapters: float = 2.0
+    # Language override for phonemization (e.g., 'de', 'en-us', 'fr')
+    # If None, language from PhonemeSegments is used
+    lang: Optional[str] = None
     # Segment pause (random silence between sentences within a paragraph)
     segment_pause_min: float = 0.1
     segment_pause_max: float = 0.3
@@ -601,6 +608,7 @@ class PhonemeConverter:
                     segment,
                     voice=self._voice_style or self.options.voice,
                     speed=self.options.speed,
+                    lang=self.options.lang,
                 )
 
                 if self._cancelled:
@@ -1121,6 +1129,7 @@ class PhonemeConverter:
                         segment,
                         voice=self._voice_style or self.options.voice,
                         speed=self.options.speed,
+                        lang=self.options.lang,
                     )
 
                     if self._cancelled:

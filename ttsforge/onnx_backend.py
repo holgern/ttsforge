@@ -816,6 +816,7 @@ class KokoroONNX:
         segment: "PhonemeSegment",
         voice: str | np.ndarray | VoiceBlend,
         speed: float = 1.0,
+        lang: Optional[str] = None,
     ) -> tuple[np.ndarray, int]:
         """
         Generate audio from a PhonemeSegment.
@@ -824,6 +825,7 @@ class KokoroONNX:
             segment: PhonemeSegment with phonemes and tokens
             voice: Voice name, style vector, or VoiceBlend
             speed: Speech speed (1.0 = normal)
+            lang: Language code override (e.g., 'de', 'en-us')
 
         Returns:
             Tuple of (audio samples as numpy array, sample rate)
@@ -835,7 +837,9 @@ class KokoroONNX:
             return self.create_from_phonemes(segment.phonemes, voice, speed)
         else:
             # Fall back to text
-            return self.create(segment.text, voice, speed, segment.lang)
+            # Use lang override if provided, otherwise use segment's lang
+            effective_lang = lang if lang is not None else segment.lang
+            return self.create(segment.text, voice, speed, effective_lang)
 
     def phonemize(self, text: str, lang: str = "en-us") -> str:
         """

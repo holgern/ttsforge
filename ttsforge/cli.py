@@ -132,6 +132,13 @@ def main(
     help="Language code (a=American English, b=British English, etc.).",
 )
 @click.option(
+    "--lang",
+    type=str,
+    default=None,
+    help="Override language for phonemization (e.g., 'de', 'fr', 'en-us'). "
+    "By default, language is determined from the voice.",
+)
+@click.option(
     "-s",
     "--speed",
     type=float,
@@ -247,6 +254,7 @@ def convert(
     output_format: Optional[str],
     voice: Optional[str],
     language: Optional[str],
+    lang: Optional[str],
     speed: Optional[float],
     use_gpu: Optional[bool],
     chapters: Optional[str],
@@ -406,6 +414,7 @@ def convert(
         num_chapters=len(selected_indices) if selected_indices else len(epub_chapters),
         title=effective_title,
         author=effective_author,
+        lang=lang,
     )
 
     # Confirm
@@ -437,6 +446,7 @@ def convert(
         output_dir=output.parent,
         use_gpu=use_gpu if use_gpu is not None else config.get("use_gpu", False),
         silence_between_chapters=silence or config.get("silence_between_chapters", 2.0),
+        lang=lang or config.get("phonemization_lang"),
         segment_pause_min=(
             segment_pause_min
             if segment_pause_min is not None
@@ -680,6 +690,12 @@ DEFAULT_SAMPLE_TEXT = (
     type=click.Choice(list(LANGUAGE_DESCRIPTIONS.keys())),
     help="Language for TTS.",
 )
+@click.option(
+    "--lang",
+    type=str,
+    default=None,
+    help="Override language for phonemization (e.g., 'de', 'fr', 'en-us').",
+)
 @click.option("-s", "--speed", type=float, help="Speech speed (default: 1.0).")
 @click.option(
     "--gpu/--no-gpu",
@@ -709,11 +725,12 @@ def sample(
     output_format: str,
     voice: Optional[str],
     language: Optional[str],
+    lang: Optional[str],
     speed: Optional[float],
     use_gpu: Optional[bool],
     split_mode: Optional[str],
-    verbose: bool,
     play_audio: bool,
+    verbose: bool,
 ) -> None:
     """Generate a sample audio file to test TTS settings.
 
@@ -768,6 +785,7 @@ def sample(
         output_format=output_format,
         use_gpu=use_gpu if use_gpu is not None else user_config.get("use_gpu", True),
         split_mode=split_mode or user_config.get("split_mode", "auto"),
+        lang=lang or user_config.get("phonemization_lang"),
         model_path=model_path,
         voices_path=voices_path,
     )
@@ -776,6 +794,8 @@ def sample(
     console.print(f"[dim]Voice:[/dim] {options.voice}")
     lang_desc = LANGUAGE_DESCRIPTIONS.get(options.language, "Unknown")
     console.print(f"[dim]Language:[/dim] {options.language} ({lang_desc})")
+    if options.lang:
+        console.print(f"[dim]Phonemization Lang:[/dim] {options.lang} (override)")
     console.print(f"[dim]Speed:[/dim] {options.speed}")
     console.print(f"[dim]Format:[/dim] {options.output_format}")
     console.print(f"[dim]Split mode:[/dim] {options.split_mode}")
@@ -2424,6 +2444,7 @@ def _show_conversion_summary(
     num_chapters: int,
     title: str,
     author: str,
+    lang: Optional[str] = None,
 ) -> None:
     """Show conversion summary before starting."""
     console.print()
@@ -2438,6 +2459,8 @@ def _show_conversion_summary(
     table.add_row("Chapters", str(num_chapters))
     table.add_row("Voice", voice)
     table.add_row("Language", LANGUAGE_DESCRIPTIONS.get(language, language))
+    if lang:
+        table.add_row("Phonemization Lang", f"{lang} (override)")
     table.add_row("Speed", f"{speed}x")
     table.add_row("GPU", "Enabled" if use_gpu else "Disabled")
     table.add_row("Title", title)
