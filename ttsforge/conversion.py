@@ -1032,8 +1032,10 @@ class TTSConverter:
                                 f"voice={state.voice}, language={state.language}, "
                                 f"speed={state.speed}, split_mode={state.split_mode}, "
                                 f"silence={state.silence_between_chapters}s, "
-                                f"segment_pause={state.segment_pause_min}-{state.segment_pause_max}s, "
-                                f"paragraph_pause={state.paragraph_pause_min}-{state.paragraph_pause_max}s",
+                                f"segment_pause={state.segment_pause_min}-"
+                                f"{state.segment_pause_max}s, "
+                                f"paragraph_pause={state.paragraph_pause_min}-"
+                                f"{state.paragraph_pause_max}s",
                                 "info",
                             )
 
@@ -1322,7 +1324,7 @@ class TTSConverter:
                         current_time += chunk_duration
 
                         # Add pause between segments (not after the last segment)
-                        # Use longer pause for paragraph boundaries, shorter for sentences
+                        # Longer pause for paragraph boundaries, shorter for sentences
                         if seg_idx < total_segments - 1:
                             next_segment = segments[seg_idx + 1]
                             if next_segment.paragraph != segment.paragraph:

@@ -1,14 +1,28 @@
 """Vocabulary management for ttsforge tokenizer.
 
-This module handles loading phoneme-to-token vocabularies from the
-downloaded config.json file.
+This module provides a compatibility layer that wraps kokorog2p's vocabulary
+functions for backward compatibility with existing ttsforge code.
 """
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import TYPE_CHECKING
+
+import kokorog2p
+from kokorog2p.vocab import (
+    get_vocab as _get_kokoro_vocab,
+    get_vocab_reverse as _get_vocab_reverse,
+    get_config as _get_kokoro_config,
+    N_TOKENS,
+    PAD_IDX,
+    encode,
+    decode,
+    validate_for_kokoro,
+    filter_for_kokoro,
+    phonemes_to_ids,
+    ids_to_phonemes,
+)
 
 if TYPE_CHECKING:
     pass
@@ -21,115 +35,76 @@ SUPPORTED_VERSIONS = {"v1.0"}
 
 
 def get_config_path() -> Path:
-    """Get the path to the cached config.json.
+    """Get the path to the config.json (compatibility function).
 
     Returns:
-        Path to the config.json file in the cache directory.
+        Path to the embedded kokoro_config.json in kokorog2p.
 
     Note:
-        This imports from onnx_backend to avoid circular imports.
+        This now returns the path to kokorog2p's embedded config,
+        not the downloaded config.json from onnx_backend.
     """
-    from ..onnx_backend import get_config_path as _get_config_path
+    import kokorog2p.data
 
-    return _get_config_path()
+    return Path(kokorog2p.data.__file__).parent / "kokoro_config.json"
 
 
 def is_config_downloaded() -> bool:
-    """Check if config.json is downloaded.
+    """Check if config is available (always True with kokorog2p).
 
     Returns:
-        True if config.json exists in the cache directory.
+        True (kokorog2p embeds the vocabulary)
     """
-    from ..onnx_backend import is_config_downloaded as _is_config_downloaded
-
-    return _is_config_downloaded()
+    return True
 
 
 def load_vocab(config_path: Path | str | None = None) -> dict[str, int]:
-    """Load vocabulary from cached config.json.
+    """Load vocabulary from kokorog2p.
 
     Args:
-        config_path: Optional path to config.json, or a version string
-            (e.g., "v1.0") for backward compatibility. If None, uses the
-            cached config.json from the download directory.
+        config_path: Ignored (kept for backward compatibility).
+            The vocabulary is now loaded from kokorog2p's embedded data.
 
     Returns:
         Dictionary mapping phoneme strings to token IDs.
 
     Raises:
-        FileNotFoundError: If config.json is not found. Run
-            `ttsforge download` to download the required files.
         ValueError: If an unknown version string is provided.
     """
     # Handle backward compatibility with version strings
     if isinstance(config_path, str):
         if config_path in SUPPORTED_VERSIONS:
-            # Version string provided, use default config path
-            config_path = get_config_path()
+            # Version string provided, use kokorog2p vocab
+            pass
         elif config_path.startswith("v") and "." in config_path:
             # Looks like a version string but not supported
             raise ValueError(
                 f"Unknown vocabulary version: {config_path}. "
                 f"Supported versions: {', '.join(sorted(SUPPORTED_VERSIONS))}"
             )
-        else:
-            # Try to interpret as a path
-            config_path = Path(config_path)
+        # Otherwise ignore and use kokorog2p vocab
 
-    if config_path is None:
-        config_path = get_config_path()
-
-    if not config_path.exists():
-        raise FileNotFoundError(
-            f"Config file not found at {config_path}. "
-            "Please run 'ttsforge download' to download the required model files."
-        )
-
-    with open(config_path, encoding="utf-8") as f:
-        data = json.load(f)
-
-    return data["vocab"]
+    return _get_kokoro_vocab()
 
 
 def get_vocab_info(config_path: Path | str | None = None) -> dict:
     """Get metadata about the vocabulary.
 
     Args:
-        config_path: Optional path to config.json, or a version string
-            for backward compatibility.
+        config_path: Ignored (kept for backward compatibility).
 
     Returns:
         Dictionary with vocabulary metadata.
     """
-    # Handle backward compatibility with version strings
-    if isinstance(config_path, str):
-        if config_path in SUPPORTED_VERSIONS:
-            config_path = get_config_path()
-        else:
-            config_path = Path(config_path)
-
-    if config_path is None:
-        config_path = get_config_path()
-
-    if not config_path.exists():
-        return {
-            "version": DEFAULT_VERSION,
-            "path": str(config_path),
-            "num_tokens": 0,
-            "max_token_id": 0,
-            "downloaded": False,
-        }
-
-    with open(config_path, encoding="utf-8") as f:
-        data = json.load(f)
-
-    vocab = data["vocab"]
+    vocab = _get_kokoro_vocab()
     return {
         "version": DEFAULT_VERSION,
-        "path": str(config_path),
+        "path": str(get_config_path()),
         "num_tokens": len(vocab),
         "max_token_id": max(vocab.values()) if vocab else 0,
+        "n_tokens": N_TOKENS,
         "downloaded": True,
+        "backend": "kokorog2p",
     }
 
 
@@ -140,3 +115,25 @@ def list_versions() -> list[str]:
         List of version strings. Currently only "v1.0" is supported.
     """
     return [DEFAULT_VERSION]
+
+
+# Re-export kokorog2p vocabulary functions for convenience
+__all__ = [
+    # Compatibility functions
+    "DEFAULT_VERSION",
+    "SUPPORTED_VERSIONS",
+    "get_config_path",
+    "is_config_downloaded",
+    "load_vocab",
+    "get_vocab_info",
+    "list_versions",
+    # kokorog2p re-exports
+    "N_TOKENS",
+    "PAD_IDX",
+    "encode",
+    "decode",
+    "validate_for_kokoro",
+    "filter_for_kokoro",
+    "phonemes_to_ids",
+    "ids_to_phonemes",
+]

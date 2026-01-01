@@ -1,28 +1,26 @@
 """Tokenizer for ttsforge - converts text to phonemes and tokens.
 
 This module provides text-to-phoneme and phoneme-to-token conversion using
-espeak-ng as the phonemizer backend.
+kokorog2p (dictionary + espeak fallback) as the phonemizer backend.
 """
 
 from __future__ import annotations
 
-import ctypes
-import ctypes.util
 import logging
-import os
-import platform
-import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
-import espeakng_loader
-import phonemizer
-from phonemizer.backend.espeak.wrapper import EspeakWrapper
-
-try:
-    from .vocab import DEFAULT_VERSION, load_vocab
-except ImportError:
-    from ttsforge.vocab import DEFAULT_VERSION, load_vocab
+from kokorog2p import (
+    N_TOKENS,
+    GToken,
+    filter_for_kokoro,
+    get_g2p,
+    get_kokoro_vocab,
+    ids_to_phonemes,
+    phonemes_to_ids,
+    validate_for_kokoro,
+)
+from kokorog2p.base import G2PBase
 
 if TYPE_CHECKING:
     pass
@@ -34,11 +32,13 @@ MAX_PHONEME_LENGTH = 510
 SAMPLE_RATE = 24000
 
 # Supported languages for phonemization
-# Format: language code -> espeak language code
+# Format: language code -> kokorog2p language code
 SUPPORTED_LANGUAGES = {
     "en-us": "en-us",
     "en-gb": "en-gb",
     "en": "en-us",  # Default English to US
+    # Note: kokorog2p currently only supports English
+    # Other languages will fall back to espeak-only mode
     "es": "es",
     "fr": "fr-fr",
     "de": "de",
@@ -54,31 +54,66 @@ SUPPORTED_LANGUAGES = {
 
 
 @dataclass
-class EspeakConfig:
-    """Configuration for espeak-ng backend.
+class TokenizerConfig:
+    """Configuration for the tokenizer.
 
     Attributes:
-        lib_path: Path to the espeak-ng shared library
-        data_path: Path to the espeak-ng data directory
+        use_espeak_fallback: Whether to use espeak for OOV words (default: True)
+        use_spacy: Whether to use spaCy for POS tagging (default: True)
+        use_dictionary: Whether to use dictionary lookup (default: True)
+    """
+
+    use_espeak_fallback: bool = True
+    use_spacy: bool = True
+    use_dictionary: bool = True
+
+
+# Backward compatibility alias
+@dataclass
+class EspeakConfig:
+    """Configuration for espeak-ng backend (deprecated, use TokenizerConfig).
+
+    Kept for backward compatibility. The lib_path and data_path are now
+    managed by kokorog2p internally.
+
+    Attributes:
+        lib_path: Path to the espeak-ng shared library (ignored)
+        data_path: Path to the espeak-ng data directory (ignored)
     """
 
     lib_path: str | None = None
     data_path: str | None = None
 
 
+@dataclass
+class PhonemeResult:
+    """Result of phonemization with quality metadata.
+
+    Attributes:
+        phonemes: The phoneme string
+        tokens: List of GToken objects with per-word phonemes
+        low_confidence_words: Words that used espeak fallback
+    """
+
+    phonemes: str
+    tokens: list[GToken] = field(default_factory=list)
+    low_confidence_words: list[str] = field(default_factory=list)
+
+
 class Tokenizer:
-    """Text-to-phoneme-to-token converter using espeak-ng.
+    """Text-to-phoneme-to-token converter using kokorog2p.
 
     This class handles:
     1. Text normalization
-    2. Text to phoneme conversion (via espeak-ng/phonemizer)
-    3. Phoneme to token conversion (via vocabulary)
+    2. Text to phoneme conversion (via kokorog2p dictionary + espeak fallback)
+    3. Phoneme to token conversion (via Kokoro vocabulary)
     4. Token to phoneme conversion (reverse lookup)
 
     Args:
-        espeak_config: Optional espeak-ng configuration
-        vocab_version: Vocabulary version to use (default: "v1.0")
-        vocab: Optional custom vocabulary dict (overrides vocab_version)
+        espeak_config: Deprecated, kept for backward compatibility
+        vocab_version: Ignored (uses kokorog2p's embedded vocabulary)
+        vocab: Optional custom vocabulary dict (overrides default)
+        config: Optional TokenizerConfig for phonemization settings
 
     Example:
         >>> tokenizer = Tokenizer()
@@ -90,79 +125,92 @@ class Tokenizer:
     def __init__(
         self,
         espeak_config: EspeakConfig | None = None,
-        vocab_version: str = DEFAULT_VERSION,
+        vocab_version: str = "v1.0",
         vocab: dict[str, int] | None = None,
+        config: TokenizerConfig | None = None,
     ):
         """Initialize the tokenizer.
 
         Args:
-            espeak_config: Optional espeak-ng configuration
-            vocab_version: Vocabulary version to use
-            vocab: Optional custom vocabulary (overrides vocab_version)
+            espeak_config: Deprecated, kept for backward compatibility
+            vocab_version: Ignored (uses kokorog2p's embedded vocabulary)
+            vocab: Optional custom vocabulary (overrides default)
+            config: Optional TokenizerConfig for phonemization settings
         """
         self.vocab_version = vocab_version
-        self.vocab = vocab if vocab is not None else load_vocab(vocab_version)
+        self.vocab = vocab if vocab is not None else get_kokoro_vocab()
         self._reverse_vocab: dict[int, str] | None = None
+        self.config = config or TokenizerConfig()
 
-        # Initialize espeak-ng
-        self._init_espeak(espeak_config)
+        # G2P instances cache (lazy loaded per language)
+        self._g2p_cache: dict[str, G2PBase] = {}
 
-    def _init_espeak(self, config: EspeakConfig | None) -> None:
-        """Initialize espeak-ng library.
+        # Log if espeak_config was provided (deprecated)
+        if espeak_config is not None and (
+            espeak_config.lib_path or espeak_config.data_path
+        ):
+            logger.warning(
+                "EspeakConfig is deprecated. kokorog2p manages espeak internally."
+            )
+
+    def _get_g2p(self, lang: str) -> G2PBase:
+        """Get or create a G2P instance for the given language.
 
         Args:
-            config: Optional espeak configuration
+            lang: Language code (e.g., 'en-us', 'en-gb')
+
+        Returns:
+            G2P instance for the language
         """
-        if config is None:
-            config = EspeakConfig()
+        if lang not in self._g2p_cache:
+            # Map language to kokorog2p format
+            kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
 
-        # Use espeakng_loader defaults if not specified
-        if not config.data_path:
-            config.data_path = espeakng_loader.get_data_path()
-        if not config.lib_path:
-            config.lib_path = espeakng_loader.get_library_path()
-
-        # Check environment override
-        env_lib = os.getenv("PHONEMIZER_ESPEAK_LIBRARY")
-        if env_lib:
-            config.lib_path = env_lib
-
-        # Try to load the library
-        try:
-            if config.lib_path:
-                ctypes.cdll.LoadLibrary(config.lib_path)
-        except Exception as e:
-            logger.warning(f"Failed to load espeak shared library: {e}")
-            logger.info("Falling back to system-wide espeak-ng library")
-
-            # Fallback to system library
-            config.lib_path = ctypes.util.find_library(
-                "espeak-ng"
-            ) or ctypes.util.find_library("espeak")
-
-            if not config.lib_path:
-                error_info = (
-                    "Failed to load espeak-ng. Please install espeak-ng system-wide.\n"
-                    "\tSee https://github.com/espeak-ng/espeak-ng/blob/master/docs/guide.md\n"
-                    "\tNote: you can specify shared library path using "
-                    "PHONEMIZER_ESPEAK_LIBRARY environment variable.\n"
-                    f"Environment:\n\t{platform.platform()} ({platform.release()}) "
-                    f"| {sys.version}"
+            # Only English is fully supported by kokorog2p
+            if kokorog2p_lang.startswith("en"):
+                self._g2p_cache[lang] = get_g2p(
+                    language=kokorog2p_lang,
+                    use_espeak_fallback=self.config.use_espeak_fallback,
+                    use_spacy=self.config.use_spacy,
                 )
-                raise RuntimeError(error_info) from e
+            else:
+                # For non-English, use espeak-only mode
+                logger.info(
+                    f"Language {lang} not fully supported, using espeak fallback only"
+                )
+                # Create a minimal G2P that just uses espeak
+                self._g2p_cache[lang] = self._create_espeak_only_g2p(kokorog2p_lang)
 
-            try:
-                ctypes.cdll.LoadLibrary(config.lib_path)
-            except Exception as e2:
-                raise RuntimeError(
-                    f"Failed to load espeak-ng from fallback: {e2}"
-                ) from e2
+        return self._g2p_cache[lang]
 
-        # Configure phonemizer backend
-        if config.data_path:
-            EspeakWrapper.set_data_path(config.data_path)
-        if config.lib_path:
-            EspeakWrapper.set_library(config.lib_path)
+    def _create_espeak_only_g2p(self, lang: str) -> G2PBase:
+        """Create an espeak-only G2P for non-English languages.
+
+        Args:
+            lang: Language code
+
+        Returns:
+            G2P instance using espeak backend
+        """
+        from kokorog2p.backends.espeak import EspeakBackend
+
+        class EspeakOnlyG2P(G2PBase):
+            """Minimal G2P that only uses espeak."""
+
+            def __init__(self, language: str):
+                super().__init__(language=language, use_espeak_fallback=True)
+                self._backend = EspeakBackend(language=language)
+
+            def __call__(self, text: str) -> list[GToken]:
+                if not text.strip():
+                    return []
+                phonemes = self._backend.phonemize(text)
+                return [GToken(text=text, phonemes=phonemes)]
+
+            def lookup(self, word: str, tag: str | None = None) -> str | None:
+                return self._backend.phonemize(word)
+
+        return EspeakOnlyG2P(language=lang)
 
     @property
     def reverse_vocab(self) -> dict[int, str]:
@@ -200,7 +248,7 @@ class Tokenizer:
             normalize: Whether to normalize text first
 
         Returns:
-            Phoneme string (IPA characters)
+            Phoneme string (Kokoro format)
 
         Raises:
             ValueError: If language is not supported
@@ -211,26 +259,73 @@ class Tokenizer:
         if not text:
             return ""
 
-        # Map language to espeak code
-        espeak_lang = SUPPORTED_LANGUAGES.get(lang, lang)
+        # Get G2P instance for language
+        g2p = self._get_g2p(lang)
 
-        # Use phonemizer library
-        phonemes = phonemizer.phonemize(
-            text,
-            language=espeak_lang,
-            preserve_punctuation=True,
-            with_stress=True,
-        )
+        # Convert text to phonemes using kokorog2p
+        phonemes = g2p.phonemize(text)
 
         # Filter to only characters in vocabulary
-        phonemes = "".join(c for c in phonemes if c in self.vocab)
+        phonemes = filter_for_kokoro(phonemes)
+
         return phonemes.strip()
+
+    def phonemize_detailed(
+        self,
+        text: str,
+        lang: str = "en-us",
+        normalize: bool = True,
+    ) -> PhonemeResult:
+        """Convert text to phonemes with detailed token information.
+
+        Args:
+            text: Input text
+            lang: Language code (e.g., 'en-us', 'en-gb')
+            normalize: Whether to normalize text first
+
+        Returns:
+            PhonemeResult with phonemes, tokens, and quality metadata
+        """
+        if normalize:
+            text = self.normalize_text(text)
+
+        if not text:
+            return PhonemeResult(phonemes="", tokens=[], low_confidence_words=[])
+
+        # Get G2P instance for language
+        g2p = self._get_g2p(lang)
+
+        # Get tokens with per-word phonemes
+        tokens = g2p(text)
+
+        # Build phoneme string and identify low-confidence words
+        phoneme_parts = []
+        low_confidence = []
+
+        for token in tokens:
+            if token.phonemes:
+                phoneme_parts.append(token.phonemes)
+                # Check rating (1 = espeak fallback, 3-4 = dictionary)
+                rating = token.get("rating", 4)
+                if rating is not None and rating < 2:
+                    low_confidence.append(token.text)
+            if token.whitespace:
+                phoneme_parts.append(" ")
+
+        phonemes = "".join(phoneme_parts)
+        phonemes = filter_for_kokoro(phonemes)
+
+        return PhonemeResult(
+            phonemes=phonemes.strip(),
+            tokens=tokens,
+            low_confidence_words=low_confidence,
+        )
 
     def tokenize(self, phonemes: str) -> list[int]:
         """Convert phonemes to token IDs.
 
         Args:
-            phonemes: Phoneme string (IPA characters)
+            phonemes: Phoneme string (Kokoro format)
 
         Returns:
             List of token IDs
@@ -244,9 +339,7 @@ class Tokenizer:
                 f"Maximum is {MAX_PHONEME_LENGTH} phonemes."
             )
 
-        return [
-            token_id for c in phonemes if (token_id := self.vocab.get(c)) is not None
-        ]
+        return phonemes_to_ids(phonemes)
 
     def detokenize(self, tokens: list[int]) -> str:
         """Convert token IDs back to phonemes.
@@ -257,11 +350,7 @@ class Tokenizer:
         Returns:
             Phoneme string
         """
-        return "".join(
-            phoneme
-            for t in tokens
-            if (phoneme := self.reverse_vocab.get(t)) is not None
-        )
+        return ids_to_phonemes(tokens)
 
     def text_to_tokens(
         self,
@@ -300,12 +389,15 @@ class Tokenizer:
         Returns:
             List of (word, phonemes) tuples
         """
-        words = text.split()
-        result = []
+        g2p = self._get_g2p(lang)
+        tokens = g2p(text)
 
-        for word in words:
-            phonemes = self.phonemize(word, lang=lang, normalize=True)
-            result.append((word, phonemes))
+        result = []
+        for token in tokens:
+            if token.phonemes and token.text.strip():
+                # Filter phonemes for Kokoro vocabulary
+                filtered_phonemes = filter_for_kokoro(token.phonemes)
+                result.append((token.text, filtered_phonemes))
 
         return result
 
@@ -337,4 +429,38 @@ class Tokenizer:
             "num_tokens": len(self.vocab),
             "max_token_id": max(self.vocab.values()) if self.vocab else 0,
             "max_phoneme_length": MAX_PHONEME_LENGTH,
+            "n_tokens": N_TOKENS,
+            "backend": "kokorog2p",
         }
+
+    def validate_phonemes(self, phonemes: str) -> tuple[bool, list[str]]:
+        """Validate that all characters are in the Kokoro vocabulary.
+
+        Args:
+            phonemes: Phoneme string to validate
+
+        Returns:
+            Tuple of (is_valid, list_of_invalid_chars)
+        """
+        return validate_for_kokoro(phonemes)
+
+
+# Convenience function for simple usage
+def create_tokenizer(
+    use_espeak_fallback: bool = True,
+    use_spacy: bool = True,
+) -> Tokenizer:
+    """Create a tokenizer with the specified configuration.
+
+    Args:
+        use_espeak_fallback: Whether to use espeak for OOV words
+        use_spacy: Whether to use spaCy for POS tagging
+
+    Returns:
+        Configured Tokenizer instance
+    """
+    config = TokenizerConfig(
+        use_espeak_fallback=use_espeak_fallback,
+        use_spacy=use_spacy,
+    )
+    return Tokenizer(config=config)

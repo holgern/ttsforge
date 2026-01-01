@@ -166,12 +166,15 @@ DEFAULT_CONFIG = {
     "default_speed": 1.0,
     "default_format": "m4b",
     "use_gpu": False,  # GPU requires onnxruntime-gpu
-    "model_quality": "fp32",  # Model quality: fp32, fp16, q8, q8f16, q4, q4f16, uint8, uint8f16
+    # Model quality: fp32, fp16, q8, q8f16, q4, q4f16, uint8, uint8f16
+    "model_quality": "fp32",
     "silence_between_chapters": 2.0,
     "save_chapters_separately": False,
     "merge_at_end": True,
     "auto_detect_language": True,
     "default_split_mode": "auto",
+    "default_content_mode": "chapters",  # Content mode for read: chapters or pages
+    "default_page_size": 2000,  # Synthetic page size in characters for pages mode
     "segment_pause_min": 0.1,
     "segment_pause_max": 0.3,
     "paragraph_pause_min": 0.5,

@@ -854,8 +854,10 @@ class PhonemeConverter:
                             f"Restoring settings from previous session: "
                             f"voice={state.voice}, speed={state.speed}, "
                             f"silence={state.silence_between_chapters}s, "
-                            f"segment_pause={state.segment_pause_min}-{state.segment_pause_max}s, "
-                            f"paragraph_pause={state.paragraph_pause_min}-{state.paragraph_pause_max}s",
+                            f"segment_pause={state.segment_pause_min}-"
+                            f"{state.segment_pause_max}s, "
+                            f"paragraph_pause={state.paragraph_pause_min}-"
+                            f"{state.paragraph_pause_max}s",
                             "info",
                         )
                         # Apply saved settings for consistency

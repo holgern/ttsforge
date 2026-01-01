@@ -1112,7 +1112,10 @@ def demo(
                     if text:
                         demo_text = text.format(voice=" and ".join(voice_names))
                     else:
-                        demo_text = f"This is a blend of {' and '.join(voice_names)} speaking together."
+                        voices_str = " and ".join(voice_names)
+                        demo_text = (
+                            f"This is a blend of {voices_str} speaking together."
+                        )
 
                     # Generate audio with blended voice
                     samples, sr = kokoro.create(
@@ -1148,8 +1151,9 @@ def demo(
                 progress.advance(task)
 
         if save_output:
+            num_saved = len(blends_to_process)
             console.print(
-                f"\n[green]Saved {len(blends_to_process)} voice blend demos to:[/green] {output}"
+                f"\n[green]Saved {num_saved} voice blend demos to:[/green] {output}"
             )
         elif play_audio:
             console.print("\n[green]Playback complete.[/green]")
@@ -2475,10 +2479,23 @@ def _show_conversion_summary(
     help="Use GPU acceleration if available.",
 )
 @click.option(
+    "--mode",
+    "content_mode",
+    type=click.Choice(["chapters", "pages"]),
+    default=None,
+    help="Split content by chapters or pages (default: chapters).",
+)
+@click.option(
     "-c",
     "--chapters",
     type=str,
-    help="Chapter selection (e.g., '1-5', '1,3,5', '3-').",
+    help="Chapter selection (e.g., '1-5', '1,3,5', '3-'). Use with --mode chapters.",
+)
+@click.option(
+    "-p",
+    "--pages",
+    type=str,
+    help="Page selection (e.g., '1-50', '10,20,30'). Use with --mode pages.",
 )
 @click.option(
     "--start-chapter",
@@ -2486,14 +2503,26 @@ def _show_conversion_summary(
     help="Start from specific chapter number (1-indexed).",
 )
 @click.option(
+    "--start-page",
+    type=int,
+    help="Start from specific page number (1-indexed).",
+)
+@click.option(
+    "--page-size",
+    type=int,
+    default=None,
+    help="Synthetic page size in characters (default: 2000). Only for --mode pages.",
+)
+@click.option(
     "--resume",
     is_flag=True,
     help="Resume from last saved position.",
 )
 @click.option(
-    "--list-chapters",
+    "--list",
+    "list_content",
     is_flag=True,
-    help="List chapters and exit without reading.",
+    help="List chapters/pages and exit without reading.",
 )
 @click.option(
     "--split",
@@ -2534,10 +2563,14 @@ def read(
     language: Optional[str],
     speed: Optional[float],
     use_gpu: Optional[bool],
+    content_mode: Optional[str],
     chapters: Optional[str],
+    pages: Optional[str],
     start_chapter: Optional[int],
+    start_page: Optional[int],
+    page_size: Optional[int],
     resume: bool,
-    list_chapters: bool,
+    list_content: bool,
     split_mode: Optional[str],
     segment_pause_min: Optional[float],
     segment_pause_max: Optional[float],
@@ -2547,15 +2580,18 @@ def read(
     """Read an EPUB or text file aloud with streaming playback.
 
     Streams audio in real-time without creating output files.
-    Supports chapter selection, position saving, and resume.
+    Supports chapter/page selection, position saving, and resume.
 
     \b
     Examples:
         ttsforge read book.epub
         ttsforge read book.epub --chapters "1-5"
+        ttsforge read book.epub --mode pages --pages "1-50"
+        ttsforge read book.epub --mode pages --start-page 10
         ttsforge read book.epub --start-chapter 3
         ttsforge read book.epub --resume
         ttsforge read book.epub --split sentence
+        ttsforge read book.epub --list
         ttsforge read story.txt
         cat story.txt | ttsforge read -
 
@@ -2588,6 +2624,11 @@ def read(
     effective_use_gpu = (
         use_gpu if use_gpu is not None else config.get("default_use_gpu", False)
     )
+    # Content mode: chapters or pages
+    effective_content_mode = content_mode or config.get(
+        "default_content_mode", "chapters"
+    )
+    effective_page_size = page_size or config.get("default_page_size", 2000)
     # Use default_split_mode from config, map "auto" to "sentence" for streaming
     config_split_mode = split_mode or config.get("default_split_mode", "sentence")
     # Map auto/clause/line to sentence for the read command
@@ -2620,6 +2661,18 @@ def read(
     # Get language code for TTS
     espeak_lang = LANG_CODE_TO_ONNX.get(effective_language, "en-us")
 
+    # Validate conflicting options
+    if effective_content_mode == "chapters" and (pages or start_page):
+        console.print(
+            "[yellow]Warning:[/yellow] --pages/--start-page ignored in chapters mode. "
+            "Use --mode pages to read by pages."
+        )
+    if effective_content_mode == "pages" and (chapters or start_chapter):
+        console.print(
+            "[yellow]Warning:[/yellow] --chapters/--start-chapter ignored in "
+            "pages mode. Use --mode chapters to read by chapters."
+        )
+
     # Handle stdin input
     if input_file is None or str(input_file) == "-":
         if sys.stdin.isatty():
@@ -2637,8 +2690,9 @@ def read(
             sys.exit(1)
 
         # Create a simple structure for stdin text
-        chapters_data = [{"title": "Text", "text": text_content, "index": 0}]
+        content_data = [{"title": "Text", "text": text_content, "index": 0}]
         file_identifier = "stdin"
+        content_label = "section"  # Generic label for stdin
     else:
         # Validate file exists (removed exists=True from click.Path for stdin)
         if not input_file.exists():
@@ -2653,33 +2707,77 @@ def read(
                 from epub2text import EPUBParser
             except ImportError:
                 console.print(
-                    "[red]Error:[/red] epub2text is not installed. Run: pip install epub2text"
+                    "[red]Error:[/red] epub2text is not installed. "
+                    "Run: pip install epub2text"
                 )
                 sys.exit(1)
 
             try:
                 parser = EPUBParser(str(input_file))
                 metadata = parser.get_metadata()
-                epub_chapters = parser.get_chapters()
             except Exception as e:
                 console.print(f"[red]Error loading EPUB:[/red] {e}")
                 sys.exit(1)
-
-            if not epub_chapters:
-                console.print("[red]Error:[/red] No chapters found in EPUB file.")
-                sys.exit(1)
-
-            # Convert to our format
-            chapters_data = [
-                {"title": ch.title or f"Chapter {i + 1}", "text": ch.text, "index": i}
-                for i, ch in enumerate(epub_chapters)
-            ]
 
             # Show book info
             title = metadata.title or input_file.stem
             author = metadata.authors[0] if metadata.authors else "Unknown"
             console.print(f"[bold]{title}[/bold] by {author}")
-            console.print(f"[dim]{len(chapters_data)} chapters[/dim]")
+
+            # Load content based on mode (chapters or pages)
+            if effective_content_mode == "pages":
+                try:
+                    epub_pages = parser.get_pages(
+                        synthetic_page_size=effective_page_size
+                    )
+                except Exception as e:
+                    console.print(f"[red]Error loading pages:[/red] {e}")
+                    sys.exit(1)
+
+                if not epub_pages:
+                    console.print("[red]Error:[/red] No pages found in EPUB file.")
+                    sys.exit(1)
+
+                # Check if using native or synthetic pages
+                has_native = parser.has_page_list()
+                page_type = "native" if has_native else "synthetic"
+                console.print(f"[dim]{len(epub_pages)} pages ({page_type})[/dim]")
+
+                # Convert to our format
+                content_data = [
+                    {
+                        "title": f"Page {p.page_number}",
+                        "text": p.text,
+                        "index": i,
+                        "page_number": p.page_number,
+                    }
+                    for i, p in enumerate(epub_pages)
+                ]
+                content_label = "page"
+            else:
+                # Default: chapters mode
+                try:
+                    epub_chapters = parser.get_chapters()
+                except Exception as e:
+                    console.print(f"[red]Error loading chapters:[/red] {e}")
+                    sys.exit(1)
+
+                if not epub_chapters:
+                    console.print("[red]Error:[/red] No chapters found in EPUB file.")
+                    sys.exit(1)
+
+                console.print(f"[dim]{len(epub_chapters)} chapters[/dim]")
+
+                # Convert to our format
+                content_data = [
+                    {
+                        "title": ch.title or f"Chapter {i + 1}",
+                        "text": ch.text,
+                        "index": i,
+                    }
+                    for i, ch in enumerate(epub_chapters)
+                ]
+                content_label = "chapter"
 
         elif input_file.suffix.lower() in (".txt", ".text"):
             # Plain text file
@@ -2693,9 +2791,10 @@ def read(
                 console.print("[red]Error:[/red] File is empty.")
                 sys.exit(1)
 
-            chapters_data = [
+            content_data = [
                 {"title": input_file.stem, "text": text_content, "index": 0}
             ]
+            content_label = "section"
         else:
             console.print(
                 f"[red]Error:[/red] Unsupported file type: {input_file.suffix}"
@@ -2703,32 +2802,46 @@ def read(
             console.print("[dim]Supported formats: .epub, .txt[/dim]")
             sys.exit(1)
 
-    # List chapters and exit if requested
-    if list_chapters:
+    # List content and exit if requested
+    if list_content:
         console.print()
-        for ch in chapters_data:
-            idx = ch["index"] + 1
-            title = ch["title"]
-            text_preview = ch["text"][:80].replace("\n", " ").strip()
-            if len(ch["text"]) > 80:
+        for item in content_data:
+            idx = item["index"] + 1
+            item_title = item["title"]
+            text_preview = item["text"][:80].replace("\n", " ").strip()
+            if len(item["text"]) > 80:
                 text_preview += "..."
-            console.print(f"[bold]{idx:3}.[/bold] {title}")
+            console.print(f"[bold]{idx:3}.[/bold] {item_title}")
             console.print(f"     [dim]{text_preview}[/dim]")
         return
 
-    # Chapter selection
+    # Content selection (chapters or pages)
     selected_indices: Optional[list[int]] = None
 
-    if chapters:
-        selected_indices = _parse_chapter_selection(chapters, len(chapters_data))
-    elif start_chapter:
-        if start_chapter < 1 or start_chapter > len(chapters_data):
-            console.print(
-                f"[red]Error:[/red] Invalid chapter number {start_chapter}. "
-                f"Valid range: 1-{len(chapters_data)}"
-            )
-            sys.exit(1)
-        selected_indices = list(range(start_chapter - 1, len(chapters_data)))
+    if effective_content_mode == "pages":
+        # Page selection
+        if pages:
+            selected_indices = _parse_chapter_selection(pages, len(content_data))
+        elif start_page:
+            if start_page < 1 or start_page > len(content_data):
+                console.print(
+                    f"[red]Error:[/red] Invalid page number {start_page}. "
+                    f"Valid range: 1-{len(content_data)}"
+                )
+                sys.exit(1)
+            selected_indices = list(range(start_page - 1, len(content_data)))
+    else:
+        # Chapter selection
+        if chapters:
+            selected_indices = _parse_chapter_selection(chapters, len(content_data))
+        elif start_chapter:
+            if start_chapter < 1 or start_chapter > len(content_data):
+                console.print(
+                    f"[red]Error:[/red] Invalid chapter number {start_chapter}. "
+                    f"Valid range: 1-{len(content_data)}"
+                )
+                sys.exit(1)
+            selected_indices = list(range(start_chapter - 1, len(content_data)))
 
     # Handle resume
     start_segment_index = 0
@@ -2736,35 +2849,38 @@ def read(
         saved_position = load_playback_position()
         if saved_position and saved_position.file_path == file_identifier:
             # Resume from saved position
-            resume_chapter = saved_position.chapter_index
+            resume_index = saved_position.chapter_index
             start_segment_index = saved_position.segment_index
 
             if selected_indices is None:
-                selected_indices = list(range(resume_chapter, len(chapters_data)))
+                selected_indices = list(range(resume_index, len(content_data)))
             else:
-                # Filter to only include chapters from resume point
-                selected_indices = [i for i in selected_indices if i >= resume_chapter]
+                # Filter to only include items from resume point
+                selected_indices = [i for i in selected_indices if i >= resume_index]
 
             console.print(
-                f"[yellow]Resuming from chapter {resume_chapter + 1}, "
+                f"[yellow]Resuming from {content_label} {resume_index + 1}, "
                 f"segment {start_segment_index + 1}[/yellow]"
             )
         else:
             console.print(
-                "[dim]No saved position found for this file, starting from beginning.[/dim]"
+                "[dim]No saved position found for this file, "
+                "starting from beginning.[/dim]"
             )
 
-    # Final chapter list
+    # Final selection
     if selected_indices is None:
-        selected_indices = list(range(len(chapters_data)))
+        selected_indices = list(range(len(content_data)))
 
     if not selected_indices:
-        console.print("[yellow]No chapters to read.[/yellow]")
+        console.print(f"[yellow]No {content_label}s to read.[/yellow]")
         return
 
     console.print()
+    lang_desc = LANGUAGE_DESCRIPTIONS.get(effective_language, effective_language)
     console.print(
-        f"[dim]Voice: {effective_voice} | Language: {LANGUAGE_DESCRIPTIONS.get(effective_language, effective_language)} | Speed: {effective_speed}x[/dim]"
+        f"[dim]Voice: {effective_voice} | Language: {lang_desc} | "
+        f"Speed: {effective_speed}x[/dim]"
     )
     console.print()
 
@@ -2781,7 +2897,7 @@ def read(
         sys.exit(1)
 
     # Track current position for saving
-    current_chapter_idx = selected_indices[0]
+    current_content_idx = selected_indices[0]
     current_segment_idx = 0
     stop_requested = False
 
@@ -2811,22 +2927,22 @@ def read(
                 lang=espeak_lang,
             )
 
-        # Collect all segments across chapters with their metadata
+        # Collect all segments across content items with their metadata
         all_segments: list[
             tuple[int, int, str, str]
-        ] = []  # (chapter_idx, seg_idx, text, display)
+        ] = []  # (content_idx, seg_idx, text, display)
 
-        for chapter_position, chapter_idx in enumerate(selected_indices):
-            chapter = chapters_data[chapter_idx]
-            text = chapter["text"].strip()
+        for content_position, content_idx in enumerate(selected_indices):
+            content_item = content_data[content_idx]
+            text = content_item["text"].strip()
             if not text:
                 continue
 
             segments = _split_text_into_segments(text, split_mode=effective_split_mode)
 
-            # Skip segments if resuming mid-chapter
+            # Skip segments if resuming mid-content
             seg_offset = 0
-            if chapter_position == 0 and start_segment_index > 0:
+            if content_position == 0 and start_segment_index > 0:
                 segments = segments[start_segment_index:]
                 seg_offset = start_segment_index
 
@@ -2835,7 +2951,7 @@ def read(
                 # Clean up text for display (normalize whitespace)
                 display_text = " ".join(segment.split())
                 all_segments.append(
-                    (chapter_idx, actual_seg_idx, segment, display_text)
+                    (content_idx, actual_seg_idx, segment, display_text)
                 )
 
         if not all_segments:
@@ -2846,33 +2962,35 @@ def read(
         current_future = executor.submit(generate_audio, all_segments[0][2])
         next_future = None
 
-        last_chapter_idx = -1
+        last_content_idx = -1
 
-        for i, (chapter_idx, seg_idx, segment_text, display_text) in enumerate(
+        for i, (content_idx, seg_idx, _segment_text, display_text) in enumerate(
             all_segments
         ):
             if stop_requested:
                 break
 
-            current_chapter_idx = chapter_idx
+            current_content_idx = content_idx
             current_segment_idx = seg_idx
 
-            # Detect chapter change for paragraph pause
-            chapter_changed = chapter_idx != last_chapter_idx
+            # Detect content change for paragraph pause
+            content_changed = content_idx != last_content_idx
 
-            # Show chapter header when chapter changes
-            if chapter_changed:
-                chapter = chapters_data[chapter_idx]
+            # Show header when content item changes
+            if content_changed:
+                content_item = content_data[content_idx]
                 console.print()
+                label = content_label.capitalize()
                 console.print(
-                    f"[bold cyan]Chapter {chapter_idx + 1}:[/bold cyan] {chapter['title']}"
+                    f"[bold cyan]{label} {content_idx + 1}:[/bold cyan] "
+                    f"{content_item['title']}"
                 )
                 console.print("-" * 60)
-                if last_chapter_idx == -1 and start_segment_index > 0:
+                if last_content_idx == -1 and start_segment_index > 0:
                     console.print(
                         f"[dim](resuming from segment {start_segment_index + 1})[/dim]"
                     )
-                last_chapter_idx = chapter_idx
+                last_content_idx = content_idx
 
             # Display current segment
             console.print(f"[dim]{display_text}[/dim]")
@@ -2899,14 +3017,14 @@ def read(
 
                 # Add pause after segment (if not the last segment)
                 if i + 1 < len(all_segments) and not stop_requested:
-                    next_chapter_idx = all_segments[i + 1][0]
-                    if next_chapter_idx != chapter_idx:
-                        # Paragraph pause (between chapters)
+                    next_content_idx = all_segments[i + 1][0]
+                    if next_content_idx != content_idx:
+                        # Paragraph pause (between content items)
                         pause = random.uniform(
                             effective_paragraph_pause_min, effective_paragraph_pause_max
                         )
                     else:
-                        # Segment pause (within chapter)
+                        # Segment pause (within content item)
                         pause = random.uniform(
                             effective_segment_pause_min, effective_segment_pause_max
                         )
@@ -2928,12 +3046,13 @@ def read(
             # Save position for resume
             position = PlaybackPosition(
                 file_path=file_identifier,
-                chapter_index=current_chapter_idx,
+                chapter_index=current_content_idx,
                 segment_index=current_segment_idx,
             )
             save_playback_position(position)
+            label = content_label.capitalize()
             console.print(
-                f"[dim]Position saved: Chapter {current_chapter_idx + 1}, "
+                f"[dim]Position saved: {label} {current_content_idx + 1}, "
                 f"Segment {current_segment_idx + 1}[/dim]"
             )
             console.print("[dim]Use --resume to continue from this position.[/dim]")
@@ -2943,7 +3062,7 @@ def read(
         # Save position on error too
         position = PlaybackPosition(
             file_path=file_identifier,
-            chapter_index=current_chapter_idx,
+            chapter_index=current_content_idx,
             segment_index=current_segment_idx,
         )
         save_playback_position(position)

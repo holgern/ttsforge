@@ -28,9 +28,8 @@ dependencies = [
     "platformdirs>=3.0.0",
     "onnxruntime>=1.16.0",
     "phrasplit",
-    # Tokenizer dependencies (for embedded tokenizer)
-    "phonemizer-fork>=3.3.2",
-    "espeakng-loader>=0.1.0",
+    # Tokenizer dependencies (kokorog2p for G2P)
+    "kokorog2p",
     "sounddevice>=0.4.6",
 ]
 classifiers=[

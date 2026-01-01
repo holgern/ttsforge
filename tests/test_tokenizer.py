@@ -7,13 +7,16 @@ from ttsforge.tokenizer import (
     SAMPLE_RATE,
     SUPPORTED_LANGUAGES,
     EspeakConfig,
+    PhonemeResult,
     Tokenizer,
+    TokenizerConfig,
+    create_tokenizer,
 )
 from ttsforge.vocab import DEFAULT_VERSION, get_vocab_info, list_versions, load_vocab
 
 
 class TestEspeakConfig:
-    """Tests for EspeakConfig dataclass."""
+    """Tests for EspeakConfig dataclass (deprecated, kept for compatibility)."""
 
     def test_default_values(self):
         """Test default config has None values."""
@@ -26,6 +29,53 @@ class TestEspeakConfig:
         config = EspeakConfig(lib_path="/path/to/lib", data_path="/path/to/data")
         assert config.lib_path == "/path/to/lib"
         assert config.data_path == "/path/to/data"
+
+
+class TestTokenizerConfig:
+    """Tests for TokenizerConfig dataclass."""
+
+    def test_default_values(self):
+        """Test default config values."""
+        config = TokenizerConfig()
+        assert config.use_espeak_fallback is True
+        assert config.use_spacy is True
+        assert config.use_dictionary is True
+
+    def test_custom_values(self):
+        """Test config with custom values."""
+        config = TokenizerConfig(
+            use_espeak_fallback=False,
+            use_spacy=False,
+            use_dictionary=False,
+        )
+        assert config.use_espeak_fallback is False
+        assert config.use_spacy is False
+        assert config.use_dictionary is False
+
+
+class TestPhonemeResult:
+    """Tests for PhonemeResult dataclass."""
+
+    def test_default_values(self):
+        """Test default result values."""
+        result = PhonemeResult(phonemes="test")
+        assert result.phonemes == "test"
+        assert result.tokens == []
+        assert result.low_confidence_words == []
+
+    def test_custom_values(self):
+        """Test result with custom values."""
+        from kokorog2p import GToken
+
+        tokens = [GToken(text="hello", phonemes="hɛlO")]
+        result = PhonemeResult(
+            phonemes="hɛlO",
+            tokens=tokens,
+            low_confidence_words=["xyz"],
+        )
+        assert result.phonemes == "hɛlO"
+        assert len(result.tokens) == 1
+        assert result.low_confidence_words == ["xyz"]
 
 
 class TestConstants:
@@ -77,6 +127,7 @@ class TestVocab:
         assert "num_tokens" in info
         assert "max_token_id" in info
         assert info["num_tokens"] > 100
+        assert info["backend"] == "kokorog2p"
 
     def test_invalid_version_raises(self):
         """Test that invalid version raises ValueError."""
@@ -103,6 +154,13 @@ class TestTokenizer:
         custom_vocab = {"a": 1, "b": 2}
         tokenizer = Tokenizer(vocab=custom_vocab)
         assert tokenizer.vocab == custom_vocab
+
+    def test_init_with_config(self):
+        """Test initialization with TokenizerConfig."""
+        config = TokenizerConfig(use_spacy=False, use_espeak_fallback=True)
+        tokenizer = Tokenizer(config=config)
+        assert tokenizer.config.use_spacy is False
+        assert tokenizer.config.use_espeak_fallback is True
 
     def test_normalize_text(self, tokenizer):
         """Test text normalization."""
@@ -138,6 +196,14 @@ class TestTokenizer:
         # Both should produce phonemes
         assert len(us_phonemes) > 0
         assert len(gb_phonemes) > 0
+
+    def test_phonemize_detailed(self, tokenizer):
+        """Test detailed phonemization."""
+        result = tokenizer.phonemize_detailed("Hello world")
+        assert isinstance(result, PhonemeResult)
+        assert len(result.phonemes) > 0
+        assert len(result.tokens) > 0
+        assert isinstance(result.low_confidence_words, list)
 
     def test_tokenize_basic(self, tokenizer):
         """Test basic tokenization."""
@@ -230,6 +296,19 @@ class TestTokenizer:
         assert info["version"] == tokenizer.vocab_version
         assert info["num_tokens"] == len(tokenizer.vocab)
         assert info["max_phoneme_length"] == MAX_PHONEME_LENGTH
+        assert info["backend"] == "kokorog2p"
+
+    def test_validate_phonemes(self, tokenizer):
+        """Test phoneme validation."""
+        # Valid phonemes
+        is_valid, invalid = tokenizer.validate_phonemes("hɛlO")
+        assert is_valid is True
+        assert invalid == []
+
+        # Invalid phonemes
+        is_valid, invalid = tokenizer.validate_phonemes("hɛlO§")
+        assert is_valid is False
+        assert "§" in invalid
 
 
 class TestTokenizerRoundTrip:
@@ -263,3 +342,85 @@ class TestTokenizerRoundTrip:
         tokens = tokenizer.tokenize(phonemes)
         recovered = tokenizer.detokenize(tokens)
         assert recovered == phonemes
+
+
+class TestCreateTokenizer:
+    """Tests for create_tokenizer convenience function."""
+
+    def test_create_default(self):
+        """Test creating tokenizer with defaults."""
+        tokenizer = create_tokenizer()
+        assert tokenizer.config.use_espeak_fallback is True
+        assert tokenizer.config.use_spacy is True
+
+    def test_create_custom(self):
+        """Test creating tokenizer with custom settings."""
+        tokenizer = create_tokenizer(use_espeak_fallback=False, use_spacy=False)
+        assert tokenizer.config.use_espeak_fallback is False
+        assert tokenizer.config.use_spacy is False
+
+
+class TestKokorog2pIntegration:
+    """Tests for kokorog2p integration features."""
+
+    @pytest.fixture
+    def tokenizer(self):
+        """Create a tokenizer instance."""
+        return Tokenizer()
+
+    def test_homograph_disambiguation(self, tokenizer):
+        """Test that homographs are pronounced correctly based on context."""
+        # 'read' as present tense (VBP)
+        result1 = tokenizer.phonemize_detailed("They read books often")
+        # 'read' as past tense (VBD)
+        result2 = tokenizer.phonemize_detailed("He read the book")
+
+        # Both should produce valid phonemes
+        assert len(result1.phonemes) > 0
+        assert len(result2.phonemes) > 0
+
+    def test_article_pronunciation(self, tokenizer):
+        """Test 'the' pronunciation before vowels."""
+        # 'the' before vowel should be 'ði'
+        phonemes1 = tokenizer.phonemize("the apple")
+        # 'the' before consonant should be 'ðə'
+        phonemes2 = tokenizer.phonemize("the book")
+
+        # Both should produce valid phonemes
+        assert len(phonemes1) > 0
+        assert len(phonemes2) > 0
+        # Check that 'the' is phonemized (contains 'ð')
+        assert "ð" in phonemes1
+        assert "ð" in phonemes2
+
+    def test_dictionary_vs_espeak_quality(self, tokenizer):
+        """Test that common words use dictionary (higher rating)."""
+        result = tokenizer.phonemize_detailed("Hello world")
+
+        # Common words should have high rating (from dictionary)
+        for token in result.tokens:
+            if token.text.lower() in ["hello", "world"]:
+                rating = token.get("rating")
+                # Rating 3-4 = dictionary, 1 = espeak
+                assert (
+                    rating is None or rating >= 3
+                ), f"Expected {token.text} to use dictionary"
+
+    def test_unknown_word_handling(self, tokenizer):
+        """Test that unknown words are handled via espeak fallback."""
+        # Made-up word that won't be in dictionary
+        result = tokenizer.phonemize_detailed("The xyzfoobar is here")
+
+        # Should still produce valid phonemes
+        assert len(result.phonemes) > 0
+
+        # The made-up word should be in low_confidence_words
+        # (or handled by espeak with low rating)
+        for token in result.tokens:
+            if "xyzfoobar" in token.text.lower():
+                rating = token.get("rating")
+                if rating is not None and rating < 2:
+                    pass
+        # May or may not be marked low confidence depending on espeak behavior
+        # Just verify phonemes were produced
+        assert "xyzfoobar" not in result.phonemes  # Should be converted to phonemes

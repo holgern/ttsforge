@@ -554,8 +554,9 @@ class KokoroONNX:
         phonemes = phonemes[:MAX_PHONEME_LENGTH]
         tokens = self.tokenizer.tokenize(phonemes)
 
-        # Get voice style for this token length
-        voice_style = voice[len(tokens)]
+        # Get voice style for this token length (clamp to valid range)
+        style_idx = min(len(tokens), MAX_PHONEME_LENGTH - 1)
+        voice_style = voice[style_idx]
 
         # Pad tokens with start/end tokens
         tokens_padded = [[0, *tokens, 0]]
@@ -592,6 +593,8 @@ class KokoroONNX:
             audio: np.ndarray = np.asarray(result).T
         else:
             audio: np.ndarray = np.asarray(result)
+        # Ensure audio is 1D for compatibility with trim and other operations
+        audio = np.squeeze(audio)
         return audio, SAMPLE_RATE
 
     def _split_phonemes(self, phonemes: str) -> list[str]:

@@ -454,7 +454,7 @@ def format_filename_template(
         {book_title} - Sanitized book title
         {author} - Sanitized author name
         {chapter_title} - Sanitized chapter title
-        {chapter_num} - Chapter number (1-based), supports format specs like {chapter_num:03d}
+        {chapter_num} - Chapter number (1-based), supports format specs
         {input_stem} - Original input filename without extension
         {chapters_range} - Chapter range string (e.g., "chapters_1-5") or empty
 
@@ -475,9 +475,17 @@ def format_filename_template(
     Examples:
         >>> format_filename_template("{book_title}", book_title="My Book")
         'My_Book'
-        >>> format_filename_template("{chapter_num:03d}_{chapter_title}", chapter_num=1, chapter_title="Intro")
+        >>> format_filename_template(
+        ...     "{chapter_num:03d}_{chapter_title}",
+        ...     chapter_num=1,
+        ...     chapter_title="Intro",
+        ... )
         '001_Intro'
-        >>> format_filename_template("{author}_{book_title}", author="John Doe", book_title="")
+        >>> format_filename_template(
+        ...     "{author}_{book_title}",
+        ...     author="John Doe",
+        ...     book_title="",
+        ... )
         'John_Doe_Untitled'
     """
     # Determine effective book title with fallback
