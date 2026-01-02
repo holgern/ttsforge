@@ -769,7 +769,9 @@ class TTSConverter:
                 assert self._kokoro is not None
                 title_samples, _ = self._kokoro.create(
                     announcement_text,
-                    voice=self._voice_style or self.options.voice,
+                    voice=self._voice_style
+                    if self._voice_style is not None
+                    else self.options.voice,
                     speed=self.options.speed,
                     lang=lang_code,
                 )
@@ -798,7 +800,9 @@ class TTSConverter:
                     assert self._kokoro is not None
                     samples, sample_rate = self._kokoro.create(
                         segment.text,
-                        voice=self._voice_style or self.options.voice,
+                        voice=self._voice_style
+                        if self._voice_style is not None
+                        else self.options.voice,
                         speed=self.options.speed,
                         lang=lang_code,
                     )
@@ -843,7 +847,9 @@ class TTSConverter:
                 chunks_data = list(
                     self._kokoro.generate_chunks(
                         chapter.content,
-                        voice=self._voice_style or self.options.voice,
+                        voice=self._voice_style
+                        if self._voice_style is not None
+                        else self.options.voice,
                         speed=self.options.speed,
                         lang=lang_code,
                     )
@@ -1373,7 +1379,9 @@ class TTSConverter:
                         assert self._kokoro is not None
                         samples, sample_rate = self._kokoro.create(
                             segment.text,
-                            voice=self._voice_style or self.options.voice,
+                            voice=self._voice_style
+                            if self._voice_style is not None
+                            else self.options.voice,
                             speed=self.options.speed,
                             lang=lang_code,
                         )
@@ -1426,7 +1434,9 @@ class TTSConverter:
                     chunks_data = list(
                         self._kokoro.generate_chunks(
                             chapter.content,
-                            voice=self._voice_style or self.options.voice,
+                            voice=self._voice_style
+                            if self._voice_style is not None
+                            else self.options.voice,
                             speed=self.options.speed,
                             lang=lang_code,
                         )

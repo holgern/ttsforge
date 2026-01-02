@@ -65,6 +65,28 @@ from .utils import (
 console = Console()
 
 
+def parse_voice_parameter(voice: str) -> tuple[str | None, str | None]:
+    """Parse voice parameter to detect if it's a single voice or a blend.
+
+    Args:
+        voice: Voice parameter (e.g., 'af_sky' or 'af_nicole:50,am_michael:50')
+
+    Returns:
+        Tuple of (voice, voice_blend) where one will be None
+
+    Examples:
+        >>> parse_voice_parameter('af_sky')
+        ('af_sky', None)
+        >>> parse_voice_parameter('af_nicole:50,am_michael:50')
+        (None, 'af_nicole:50,am_michael:50')
+    """
+    # Detect if it's a blend (contains both : and ,)
+    if ":" in voice and "," in voice:
+        return (None, voice)
+    else:
+        return (voice, None)
+
+
 def get_version() -> str:
     """Get the package version."""
     try:
@@ -789,7 +811,12 @@ DEFAULT_SAMPLE_TEXT = (
     default="wav",
     help="Output audio format.",
 )
-@click.option("-v", "--voice", type=click.Choice(VOICES), help="TTS voice to use.")
+@click.option(
+    "-v",
+    "--voice",
+    type=str,
+    help="TTS voice to use or voice blend (e.g., 'af_sky' or 'af_nicole:50,am_michael:50').",
+)
 @click.option(
     "-l",
     "--language",
@@ -935,9 +962,14 @@ def sample(
             lang_item.strip() for lang_item in mixed_language_allowed.split(",")
         ]
 
+    # Auto-detect if voice is a blend
+    voice_value = voice or user_config.get("voice") or "af_bella"
+    parsed_voice, parsed_voice_blend = parse_voice_parameter(voice_value)
+
     # Build conversion options (use ConversionOptions defaults if not specified)
     options = ConversionOptions(
-        voice=voice or user_config.get("voice") or "af_bella",
+        voice=parsed_voice or "af_bella",
+        voice_blend=parsed_voice_blend,
         language=language or user_config.get("language") or "a",
         speed=speed or user_config.get("speed", 1.0),
         output_format=output_format,
@@ -970,7 +1002,10 @@ def sample(
     )
 
     # Always show settings
-    console.print(f"[dim]Voice:[/dim] {options.voice}")
+    if options.voice_blend:
+        console.print(f"[dim]Voice Blend:[/dim] {options.voice_blend}")
+    else:
+        console.print(f"[dim]Voice:[/dim] {options.voice}")
     lang_desc = LANGUAGE_DESCRIPTIONS.get(options.language, "Unknown")
     console.print(f"[dim]Language:[/dim] {options.language} ({lang_desc})")
     if options.lang:
@@ -2390,7 +2425,7 @@ def phonemes_convert(
     "--voice",
     type=str,
     default="af_sky",
-    help="Voice to use for audio preview (default: af_sky).",
+    help="Voice to use for audio preview, or voice blend (e.g., 'af_nicole:50,am_michael:50').",
 )
 @click.option(
     "--phoneme-dict",
@@ -2423,6 +2458,8 @@ def phonemes_preview(
         ttsforge phonemes preview "König" --language de --play
 
         ttsforge phonemes preview "Hermione" --play --phoneme-dict custom.json
+
+        ttsforge phonemes preview "Hello" --play --voice "af_nicole:50,am_michael:50"
     """
     from .onnx_backend import LANG_CODE_TO_ONNX
     from .tokenizer import Tokenizer
@@ -2463,10 +2500,14 @@ def phonemes_preview(
         console.print("\n[bold]Generating audio preview...[/bold]")
 
         try:
+            # Auto-detect if voice is a blend
+            parsed_voice, parsed_voice_blend = parse_voice_parameter(voice)
+
             # Initialize converter
             options = ConversionOptions(
                 phoneme_dictionary_path=str(phoneme_dict) if phoneme_dict else None,
-                voice=voice,
+                voice=parsed_voice or "af_sky",  # Fallback to default if blend
+                voice_blend=parsed_voice_blend,
                 language=language,
                 output_format="wav",  # Explicitly set WAV format
             )
@@ -3896,9 +3937,13 @@ def list_names(
 
         # Initialize converter with phoneme dictionary
         try:
+            # Auto-detect if voice is a blend
+            parsed_voice, parsed_voice_blend = parse_voice_parameter(voice)
+
             options = ConversionOptions(
                 phoneme_dictionary_path=str(phoneme_dict),
-                voice=voice,
+                voice=parsed_voice or "af_sky",
+                voice_blend=parsed_voice_blend,
                 language=language,
             )
             converter = TTSConverter(options)
