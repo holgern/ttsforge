@@ -497,7 +497,7 @@ class TestPhonemeConverterConversion:
 
             assert result.success is True
             # Should only process chapter 1 (1 segment)
-            # Note: with announce_chapters enabled (default), create() is called for title
+            # Note: with announce_chapters enabled, create() called for title
             assert mock_kokoro.create_from_segment.call_count == 1
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")

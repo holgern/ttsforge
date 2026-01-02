@@ -1,9 +1,7 @@
 """Test chapter marker removal from epub2text content."""
 
 import re
-import pytest
-from unittest.mock import MagicMock, patch
-from pathlib import Path
+from unittest.mock import MagicMock
 
 from ttsforge.conversion import Chapter
 
@@ -61,7 +59,6 @@ class TestEpubChapterMarkerRemoval:
 
     def test_epub_chapters_have_markers_stripped(self):
         """Test that convert_epub removes chapter markers from content."""
-        from ttsforge.conversion import Chapter
 
         # Mock epub2text Chapter objects with markers in content
         mock_chapter1 = MagicMock()

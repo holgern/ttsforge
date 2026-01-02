@@ -33,14 +33,14 @@ SAMPLE_RATE = 24000
 
 # Supported languages for phonemization
 # Format: language code -> kokorog2p language code
+# All languages now fully supported by kokorog2p with dictionary + espeak fallback
 SUPPORTED_LANGUAGES = {
     "en-us": "en-us",
     "en-gb": "en-gb",
     "en": "en-us",  # Default English to US
-    # Note: kokorog2p currently only supports English
-    # Other languages will fall back to espeak-only mode
     "es": "es",
-    "fr": "fr-fr",
+    "fr-fr": "fr-fr",
+    "fr": "fr-fr",  # Accept both fr and fr-fr
     "de": "de",
     "it": "it",
     "pt": "pt",
@@ -50,6 +50,7 @@ SUPPORTED_LANGUAGES = {
     "ko": "ko",
     "ja": "ja",
     "zh": "cmn",  # Mandarin Chinese
+    "cmn": "cmn",  # Accept both zh and cmn
 }
 
 
@@ -157,7 +158,7 @@ class Tokenizer:
         """Get or create a G2P instance for the given language.
 
         Args:
-            lang: Language code (e.g., 'en-us', 'en-gb')
+            lang: Language code (e.g., 'en-us', 'en-gb', 'de', 'fr-fr')
 
         Returns:
             G2P instance for the language
@@ -166,51 +167,15 @@ class Tokenizer:
             # Map language to kokorog2p format
             kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
 
-            # Only English is fully supported by kokorog2p
-            if kokorog2p_lang.startswith("en"):
-                self._g2p_cache[lang] = get_g2p(
-                    language=kokorog2p_lang,
-                    use_espeak_fallback=self.config.use_espeak_fallback,
-                    use_spacy=self.config.use_spacy,
-                )
-            else:
-                # For non-English, use espeak-only mode
-                logger.info(
-                    f"Language {lang} not fully supported, using espeak fallback only"
-                )
-                # Create a minimal G2P that just uses espeak
-                self._g2p_cache[lang] = self._create_espeak_only_g2p(kokorog2p_lang)
+            # All languages are now fully supported by kokorog2p
+            # kokorog2p uses dictionary + espeak fallback for all languages
+            self._g2p_cache[lang] = get_g2p(
+                language=kokorog2p_lang,
+                use_espeak_fallback=self.config.use_espeak_fallback,
+                use_spacy=self.config.use_spacy,
+            )
 
         return self._g2p_cache[lang]
-
-    def _create_espeak_only_g2p(self, lang: str) -> G2PBase:
-        """Create an espeak-only G2P for non-English languages.
-
-        Args:
-            lang: Language code
-
-        Returns:
-            G2P instance using espeak backend
-        """
-        from kokorog2p.backends.espeak import EspeakBackend
-
-        class EspeakOnlyG2P(G2PBase):
-            """Minimal G2P that only uses espeak."""
-
-            def __init__(self, language: str):
-                super().__init__(language=language, use_espeak_fallback=True)
-                self._backend = EspeakBackend(language=language)
-
-            def __call__(self, text: str) -> list[GToken]:
-                if not text.strip():
-                    return []
-                phonemes = self._backend.phonemize(text)
-                return [GToken(text=text, phonemes=phonemes)]
-
-            def lookup(self, word: str, tag: str | None = None) -> str | None:
-                return self._backend.phonemize(word)
-
-        return EspeakOnlyG2P(language=lang)
 
     @property
     def reverse_vocab(self) -> dict[int, str]:

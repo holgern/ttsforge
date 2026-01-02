@@ -24,37 +24,38 @@ from ttsforge.onnx_backend import SAMPLE_RATE, KokoroONNX
 TEXT = """
 A Homograph Challenge Text: The Executive's Dilemma
 
-The executive decided to present her team with a gift to acknowledge their lead role 
-in completing the project. She asked them to read the report that was read aloud at 
-yesterday's meeting. The document detailed how to properly wind the rope and wind down 
+The executive decided to present her team with a gift to acknowledge their lead role
+in completing the project. She asked them to read the report that was read aloud at
+yesterday's meeting. The document detailed how to properly wind the rope and wind down
 after long hours.
 
-One employee began to object to the proposal, noting that they'd need to object to the 
-plan's mechanics. "We need to live up to our standards," she said, "especially since we 
+One employee began to object to the proposal, noting that they'd need to object to the
+plan's mechanics. "We need to live up to our standards," she said, "especially since we
 live near the production facility."
 
-The discussion revealed a tear in the fabric of their strategy—they would need to tear 
-down old systems. Someone mentioned they saw a tear fall from the investor's eye during 
+The discussion revealed a tear in the fabric of their strategy—they would need to tear
+down old systems. Someone mentioned they saw a tear fall from the investor's eye during
 the pitch.
 
-"Don't desert this project," warned the manager, "or you'll regret abandoning us in the 
-desert market." The team's bass player suggested they lower the bass frequencies in their 
-audio materials.
+"Don't desert this project," warned the manager, "or you'll regret abandoning us in the
+desert market." The team's bass player suggested they lower the bass frequencies in
+their audio materials.
 
-The bow of the company ship pointed toward innovation. "We must all bow to market demands," 
-the CEO proclaimed. The musician would lead the orchestra, though some were concerned she 
-might lead them astray with experimental choices.
+The bow of the company ship pointed toward innovation. "We must all bow to market
+demands," the CEO proclaimed. The musician would lead the orchestra, though some were
+concerned she might lead them astray with experimental choices.
 
-One accountant asked about the permit they'd need to permit construction. Another employee 
-noted that the rare sow would sow seeds in the experimental garden. There was discussion 
-about whether to close the warehouse doors to close the gap in their supply chain.
+One accountant asked about the permit they'd need to permit construction. Another
+employee noted that the rare sow would sow seeds in the experimental garden. There was
+discussion about whether to close the warehouse doors to close the gap in their supply
+chain.
 
-They had to record this meeting—such an important record of their strategic direction. 
-The factory worker explained how to produce goods and the financial impact of their 
+They had to record this meeting—such an important record of their strategic direction.
+The factory worker explained how to produce goods and the financial impact of their
 produce line.
 
-The consultant asked them to subject each proposal to scrutiny; every subject deserved 
-attention. Finally, someone mentioned they'd need to subject their entire operation to 
+The consultant asked them to subject each proposal to scrutiny; every subject deserved
+attention. Finally, someone mentioned they'd need to subject their entire operation to
 this transformation.
 """
 

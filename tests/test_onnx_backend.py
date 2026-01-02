@@ -5,6 +5,7 @@ from pathlib import Path
 from ttsforge.onnx_backend import (
     DEFAULT_MODEL_QUALITY,
     LANG_CODE_TO_ONNX,
+    MAX_PHONEME_LENGTH,
     MODEL_BASE_URL,
     MODEL_QUALITY_FILES,
     VOICE_NAMES,
@@ -263,3 +264,250 @@ class TestVoiceDatabaseMethods:
         # Should not raise even without database
         kokoro.close()
         assert kokoro._voice_db is None
+
+
+class TestSplitPhonemes:
+    """Tests for _split_phonemes method."""
+
+    def test_short_phonemes_no_split(self):
+        """Short phonemes should not be split."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        phonemes = "həlˈoʊ wɜːld ."
+        batches = kokoro._split_phonemes(phonemes)
+
+        assert len(batches) == 1
+        assert batches[0] == phonemes
+
+    def test_split_at_sentence_boundaries(self):
+        """Should split at sentence-ending punctuation (. ! ?)."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        # Create phonemes with sentence-ending punctuation
+        phonemes = "hɛlˈoʊ . haʊ ˈɑːr juː ? aɪm faɪn ."
+        batches = kokoro._split_phonemes(phonemes)
+
+        # Should stay in one batch if total length < MAX_PHONEME_LENGTH
+        assert len(batches) >= 1
+        # Verify all content is preserved
+        combined = " ".join(batches)
+        assert "hɛlˈoʊ" in combined
+        assert "faɪn" in combined
+
+    def test_split_preserves_punctuation(self):
+        """Punctuation should be preserved in batches."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        phonemes = "fɜːrst sɛntəns . sɛkənd sɛntəns !"
+        batches = kokoro._split_phonemes(phonemes)
+
+        # All punctuation should be preserved
+        combined = " ".join(batches)
+        assert "." in combined
+        assert "!" in combined
+
+    def test_split_long_phonemes_exceeding_limit(self):
+        """Phonemes exceeding MAX_PHONEME_LENGTH should be split."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        # Create a phoneme string longer than MAX_PHONEME_LENGTH (510)
+        # Each sentence is ~50 chars, so 12 sentences = ~600 chars
+        sentence = "ɡuːtn taːk ! viː ɡeːt ɛs iːnən ? diː zɔnə ʃaɪnt . "
+        phonemes = sentence * 12  # ~600 chars (exceeds 510 limit)
+
+        batches = kokoro._split_phonemes(phonemes)
+
+        # Should split into multiple batches
+        assert len(batches) > 1
+        # Each batch should be under the limit
+        for batch in batches:
+            assert len(batch) <= MAX_PHONEME_LENGTH
+        # All content should be preserved
+        combined = " ".join(batches)
+        assert "ɡuːtn" in combined
+        assert "ʃaɪnt" in combined
+
+    def test_split_respects_max_phoneme_length(self):
+        """Each batch should respect MAX_PHONEME_LENGTH."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        # Create very long phoneme string
+        base = "a" * 100 + " . "
+        phonemes = base * 10  # ~1030 chars
+
+        batches = kokoro._split_phonemes(phonemes)
+
+        # All batches must be under limit
+        for batch in batches:
+            error_msg = (
+                f"Batch length {len(batch)} exceeds "
+                f"MAX_PHONEME_LENGTH {MAX_PHONEME_LENGTH}"
+            )
+            assert len(batch) <= MAX_PHONEME_LENGTH, error_msg
+
+    def test_split_with_german_phonemes(self):
+        """Should handle German phonemes with punctuation."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        # Realistic German phonemes from kokorog2p
+        phonemes = (
+            "ɡuːtn taːk ! vɪlkɔmən ʦuː diːzm baɪʃpiːl . "
+            "diː dɔɪʧə ʃpʁaːxə hat fiːlə bəzɔndəʁə aɪɡənʃaftn ."
+        )
+        batches = kokoro._split_phonemes(phonemes)
+
+        assert len(batches) >= 1
+        # Should preserve German phoneme characters
+        combined = " ".join(batches)
+        assert "ɡuːtn" in combined
+        assert "ʃpʁaːxə" in combined
+        assert "!" in combined
+        assert "." in combined
+
+    def test_split_with_only_periods(self):
+        """Should split at periods correctly."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        phonemes = "fɜːrst . sɛkənd . θɜːrd ."
+        batches = kokoro._split_phonemes(phonemes)
+
+        # Should preserve all content
+        combined = " ".join(batches)
+        assert "fɜːrst" in combined
+        assert "sɛkənd" in combined
+        assert "θɜːrd" in combined
+
+    def test_split_with_only_exclamations(self):
+        """Should split at exclamation marks correctly."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        phonemes = "hɛlˈoʊ ! ɡʊdbaɪ !"
+        batches = kokoro._split_phonemes(phonemes)
+
+        combined = " ".join(batches)
+        assert "hɛlˈoʊ" in combined
+        assert "!" in combined
+        assert "ɡʊdbaɪ" in combined
+
+    def test_split_with_only_questions(self):
+        """Should split at question marks correctly."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        phonemes = "haʊ ˈɑːr juː ? wɛr ɪz ɪt ?"
+        batches = kokoro._split_phonemes(phonemes)
+
+        combined = " ".join(batches)
+        assert "haʊ" in combined
+        assert "?" in combined
+        assert "wɛr" in combined
+
+    def test_split_mixed_punctuation(self):
+        """Should handle mixed sentence-ending punctuation."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        phonemes = "həlˈoʊ . haʊ ˈɑːr juː ? ɡʊdbaɪ !"
+        batches = kokoro._split_phonemes(phonemes)
+
+        combined = " ".join(batches)
+        assert "." in combined
+        assert "?" in combined
+        assert "!" in combined
+
+    def test_split_empty_string(self):
+        """Should handle empty phoneme string."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        phonemes = ""
+        batches = kokoro._split_phonemes(phonemes)
+
+        assert len(batches) == 1
+        assert batches[0] == ""
+
+    def test_split_whitespace_only(self):
+        """Should handle whitespace-only phoneme string."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        phonemes = "   "
+        batches = kokoro._split_phonemes(phonemes)
+
+        # Should return empty or whitespace
+        assert len(batches) >= 1
+
+    def test_split_no_punctuation_very_long(self):
+        """Should split very long phonemes even without punctuation."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        # Create string with no sentence-ending punctuation but exceeds limit
+        phonemes = "a" * 600  # Exceeds MAX_PHONEME_LENGTH
+
+        batches = kokoro._split_phonemes(phonemes)
+
+        # Should still split even without punctuation
+        assert len(batches) > 1
+        # Each batch should respect limit
+        for batch in batches:
+            assert len(batch) <= MAX_PHONEME_LENGTH
+
+    def test_split_preserves_content_integrity(self):
+        """All phoneme content should be preserved after splitting."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        # Create a diverse phoneme string
+        phonemes = "ɡuːtn taːk ! viː ɡeːt ɛs ? diː zɔnə ʃaɪnt . ɛs ɪst ʃøːn !"
+        original_length = len(phonemes.replace(" ", ""))
+
+        batches = kokoro._split_phonemes(phonemes)
+
+        # Reconstruct and verify no content lost
+        combined = " ".join(batches)
+        combined_length = len(combined.replace(" ", ""))
+
+        # Length should be approximately preserved (allowing for spacing differences)
+        assert abs(combined_length - original_length) < 10
+
+    def test_split_realistic_german_text(self):
+        """Test with realistic German phoneme output from kokorog2p."""
+        from ttsforge.onnx_backend import KokoroONNX
+
+        kokoro = KokoroONNX()
+        # Phonemes from actual German text (769 chars total)
+        phonemes = (
+            "ɡuːtn taːk ! vɪlkɔmən ʦuː diːzm baɪʃpiːl deːɐ dɔɪʧn ʃpʁaːxə . "
+            "diː dɔɪʧə ʃpʁaːxə hat fiːlə bəzɔndəʁə aɪɡənʃaftn . "
+            "ziː ɪst bəkant fyːɐ iːʁə laŋən ʦuːzamənɡəzɛʦtn vœɐtɐ viː "
+            "doːnaʊdampfʃɪfaːɐtsɡəzɛlʃaft oːdɐ "
+            "kʁaftfaːɐʦɔʏkhaftpflɪçtfɛɐzɪçəʁʊŋ . "
+            "hɔʏtə ɪst aɪn ʃøːnɐ taːk . diː zɔnə ʃaɪnt ʊnt diː føːɡl̩ zɪŋən . "
+            "ɪç mœçtə ɡɛɐnə aɪnən kafeː tʁɪŋkn ʊnt aɪn buːx leːzn . "
+            "ʦaːlən zɪnt aʊx vɪçtɪç : aɪns , ʦvaɪ , dʁaɪ , fiːɐ , fʏnf , "
+            "zɛks , ziːbn̩ , axt , nɔʏn , ʦeːn . "
+            "ʊmlaʊtə zɪnt kaʁaktəʁɪstɪʃ fyːɐ dɔɪʧ : ɛː , øː , yː ʊnt das ɛsʦɛt s . "
+            "keːzə , bʁøːtçən , mʏlɐ , ʃtʁaːsə ."
+        )
+
+        batches = kokoro._split_phonemes(phonemes)
+
+        # Should split into multiple batches
+        assert len(batches) >= 2
+        # Each batch should be under limit
+        for batch in batches:
+            assert len(batch) <= MAX_PHONEME_LENGTH
+        # Content should be preserved
+        combined = " ".join(batches)
+        assert "ɡuːtn taːk" in combined
+        assert "ʊmlaʊtə" in combined
+        assert "ʃtʁaːsə" in combined

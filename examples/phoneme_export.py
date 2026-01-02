@@ -24,28 +24,28 @@ To convert to audio later:
 import json
 
 from ttsforge.onnx_backend import KokoroONNX
-from ttsforge.phonemes import PhonemeBook, PhonemeChapter
+from ttsforge.phonemes import PhonemeBook
 
 # Text with heavy punctuation usage (same as punctuation.py)
 TEXT = """
 "Well," said the professor; "this is quite extraordinary!"
 
-The experiment — which took years to complete — yielded surprising results: 
+The experiment — which took years to complete — yielded surprising results:
 success rates of 95%, 87%, and 72% (in that order).
 
 "But wait..." she paused, "are you absolutely sure?"
 
-Yes! No? Maybe... Who knows: life is full of mysteries; 
+Yes! No? Maybe... Who knows: life is full of mysteries;
 that's what makes it interesting.
 
-Consider this: the data shows (a) increased efficiency; 
+Consider this: the data shows (a) increased efficiency;
 (b) reduced costs; and (c) improved outcomes — all remarkable achievements!
 
 "To be, or not to be?" — that is the question.
 
 He shouted: "Eureka!" Then whispered... "Finally."
 
-The results were: excellent (A+), good (B), average (C); 
+The results were: excellent (A+), good (B), average (C);
 however — and this is important — none failed!
 
 "Why?" she asked. "Because," he replied, "science never sleeps..."
@@ -90,19 +90,20 @@ def main():
     print(f"Created {len(segments)} segments")
 
     # Show some statistics
-    print(f"\nPhoneme Statistics:")
+    print("\nPhoneme Statistics:")
     print(f"  Total segments: {book.total_segments}")
     print(f"  Total phonemes: {book.total_phonemes} characters")
     print(f"  Total tokens: {book.total_tokens}")
 
     # Show first few segments as examples
-    print(f"\nFirst 3 segments:")
+    print("\nFirst 3 segments:")
     for i, seg in enumerate(segments[:3]):
         print(f"\n  Segment {i + 1}:")
         print(f"    Text: {seg.text[:60]}{'...' if len(seg.text) > 60 else ''}")
-        print(
-            f"    Phonemes: {seg.phonemes[:60]}{'...' if len(seg.phonemes) > 60 else ''}"
+        phoneme_preview = (
+            f"{seg.phonemes[:60]}{'...' if len(seg.phonemes) > 60 else ''}"
         )
+        print(f"    Phonemes: {phoneme_preview}")
         print(f"    Tokens: {len(seg.tokens)} tokens")
 
     # Save to JSON file
@@ -122,7 +123,7 @@ def main():
     }
     print(json.dumps(preview, indent=2))
 
-    print(f"\nTo convert to audio, run:")
+    print("\nTo convert to audio, run:")
     print(f"  ttsforge phonemes convert {output_file} -v {VOICE}")
 
     kokoro.close()

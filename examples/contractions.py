@@ -21,17 +21,17 @@ TEXT = """
 I've been waiting for this moment. You've already heard the news, haven't you?
 We've worked together for years, and they've never let us down.
 
-She's completed the project. He's finished his work too. 
+She's completed the project. He's finished his work too.
 It's been a long day, but that's just how it goes sometimes.
 
 I'd hoped to see you earlier. You'd mentioned you'd be here by noon.
 We'd planned everything carefully, and they'd promised to help.
 
 Yesterday, I walked to the store and talked with the owner.
-She baked fresh bread and served it warm. 
+She baked fresh bread and served it warm.
 The children played outside and laughed all afternoon.
 
-I've learned so much. You've taught me well. 
+I've learned so much. You've taught me well.
 He's mastered the technique. She's perfected her craft.
 
 I'd traveled there before. You'd asked about it, hadn't you?

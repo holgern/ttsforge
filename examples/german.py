@@ -13,16 +13,25 @@ Output:
     german_demo.wav - Generated German speech
 """
 
+import logging
+import os
+
 import soundfile as sf
 
 from ttsforge.onnx_backend import SAMPLE_RATE, KokoroONNX, VoiceBlend
+
+# Enable phoneme debugging to see what phonemes are generated
+os.environ["TTSFORGE_DEBUG_PHONEMES"] = "1"
+
+# Configure logging to display phoneme debug information
+logging.basicConfig(level=logging.INFO, format="%(levelname)s [%(name)s] %(message)s")
 
 # German text samples
 TEXT = """
 Guten Tag! Willkommen zu diesem Beispiel der deutschen Sprache.
 
-Die deutsche Sprache hat viele besondere Eigenschaften. 
-Sie ist bekannt für ihre langen zusammengesetzten Wörter wie 
+Die deutsche Sprache hat viele besondere Eigenschaften.
+Sie ist bekannt für ihre langen zusammengesetzten Wörter wie
 Donaudampfschifffahrtsgesellschaft oder Kraftfahrzeughaftpflichtversicherung.
 
 Heute ist ein schöner Tag. Die Sonne scheint, und die Vögel singen.
@@ -42,19 +51,20 @@ Technologie verändert unsere Welt jeden Tag.
 Auf Wiedersehen und vielen Dank fürs Zuhören!
 """
 
-VOICE = "af_bella"  # American Female voice
-VOICE = "ef_dora"  # American Female voice
-VOICE = "if_sara"  # American Female voice
-VOICE = "jf_alpha"  # American Female voice
-BLEND = "ff_siwis:50,ef_dora:50"  # Blend of three voices
-LANG = "de"  # German
+# Voice options - uncomment one to use:
+# VOICE = "af_bella"  # American Female (English-trained, attempting German)
+# VOICE = "ef_dora"   # Spanish Female (Romance language, may handle German better)
+# VOICE = "ff_siwis"  # French Female (Romance language, may handle German better)
+# VOICE = "ff_siwis"  # Using French voice for better German pronunciation
+BLEND = "ff_siwis:50,ef_dora:50"  # Blend of French and Spanish voices
+
+LANG = "de"  # German language code for espeak-ng phonemization
 
 
 def main():
     """Generate German speech using English-trained voice."""
     print("Initializing TTS engine...")
     kokoro = KokoroONNX()
-    
 
     print("=" * 60)
     print("NOTE: Kokoro was NOT explicitly trained on German.")
@@ -64,11 +74,10 @@ def main():
     print(f"\nVoice: {BLEND}")
     print(f"Language: {LANG}")
 
-    blend = VoiceBlend.parse(BLEND)
     print("\nGenerating audio...")
     samples, _ = kokoro.create(
         TEXT,
-        voice=blend,
+        voice=VoiceBlend.parse(BLEND),
         speed=1.0,
         lang=LANG,
     )

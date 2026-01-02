@@ -21,22 +21,22 @@ from ttsforge.onnx_backend import SAMPLE_RATE, KokoroONNX
 TEXT = """
 "Well," said the professor; "this is quite extraordinary!"
 
-The experiment — which took years to complete — yielded surprising results: 
+The experiment — which took years to complete — yielded surprising results:
 success rates of 95%, 87%, and 72% (in that order).
 
 "But wait..." she paused, "are you absolutely sure?"
 
-Yes! No? Maybe... Who knows: life is full of mysteries; 
+Yes! No? Maybe... Who knows: life is full of mysteries;
 that's what makes it interesting.
 
-Consider this: the data shows (a) increased efficiency; 
+Consider this: the data shows (a) increased efficiency;
 (b) reduced costs; and (c) improved outcomes — all remarkable achievements!
 
 "To be, or not to be?" — that is the question.
 
 He shouted: "Eureka!" Then whispered... "Finally."
 
-The results were: excellent (A+), good (B), average (C); 
+The results were: excellent (A+), good (B), average (C);
 however — and this is important — none failed!
 
 "Why?" she asked. "Because," he replied, "science never sleeps..."

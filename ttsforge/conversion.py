@@ -1541,7 +1541,7 @@ class TTSConverter:
         for i, ch in enumerate(epub_chapters):
             # Remove the <<CHAPTER: title>> marker from the beginning of content
             content = ch.text
-            # Pattern matches: <<CHAPTER: anything>> followed by optional whitespace/newlines
+            # Pattern matches: <<CHAPTER: anything>> followed by whitespace/newlines
             content = re.sub(
                 r"^<<CHAPTER:[^>]*>>\s*\n*", "", content, count=1, flags=re.MULTILINE
             )

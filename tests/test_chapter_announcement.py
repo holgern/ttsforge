@@ -7,7 +7,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
-from ttsforge.conversion import Chapter, ConversionOptions, TTSConverter
+from ttsforge.conversion import Chapter, ConversionOptions
 from ttsforge.phoneme_conversion import PhonemeConversionOptions, PhonemeConverter
 from ttsforge.phonemes import PhonemeBook, PhonemeSegment
 
@@ -125,7 +125,7 @@ class TestChapterAnnouncementPhonemeConversion:
         assert options.announce_chapters is True
 
     def test_phoneme_chapter_pause_default_value(self):
-        """Test that chapter_pause_after_title has correct default in phoneme options."""
+        """Test chapter_pause_after_title has correct default in phoneme options."""
         options = PhonemeConversionOptions()
         assert options.chapter_pause_after_title == 2.0
 
@@ -156,7 +156,7 @@ class TestChapterAnnouncementPhonemeConversion:
             )
             converter = PhonemeConverter(sample_phoneme_book, options)
 
-            result = converter.convert(output_path)
+            converter.convert(output_path)
 
             # Should call create() for announcements (2 chapters)
             assert mock_kokoro.create.call_count == 2
@@ -192,7 +192,7 @@ class TestChapterAnnouncementPhonemeConversion:
             )
             converter = PhonemeConverter(sample_phoneme_book, options)
 
-            result = converter.convert(output_path)
+            converter.convert(output_path)
 
             # Should NOT call create() for announcements
             # (Only create_from_segment for actual content)
@@ -230,7 +230,7 @@ class TestChapterAnnouncementPhonemeConversion:
             )
             converter = PhonemeConverter(book, options)
 
-            result = converter.convert(output_path)
+            converter.convert(output_path)
 
             # Should NOT announce empty chapters
             assert mock_kokoro.create.call_count == 0

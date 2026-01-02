@@ -2,6 +2,7 @@
 
 import asyncio
 import io
+import logging
 import os
 import re
 import sqlite3
@@ -17,6 +18,9 @@ import onnxruntime as rt
 from .tokenizer import EspeakConfig, Tokenizer
 from .trim import trim as trim_audio
 from .utils import get_user_cache_path
+
+# Logger for debugging
+logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     from .phonemes import PhonemeSegment
@@ -599,7 +603,7 @@ class KokoroONNX:
 
     def _split_phonemes(self, phonemes: str) -> list[str]:
         """
-        Split phonemes into batches at punctuation marks.
+        Split phonemes into batches at sentence-ending punctuation marks.
 
         Args:
             phonemes: Full phoneme string
@@ -607,29 +611,65 @@ class KokoroONNX:
         Returns:
             List of phoneme batches, each <= MAX_PHONEME_LENGTH
         """
-        # Split on punctuation marks while keeping them
-        words = re.split(r"([.,!?;])", phonemes)
+        # Split on sentence-ending punctuation (., !, ?) while keeping them
+        # Use lookbehind to split AFTER the punctuation
+        sentences = re.split(r"(?<=[.!?])\s*", phonemes)
+
         batches = []
         current = ""
 
-        for part in words:
-            part = part.strip()
-            if not part:
+        for sentence in sentences:
+            sentence = sentence.strip()
+            if not sentence:
                 continue
-            if len(current) + len(part) + 1 >= MAX_PHONEME_LENGTH:
+
+            # If adding sentence would exceed limit, save current batch, start new
+            if current and len(current) + len(sentence) + 1 > MAX_PHONEME_LENGTH:
+                batches.append(current.strip())
+                current = sentence
+            # If the sentence itself is too long, we need to split it further
+            elif len(sentence) > MAX_PHONEME_LENGTH:
+                # Save current batch if any
                 if current:
                     batches.append(current.strip())
-                current = part
-            elif part in ".,!?;":
-                current += part
+                    current = ""
+                # Split long sentence on any punctuation or spaces
+                words = re.split(r"([.,;:!?\s])", sentence)
+                # If there's no punctuation or spaces, force chunk by character count
+                if len(words) == 1 and len(words[0]) > MAX_PHONEME_LENGTH:
+                    # Chunk the string at MAX_PHONEME_LENGTH boundaries
+                    chunk = words[0]
+                    while len(chunk) > MAX_PHONEME_LENGTH:
+                        batches.append(chunk[:MAX_PHONEME_LENGTH])
+                        chunk = chunk[MAX_PHONEME_LENGTH:]
+                    if chunk:
+                        current = chunk
+                else:
+                    for word in words:
+                        if not word or word.isspace():
+                            if current:
+                                current += " "
+                            continue
+                        if len(current) + len(word) + 1 > MAX_PHONEME_LENGTH:
+                            if current:
+                                batches.append(current.strip())
+                            current = word
+                        else:
+                            if current and not current.endswith(
+                                (".", "!", "?", ",", ";", ":")
+                            ):
+                                current += " "
+                            current += word
             else:
+                # Add sentence to current batch
                 if current:
                     current += " "
-                current += part
+                current += sentence
 
         if current:
             batches.append(current.strip())
-        return batches
+
+        return batches if batches else [phonemes]
 
     def get_voices(self) -> list[str]:
         """Get list of available voice names."""
@@ -713,8 +753,22 @@ class KokoroONNX:
         # Convert text to phonemes
         phonemes = self.tokenizer.phonemize(text, lang=lang)
 
-        # Split phonemes into batches and generate audio
+        # Debug logging for phoneme generation
+        if os.getenv("TTSFORGE_DEBUG_PHONEMES"):
+            logger.info(f"Text: {text[:100]}...")
+            logger.info(f"Language: {lang}")
+            logger.info(f"Phonemes: {phonemes[:100]}...")
+            logger.info(f"Phoneme length: {len(phonemes)} characters")
+
+        # Split phonemes into batches at sentence boundaries
         batches = self._split_phonemes(phonemes)
+
+        # Debug logging for batch splitting
+        if os.getenv("TTSFORGE_DEBUG_PHONEMES"):
+            logger.info(f"Split into {len(batches)} batches")
+            for i, batch in enumerate(batches, 1):
+                logger.info(f"  Batch {i}: {len(batch)} chars - {batch[:80]}...")
+
         audio_parts = []
 
         for batch in batches:
@@ -761,6 +815,12 @@ class KokoroONNX:
         # kokoro-onnx supports direct phoneme input via create method with ps parameter
         # But we need to convert to tokens first
         tokens = self.tokenizer.tokenize(phonemes)
+
+        # Debug logging for phoneme generation
+        if os.getenv("TTSFORGE_DEBUG_PHONEMES"):
+            logger.info(f"Phonemes: {phonemes}")
+            logger.info(f"Tokens: {tokens}")
+
         return self.create_from_tokens(tokens, voice_style, speed)
 
     def create_from_tokens(
@@ -830,6 +890,13 @@ class KokoroONNX:
         Returns:
             Tuple of (audio samples as numpy array, sample rate)
         """
+        # Debug logging for segment
+        if os.getenv("TTSFORGE_DEBUG_PHONEMES"):
+            logger.info(f"Segment text: {segment.text[:100]}...")
+            logger.info(f"Segment phonemes: {segment.phonemes}")
+            logger.info(f"Segment tokens: {segment.tokens}")
+            logger.info(f"Segment lang: {segment.lang}")
+
         # Use tokens if available, otherwise use phonemes
         if segment.tokens:
             return self.create_from_tokens(segment.tokens, voice, speed)
