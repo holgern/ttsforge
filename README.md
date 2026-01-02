@@ -9,6 +9,7 @@ with support for 54 neural voices across 9 languages.
 
 - **EPUB to Audiobook**: Convert EPUB files to M4B, MP3, WAV, FLAC, or OPUS
 - **54 Neural Voices**: High-quality TTS in 9 languages
+- **Mixed-Language Support**: Auto-detect and handle multiple languages in text
 - **Resumable Conversions**: Interrupt and resume long audiobook conversions
 - **Phoneme Pre-tokenization**: Pre-process text for faster batch conversions
 - **Configurable Filenames**: Template-based output naming with book metadata
@@ -198,6 +199,42 @@ ttsforge demo --separate -o ./voices/
 ttsforge convert book.epub --voice-blend "af_nicole:50,am_michael:50"
 ```
 
+### Mixed-Language Support
+
+For books with multiple languages (e.g., German text with English technical terms):
+
+```bash
+# Enable mixed-language auto-detection
+ttsforge convert book.epub \
+  --use-mixed-language \
+  --mixed-language-primary de \
+  --mixed-language-allowed de,en-us
+
+# Test with a sample
+ttsforge sample \
+  "Das ist ein deutscher Satz. This is an English sentence." \
+  --use-mixed-language \
+  --mixed-language-primary de \
+  --mixed-language-allowed de,en-us
+```
+
+**Requirements**: Install `lingua-language-detector` for automatic language detection:
+
+```bash
+pip install lingua-language-detector
+```
+
+**Configuration options:**
+
+- `--use-mixed-language` - Enable mixed-language mode
+- `--mixed-language-primary LANG` - Primary language (e.g., `de`, `en-us`)
+- `--mixed-language-allowed LANGS` - Comma-separated list of allowed languages
+- `--mixed-language-confidence FLOAT` - Detection confidence threshold (0.0-1.0,
+  default: 0.7)
+
+Supported languages: `en-us`, `en-gb`, `de`, `fr-fr`, `es`, `it`, `pt`, `pl`, `tr`,
+`ru`, `ko`, `ja`, `zh`/`cmn`
+
 ## Commands
 
 | Command            | Description               |
@@ -232,19 +269,23 @@ ttsforge convert book.epub --gpu
 
 ## Configuration Options
 
-| Option                     | Default        | Description              |
-| -------------------------- | -------------- | ------------------------ |
-| `default_voice`            | `af_heart`     | Default TTS voice        |
-| `default_language`         | `a`            | Default language code    |
-| `default_speed`            | `1.0`          | Speech speed (0.5-2.0)   |
-| `default_format`           | `m4b`          | Output format            |
-| `use_gpu`                  | `false`        | Enable GPU acceleration  |
-| `silence_between_chapters` | `2.0`          | Chapter gap (seconds)    |
-| `segment_pause_min`        | `0.1`          | Min sentence pause       |
-| `segment_pause_max`        | `0.3`          | Max sentence pause       |
-| `paragraph_pause_min`      | `0.5`          | Min paragraph pause      |
-| `paragraph_pause_max`      | `1.0`          | Max paragraph pause      |
-| `output_filename_template` | `{book_title}` | Output filename template |
+| Option                      | Default        | Description                     |
+| --------------------------- | -------------- | ------------------------------- |
+| `default_voice`             | `af_heart`     | Default TTS voice               |
+| `default_language`          | `a`            | Default language code           |
+| `default_speed`             | `1.0`          | Speech speed (0.5-2.0)          |
+| `default_format`            | `m4b`          | Output format                   |
+| `use_gpu`                   | `false`        | Enable GPU acceleration         |
+| `silence_between_chapters`  | `2.0`          | Chapter gap (seconds)           |
+| `segment_pause_min`         | `0.1`          | Min sentence pause              |
+| `segment_pause_max`         | `0.3`          | Max sentence pause              |
+| `paragraph_pause_min`       | `0.5`          | Min paragraph pause             |
+| `paragraph_pause_max`       | `1.0`          | Max paragraph pause             |
+| `output_filename_template`  | `{book_title}` | Output filename template        |
+| `use_mixed_language`        | `false`        | Enable mixed-language mode      |
+| `mixed_language_primary`    | `None`         | Primary language for mixed mode |
+| `mixed_language_allowed`    | `None`         | Allowed languages (list)        |
+| `mixed_language_confidence` | `0.7`          | Language detection threshold    |
 
 ## Documentation
 

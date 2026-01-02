@@ -190,6 +190,11 @@ DEFAULT_CONFIG = {
     "phoneme_export_template": "{book_title}",
     # Fallback title when metadata is missing
     "default_title": "Untitled",
+    # Mixed-language phonemization settings (disabled by default)
+    "use_mixed_language": False,  # Enable automatic language detection
+    "mixed_language_primary": None,  # Primary language (None = use current lang)
+    "mixed_language_allowed": None,  # List of allowed languages (required if enabled)
+    "mixed_language_confidence": 0.7,  # Detection confidence threshold (0.0-1.0)
 }
 
 # Audio settings

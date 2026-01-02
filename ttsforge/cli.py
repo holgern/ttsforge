@@ -258,6 +258,33 @@ def main(
     type=click.Path(exists=True, path_type=Path),
     help="Path to custom voice database (SQLite).",
 )
+@click.option(
+    "--use-mixed-language",
+    "use_mixed_language",
+    is_flag=True,
+    help="Enable mixed-language support (auto-detect multiple languages in text).",
+)
+@click.option(
+    "--mixed-language-primary",
+    "mixed_language_primary",
+    type=str,
+    help="Primary language for mixed-language mode (e.g., 'de', 'en-us').",
+)
+@click.option(
+    "--mixed-language-allowed",
+    "mixed_language_allowed",
+    type=str,
+    help="Comma-separated list of allowed languages (e.g., 'de,en-us').",
+)
+@click.option(
+    "--mixed-language-confidence",
+    "mixed_language_confidence",
+    type=float,
+    help=(
+        "Detection confidence threshold for mixed-language mode "
+        "(0.0-1.0, default: 0.7)."
+    ),
+)
 @click.pass_context
 def convert(
     ctx: click.Context,
@@ -288,6 +315,10 @@ def convert(
     keep_chapter_files: bool,
     voice_blend: Optional[str],
     voice_database: Optional[Path],
+    use_mixed_language: bool,
+    mixed_language_primary: Optional[str],
+    mixed_language_allowed: Optional[str],
+    mixed_language_confidence: Optional[float],
 ) -> None:
     """Convert an EPUB file to an audiobook.
 
@@ -416,6 +447,13 @@ def convert(
     if output_format is None:
         output_format = output.suffix.lstrip(".") or config.get("default_format", "m4b")
 
+    # Parse mixed_language_allowed from comma-separated string
+    parsed_mixed_language_allowed = None
+    if mixed_language_allowed:
+        parsed_mixed_language_allowed = [
+            lang.strip() for lang in mixed_language_allowed.split(",")
+        ]
+
     # Show conversion summary
     _show_conversion_summary(
         epub_file=epub_file,
@@ -429,6 +467,15 @@ def convert(
         title=effective_title,
         author=effective_author,
         lang=lang,
+        use_mixed_language=use_mixed_language
+        or config.get("use_mixed_language", False),
+        mixed_language_primary=mixed_language_primary
+        or config.get("mixed_language_primary"),
+        mixed_language_allowed=parsed_mixed_language_allowed
+        or config.get("mixed_language_allowed"),
+        mixed_language_confidence=mixed_language_confidence
+        if mixed_language_confidence is not None
+        else config.get("mixed_language_confidence", 0.7),
     )
 
     # Confirm
@@ -461,6 +508,20 @@ def convert(
         use_gpu=use_gpu if use_gpu is not None else config.get("use_gpu", False),
         silence_between_chapters=silence or config.get("silence_between_chapters", 2.0),
         lang=lang or config.get("phonemization_lang"),
+        use_mixed_language=(
+            use_mixed_language or config.get("use_mixed_language", False)
+        ),
+        mixed_language_primary=(
+            mixed_language_primary or config.get("mixed_language_primary")
+        ),
+        mixed_language_allowed=(
+            parsed_mixed_language_allowed or config.get("mixed_language_allowed")
+        ),
+        mixed_language_confidence=(
+            mixed_language_confidence
+            if mixed_language_confidence is not None
+            else config.get("mixed_language_confidence", 0.7)
+        ),
         segment_pause_min=(
             segment_pause_min
             if segment_pause_min is not None
@@ -741,6 +802,33 @@ DEFAULT_SAMPLE_TEXT = (
     is_flag=True,
     help="Play audio directly (also saves to file if -o specified).",
 )
+@click.option(
+    "--use-mixed-language",
+    "use_mixed_language",
+    is_flag=True,
+    help="Enable mixed-language support (auto-detect multiple languages in text).",
+)
+@click.option(
+    "--mixed-language-primary",
+    "mixed_language_primary",
+    type=str,
+    help="Primary language for mixed-language mode (e.g., 'de', 'en-us').",
+)
+@click.option(
+    "--mixed-language-allowed",
+    "mixed_language_allowed",
+    type=str,
+    help="Comma-separated list of allowed languages (e.g., 'de,en-us').",
+)
+@click.option(
+    "--mixed-language-confidence",
+    "mixed_language_confidence",
+    type=float,
+    help=(
+        "Detection confidence threshold for mixed-language mode "
+        "(0.0-1.0, default: 0.7)."
+    ),
+)
 @click.pass_context
 def sample(
     ctx: click.Context,
@@ -755,6 +843,10 @@ def sample(
     split_mode: Optional[str],
     play_audio: bool,
     verbose: bool,
+    use_mixed_language: bool,
+    mixed_language_primary: Optional[str],
+    mixed_language_allowed: Optional[str],
+    mixed_language_confidence: Optional[float],
 ) -> None:
     """Generate a sample audio file to test TTS settings.
 
@@ -801,6 +893,13 @@ def sample(
     # Load config for defaults
     user_config = load_config()
 
+    # Parse mixed_language_allowed from comma-separated string
+    parsed_mixed_language_allowed = None
+    if mixed_language_allowed:
+        parsed_mixed_language_allowed = [
+            lang_item.strip() for lang_item in mixed_language_allowed.split(",")
+        ]
+
     # Build conversion options (use ConversionOptions defaults if not specified)
     options = ConversionOptions(
         voice=voice or user_config.get("voice") or "af_bella",
@@ -810,6 +909,20 @@ def sample(
         use_gpu=use_gpu if use_gpu is not None else user_config.get("use_gpu", True),
         split_mode=split_mode or user_config.get("split_mode", "auto"),
         lang=lang or user_config.get("phonemization_lang"),
+        use_mixed_language=(
+            use_mixed_language or user_config.get("use_mixed_language", False)
+        ),
+        mixed_language_primary=(
+            mixed_language_primary or user_config.get("mixed_language_primary")
+        ),
+        mixed_language_allowed=(
+            parsed_mixed_language_allowed or user_config.get("mixed_language_allowed")
+        ),
+        mixed_language_confidence=(
+            mixed_language_confidence
+            if mixed_language_confidence is not None
+            else user_config.get("mixed_language_confidence", 0.7)
+        ),
         model_path=model_path,
         voices_path=voices_path,
     )
@@ -2493,6 +2606,10 @@ def _show_conversion_summary(
     title: str,
     author: str,
     lang: Optional[str] = None,
+    use_mixed_language: bool = False,
+    mixed_language_primary: Optional[str] = None,
+    mixed_language_allowed: Optional[list[str]] = None,
+    mixed_language_confidence: float = 0.7,
 ) -> None:
     """Show conversion summary before starting."""
     console.print()
@@ -2509,6 +2626,13 @@ def _show_conversion_summary(
     table.add_row("Language", LANGUAGE_DESCRIPTIONS.get(language, language))
     if lang:
         table.add_row("Phonemization Lang", f"{lang} (override)")
+    if use_mixed_language:
+        table.add_row("Mixed-Language", "Enabled")
+        if mixed_language_primary:
+            table.add_row("  Primary Lang", mixed_language_primary)
+        if mixed_language_allowed:
+            table.add_row("  Allowed Langs", ", ".join(mixed_language_allowed))
+        table.add_row("  Confidence", f"{mixed_language_confidence:.2f}")
     table.add_row("Speed", f"{speed}x")
     table.add_row("GPU", "Enabled" if use_gpu else "Disabled")
     table.add_row("Title", title)

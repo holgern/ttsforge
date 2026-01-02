@@ -246,6 +246,11 @@ class ConversionOptions:
     # Language override for phonemization (e.g., 'de', 'en-us', 'fr')
     # If None, language is determined from voice prefix
     lang: Optional[str] = None
+    # Mixed-language support (auto-detect and handle multiple languages)
+    use_mixed_language: bool = False
+    mixed_language_primary: Optional[str] = None
+    mixed_language_allowed: Optional[list[str]] = None
+    mixed_language_confidence: float = 0.7
     # Segment pause (random silence between sentences within a paragraph)
     segment_pause_min: float = 0.1
     segment_pause_max: float = 0.3
@@ -362,11 +367,22 @@ class TTSConverter:
             download_all_models()
             self.log("Model download complete.")
 
+        # Create TokenizerConfig from ConversionOptions (for mixed-language support)
+        from .tokenizer import TokenizerConfig
+
+        tokenizer_config = TokenizerConfig(
+            use_mixed_language=self.options.use_mixed_language,
+            mixed_language_primary=self.options.mixed_language_primary,
+            mixed_language_allowed=self.options.mixed_language_allowed,
+            mixed_language_confidence=self.options.mixed_language_confidence,
+        )
+
         # Initialize ONNX backend
         self._kokoro = KokoroONNX(
             model_path=self.options.model_path,
             voices_path=self.options.voices_path,
             use_gpu=self.options.use_gpu,
+            tokenizer_config=tokenizer_config,
         )
 
         # Load voice database if specified

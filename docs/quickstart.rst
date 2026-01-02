@@ -176,6 +176,52 @@ Listen to all voices with a demo:
    ttsforge demo --separate -o ./voice_samples/
 
 
+Mixed-Language Support
+----------------------
+
+For books containing multiple languages (e.g., German text with English technical terms),
+ttsforge can automatically detect and handle different languages:
+
+.. code-block:: bash
+
+   # Convert a book with German and English text
+   ttsforge convert mybook.epub \
+       --use-mixed-language \
+       --mixed-language-primary de \
+       --mixed-language-allowed de,en-us
+
+   # Test with a sample
+   ttsforge sample \
+       "Das ist ein deutscher Satz. This is an English sentence." \
+       --use-mixed-language \
+       --mixed-language-primary de \
+       --mixed-language-allowed de,en-us
+
+**Requirements**: Install the language detector:
+
+.. code-block:: bash
+
+   pip install lingua-language-detector
+
+**Options**:
+
+- ``--use-mixed-language`` - Enable automatic language detection
+- ``--mixed-language-primary LANG`` - Primary/fallback language (e.g., ``de``, ``en-us``)
+- ``--mixed-language-allowed LANGS`` - Comma-separated list of languages to detect
+- ``--mixed-language-confidence FLOAT`` - Detection confidence threshold (0.0-1.0, default: 0.7)
+
+**Supported languages**: ``en-us``, ``en-gb``, ``de``, ``fr-fr``, ``es``, ``it``, ``pt``, ``pl``, ``tr``, ``ru``, ``ko``, ``ja``, ``zh``/``cmn``
+
+**Configuration**: Set defaults in config:
+
+.. code-block:: bash
+
+   ttsforge config --set use_mixed_language true
+   ttsforge config --set mixed_language_primary de
+   ttsforge config --set mixed_language_allowed "['de', 'en-us']"
+   ttsforge config --set mixed_language_confidence 0.7
+
+
 Configuration
 -------------
 

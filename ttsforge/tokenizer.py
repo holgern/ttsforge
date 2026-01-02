@@ -21,6 +21,7 @@ from kokorog2p import (
     validate_for_kokoro,
 )
 from kokorog2p.base import G2PBase
+from kokorog2p.mixed_language_g2p import MixedLanguageG2P
 
 if TYPE_CHECKING:
     pass
@@ -62,11 +63,25 @@ class TokenizerConfig:
         use_espeak_fallback: Whether to use espeak for OOV words (default: True)
         use_spacy: Whether to use spaCy for POS tagging (default: True)
         use_dictionary: Whether to use dictionary lookup (default: True)
+        use_mixed_language: Enable automatic language detection for mixed-language
+            text (default: False). Requires mixed_language_allowed to be set.
+        mixed_language_primary: Primary language code for mixed-language mode
+            (e.g., 'de', 'en-us'). If None, uses the language passed to phonemize().
+        mixed_language_allowed: List of language codes to detect and support in
+            mixed-language mode (e.g., ['de', 'en-us', 'fr']). Required when
+            use_mixed_language is True.
+        mixed_language_confidence: Minimum confidence threshold (0.0-1.0) for
+            accepting language detection results. Words below this threshold
+            fall back to primary_language (default: 0.7).
     """
 
     use_espeak_fallback: bool = True
     use_spacy: bool = True
     use_dictionary: bool = True
+    use_mixed_language: bool = False
+    mixed_language_primary: str | None = None
+    mixed_language_allowed: list[str] | None = None
+    mixed_language_confidence: float = 0.7
 
 
 # Backward compatibility alias
@@ -109,6 +124,12 @@ class Tokenizer:
     2. Text to phoneme conversion (via kokorog2p dictionary + espeak fallback)
     3. Phoneme to token conversion (via Kokoro vocabulary)
     4. Token to phoneme conversion (reverse lookup)
+    5. Optional mixed-language support for automatic language detection
+
+    Mixed-Language Support:
+        Enable automatic language detection for text containing multiple languages
+        by setting TokenizerConfig.use_mixed_language=True and specifying
+        allowed_languages. This uses kokorog2p's MixedLanguageG2P backend.
 
     Args:
         espeak_config: Deprecated, kept for backward compatibility
@@ -117,10 +138,19 @@ class Tokenizer:
         config: Optional TokenizerConfig for phonemization settings
 
     Example:
+        >>> # Single-language usage (default)
         >>> tokenizer = Tokenizer()
         >>> phonemes = tokenizer.phonemize("Hello world")
         >>> tokens = tokenizer.tokenize(phonemes)
-        >>> text_tokens = tokenizer.text_to_tokens("Hello world")
+
+        >>> # Mixed-language usage
+        >>> config = TokenizerConfig(
+        ...     use_mixed_language=True,
+        ...     mixed_language_primary="de",
+        ...     mixed_language_allowed=["de", "en-us"]
+        ... )
+        >>> tokenizer = Tokenizer(config=config)
+        >>> phonemes = tokenizer.phonemize("Ich gehe zum Meeting")
     """
 
     def __init__(
@@ -154,15 +184,151 @@ class Tokenizer:
                 "EspeakConfig is deprecated. kokorog2p manages espeak internally."
             )
 
+    def _validate_mixed_language_config(self) -> None:
+        """Validate mixed-language configuration.
+
+        Raises:
+            ValueError: If mixed-language is enabled but configuration is invalid
+        """
+        if not self.config.use_mixed_language:
+            return
+
+        # Require allowed_languages to be explicitly set
+        if not self.config.mixed_language_allowed:
+            raise ValueError(
+                "use_mixed_language is enabled but mixed_language_allowed is not set. "
+                "You must explicitly specify which languages to detect, e.g., "
+                "mixed_language_allowed=['de', 'en-us', 'fr']"
+            )
+
+        # Validate all allowed languages are supported
+        for lang in self.config.mixed_language_allowed:
+            # Map to kokorog2p format for validation
+            kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)
+            if kokorog2p_lang not in SUPPORTED_LANGUAGES.values():
+                supported = sorted(set(SUPPORTED_LANGUAGES.keys()))
+                raise ValueError(
+                    f"Language '{lang}' in mixed_language_allowed is not supported. "
+                    f"Supported languages: {supported}"
+                )
+
+        # Validate primary language if set
+        if self.config.mixed_language_primary:
+            primary = self.config.mixed_language_primary
+            kokorog2p_primary = SUPPORTED_LANGUAGES.get(primary, primary)
+            if kokorog2p_primary not in SUPPORTED_LANGUAGES.values():
+                supported = sorted(set(SUPPORTED_LANGUAGES.keys()))
+                raise ValueError(
+                    f"Primary language '{primary}' is not supported. "
+                    f"Supported languages: {supported}"
+                )
+
+            # Primary MUST be in allowed languages
+            if primary not in self.config.mixed_language_allowed:
+                raise ValueError(
+                    f"Primary language '{primary}' must be in allowed_languages. "
+                    f"Got primary='{primary}' but "
+                    f"allowed={self.config.mixed_language_allowed}"
+                )
+
+        # Validate confidence threshold
+        if not 0.0 <= self.config.mixed_language_confidence <= 1.0:
+            raise ValueError(
+                f"mixed_language_confidence must be between 0.0 and 1.0, "
+                f"got {self.config.mixed_language_confidence}"
+            )
+
+    def _get_mixed_language_cache_key(self) -> str:
+        """Generate cache key for mixed-language G2P instance.
+
+        Returns:
+            String key representing the current mixed-language configuration
+        """
+        if not self.config.use_mixed_language:
+            return ""
+
+        # Include all relevant config parameters in the key
+        allowed = tuple(sorted(self.config.mixed_language_allowed or []))
+        primary = self.config.mixed_language_primary or ""
+        confidence = self.config.mixed_language_confidence
+
+        return f"mixed:{primary}:{allowed}:{confidence}"
+
+    def invalidate_mixed_language_cache(self) -> None:
+        """Invalidate cached mixed-language G2P instance.
+
+        Call this after changing mixed-language configuration to force
+        recreation of the MixedLanguageG2P instance with new settings.
+        """
+        cache_key = self._get_mixed_language_cache_key()
+        if cache_key and cache_key in self._g2p_cache:
+            del self._g2p_cache[cache_key]
+            logger.debug(f"Invalidated mixed-language G2P cache: {cache_key}")
+
     def _get_g2p(self, lang: str) -> G2PBase:
         """Get or create a G2P instance for the given language.
+
+        If mixed-language mode is enabled, returns a MixedLanguageG2P instance.
+        Otherwise, returns a standard single-language G2P instance.
 
         Args:
             lang: Language code (e.g., 'en-us', 'en-gb', 'de', 'fr-fr')
 
         Returns:
-            G2P instance for the language
+            G2P instance for the language (or MixedLanguageG2P if enabled)
+
+        Raises:
+            ValueError: If mixed-language config is invalid
         """
+        # Validate mixed-language configuration if enabled
+        self._validate_mixed_language_config()
+
+        # If mixed-language mode is enabled, use MixedLanguageG2P
+        if self.config.use_mixed_language and self.config.mixed_language_allowed:
+            cache_key = self._get_mixed_language_cache_key()
+
+            if cache_key not in self._g2p_cache:
+                # Map primary language to kokorog2p format
+                primary_lang = self.config.mixed_language_primary or lang
+                kokorog2p_primary = SUPPORTED_LANGUAGES.get(primary_lang, primary_lang)
+
+                # Map all allowed languages to kokorog2p format
+                allowed_langs = [
+                    SUPPORTED_LANGUAGES.get(lang_code, lang_code)
+                    for lang_code in self.config.mixed_language_allowed
+                ]
+
+                try:
+                    # Create MixedLanguageG2P instance
+                    self._g2p_cache[cache_key] = MixedLanguageG2P(
+                        primary_language=kokorog2p_primary,
+                        allowed_languages=allowed_langs,
+                        confidence_threshold=self.config.mixed_language_confidence,
+                        enable_detection=True,
+                        use_espeak_fallback=self.config.use_espeak_fallback,
+                        use_spacy=self.config.use_spacy,
+                    )
+                    logger.info(
+                        f"Created MixedLanguageG2P: primary={kokorog2p_primary}, "
+                        f"allowed={allowed_langs}, "
+                        f"confidence={self.config.mixed_language_confidence}"
+                    )
+                except ImportError as e:
+                    # lingua-language-detector not available,
+                    # fall back to single-language
+                    logger.warning(
+                        f"Mixed-language mode requested but "
+                        f"lingua-language-detector is not available: {e}. "
+                        f"Falling back to single-language mode."
+                    )
+                    # Disable mixed-language mode for this session
+                    self.config.use_mixed_language = False
+                    # Fall through to single-language G2P creation below
+
+            if cache_key in self._g2p_cache:
+                return self._g2p_cache[cache_key]
+
+        # Standard single-language G2P
         if lang not in self._g2p_cache:
             # Map language to kokorog2p format
             kokorog2p_lang = SUPPORTED_LANGUAGES.get(lang, lang)

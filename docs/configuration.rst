@@ -109,6 +109,42 @@ Processing Settings
    - Choices: ``auto``, ``line``, ``paragraph``, ``sentence``, ``clause``
    - Example: ``ttsforge config --set default_split_mode sentence``
 
+Mixed-Language Settings
+^^^^^^^^^^^^^^^^^^^^^^^
+
+``use_mixed_language``
+   Enable automatic detection and handling of multiple languages in text.
+
+   - Type: boolean
+   - Default: ``false``
+   - Requires: ``lingua-language-detector`` package (``pip install lingua-language-detector``)
+   - Example: ``ttsforge config --set use_mixed_language true``
+
+``mixed_language_primary``
+   Primary/fallback language for mixed-language mode.
+
+   - Type: string or null
+   - Default: ``None``
+   - Supported: ``en-us``, ``en-gb``, ``de``, ``fr-fr``, ``es``, ``it``, ``pt``, ``pl``, ``tr``, ``ru``, ``ko``, ``ja``, ``zh``/``cmn``
+   - Example: ``ttsforge config --set mixed_language_primary de``
+
+``mixed_language_allowed``
+   List of languages allowed for auto-detection in mixed-language mode.
+
+   - Type: list of strings or null
+   - Default: ``None``
+   - Required when ``use_mixed_language`` is enabled
+   - Example: ``ttsforge config --set mixed_language_allowed "['de', 'en-us']"``
+
+``mixed_language_confidence``
+   Confidence threshold for language detection (0.0-1.0).
+
+   - Type: float
+   - Default: ``0.7``
+   - Range: ``0.0`` to ``1.0``
+   - Higher values require more confidence before switching languages
+   - Example: ``ttsforge config --set mixed_language_confidence 0.8``
+
 Audio Timing Settings
 ^^^^^^^^^^^^^^^^^^^^^
 
@@ -282,6 +318,22 @@ Complete Configuration Reference
      - string
      - ``Untitled``
      - Fallback title
+   * - ``use_mixed_language``
+     - boolean
+     - ``false``
+     - Enable mixed-language mode
+   * - ``mixed_language_primary``
+     - string/null
+     - ``None``
+     - Primary language for mixed mode
+   * - ``mixed_language_allowed``
+     - list/null
+     - ``None``
+     - Allowed languages list
+   * - ``mixed_language_confidence``
+     - float
+     - ``0.7``
+     - Language detection threshold
 
 
 Example Configuration File
@@ -309,7 +361,11 @@ Here's an example ``config.json`` with custom settings:
      "output_filename_template": "{author} - {book_title}",
      "chapter_filename_template": "{chapter_num:03d}_{chapter_title}",
      "phoneme_export_template": "{book_title}",
-     "default_title": "Untitled"
+     "default_title": "Untitled",
+     "use_mixed_language": false,
+     "mixed_language_primary": null,
+     "mixed_language_allowed": null,
+     "mixed_language_confidence": 0.7
    }
 
 

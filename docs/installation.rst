@@ -113,6 +113,33 @@ Or use the ``--gpu`` flag with commands:
    ttsforge convert book.epub --gpu
 
 
+Mixed-Language Support (Optional)
+----------------------------------
+
+For automatic detection and handling of multiple languages in text (e.g., German text with English technical terms):
+
+.. code-block:: bash
+
+   pip install lingua-language-detector
+
+Then enable mixed-language mode:
+
+.. code-block:: bash
+
+   ttsforge config --set use_mixed_language true
+   ttsforge config --set mixed_language_primary de
+   ttsforge config --set mixed_language_allowed "['de', 'en-us']"
+
+Or use the ``--use-mixed-language`` flag with commands:
+
+.. code-block:: bash
+
+   ttsforge convert book.epub \
+       --use-mixed-language \
+       --mixed-language-primary de \
+       --mixed-language-allowed de,en-us
+
+
 Downloading Models
 ------------------
 

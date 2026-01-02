@@ -15,7 +15,7 @@ from urllib.request import urlretrieve
 import numpy as np
 import onnxruntime as rt
 
-from .tokenizer import EspeakConfig, Tokenizer
+from .tokenizer import EspeakConfig, Tokenizer, TokenizerConfig
 from .trim import trim as trim_audio
 from .utils import get_user_cache_path
 
@@ -438,6 +438,7 @@ class KokoroONNX:
         use_gpu: bool = False,
         vocab_version: str = "v1.0",
         espeak_config: Optional[EspeakConfig] = None,
+        tokenizer_config: Optional["TokenizerConfig"] = None,
         model_quality: Optional[ModelQuality] = None,
     ) -> None:
         """
@@ -449,6 +450,9 @@ class KokoroONNX:
             use_gpu: Whether to use GPU acceleration (requires onnxruntime-gpu)
             vocab_version: Vocabulary version for tokenizer
             espeak_config: Optional espeak-ng configuration
+                (deprecated, use tokenizer_config)
+            tokenizer_config: Optional tokenizer configuration
+                (for mixed-language support)
             model_quality: Model quality/quantization level (default from config)
         """
         self._session: Optional[rt.InferenceSession] = None
@@ -486,12 +490,14 @@ class KokoroONNX:
         self._tokenizer: Optional[Tokenizer] = None
         self._vocab_version = vocab_version
         self._espeak_config = espeak_config
+        self._tokenizer_config = tokenizer_config
 
     @property
     def tokenizer(self) -> Tokenizer:
         """Get the tokenizer instance (lazily initialized)."""
         if self._tokenizer is None:
             self._tokenizer = Tokenizer(
+                config=self._tokenizer_config,
                 espeak_config=self._espeak_config,
                 vocab_version=self._vocab_version,
             )

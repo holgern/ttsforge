@@ -102,6 +102,21 @@ Options
 ``--voice-db PATH``
    Path to custom voice database (SQLite).
 
+``--use-mixed-language``
+   Enable mixed-language support (auto-detect multiple languages in text).
+
+``--mixed-language-primary LANG``
+   Primary language for mixed-language mode (e.g., ``de``, ``en-us``).
+   This language is used as the fallback when detection is uncertain.
+
+``--mixed-language-allowed LANGS``
+   Comma-separated list of allowed languages for detection (e.g., ``de,en-us``).
+   Required when ``--use-mixed-language`` is enabled.
+
+``--mixed-language-confidence FLOAT``
+   Detection confidence threshold for mixed-language mode (0.0-1.0).
+   Default: ``0.7``. Higher values require more confidence for language switches.
+
 Examples
 ^^^^^^^^
 
@@ -132,6 +147,12 @@ Examples
 
    # Start fresh (discard progress)
    ttsforge convert book.epub --fresh
+
+   # Mixed-language conversion (German with English terms)
+   ttsforge convert book.epub \
+       --use-mixed-language \
+       --mixed-language-primary de \
+       --mixed-language-allowed de,en-us
 
 
 list
@@ -226,6 +247,18 @@ Options
 ``--verbose``
    Show detailed output.
 
+``--use-mixed-language``
+   Enable mixed-language support (auto-detect multiple languages in text).
+
+``--mixed-language-primary LANG``
+   Primary language for mixed-language mode (e.g., ``de``, ``en-us``).
+
+``--mixed-language-allowed LANGS``
+   Comma-separated list of allowed languages (e.g., ``de,en-us``).
+
+``--mixed-language-confidence FLOAT``
+   Detection confidence threshold (0.0-1.0). Default: ``0.7``.
+
 Examples
 ^^^^^^^^
 
@@ -239,6 +272,13 @@ Examples
 
    # With voice and output options
    ttsforge sample "Testing voice" --voice am_adam -o test.wav
+
+   # Mixed-language sample
+   ttsforge sample \
+       "Das ist ein Test. This is a test." \
+       --use-mixed-language \
+       --mixed-language-primary de \
+       --mixed-language-allowed de,en-us
 
 
 voices
