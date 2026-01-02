@@ -9,9 +9,47 @@ import logging
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+
+def _split_text_into_chunks(text: str, chunk_size: int = 100000) -> list[str]:
+    """Split text into chunks at paragraph boundaries.
+
+    Args:
+        text: Input text to split
+        chunk_size: Target size for each chunk in characters (default: 100000)
+
+    Returns:
+        List of text chunks
+    """
+    # If text is small enough, return as single chunk
+    if len(text) <= chunk_size:
+        return [text]
+
+    chunks = []
+    paragraphs = text.split("\n\n")
+    current_chunk = []
+    current_size = 0
+
+    for para in paragraphs:
+        para_size = len(para)
+
+        # If adding this paragraph would exceed chunk size, start new chunk
+        if current_size > 0 and current_size + para_size > chunk_size:
+            chunks.append("\n\n".join(current_chunk))
+            current_chunk = [para]
+            current_size = para_size
+        else:
+            current_chunk.append(para)
+            current_size += para_size + 2  # +2 for \n\n
+
+    # Add final chunk
+    if current_chunk:
+        chunks.append("\n\n".join(current_chunk))
+
+    return chunks
 
 
 def extract_names_from_text(
@@ -19,6 +57,8 @@ def extract_names_from_text(
     min_count: int = 3,
     max_names: int = 100,
     include_all: bool = False,
+    chunk_size: int = 100000,
+    progress_callback: Optional[Callable[[int, int], None]] = None,
 ) -> dict[str, int]:
     """Extract proper names from text using spaCy NER and POS tagging.
 
@@ -28,6 +68,8 @@ def extract_names_from_text(
         max_names: Maximum number of names to return (default: 100)
         include_all: Include all capitalized proper nouns, not just PERSON entities
             (default: False)
+        chunk_size: Size of text chunks to process at once in characters (default: 100000)
+        progress_callback: Optional callback function(current, total) for progress updates
 
     Returns:
         Dictionary mapping name -> occurrence count, sorted by frequency
@@ -52,28 +94,44 @@ def extract_names_from_text(
             "Install with: python -m spacy download en_core_web_sm"
         ) from e
 
-    doc = nlp(text)
+    # Split text into manageable chunks
+    chunks = _split_text_into_chunks(text, chunk_size)
+    total_chunks = len(chunks)
+
+    logger.info(f"Processing {total_chunks} chunks of text (chunk_size={chunk_size})")
+
+    # Process each chunk and accumulate candidates
     candidates = []
 
-    # Method 1: Named Entity Recognition (PERSON entities)
-    for ent in doc.ents:
-        if ent.label_ == "PERSON":
-            candidates.append(ent.text)
+    for chunk_idx, chunk in enumerate(chunks, 1):
+        if progress_callback:
+            progress_callback(chunk_idx, total_chunks)
 
-    # Method 2: Capitalized proper nouns (if include_all=True)
-    if include_all:
-        for sent in doc.sents:
-            for token in sent:
-                # Skip first word of sentence, common words, and short words
-                if (
-                    token.i != sent.start
-                    and token.text[0].isupper()
-                    and token.pos_ == "PROPN"
-                    and len(token.text) > 2
-                ):
-                    candidates.append(token.text)
+        logger.debug(
+            f"Processing chunk {chunk_idx}/{total_chunks} ({len(chunk)} chars)"
+        )
 
-    # Count occurrences
+        doc = nlp(chunk)
+
+        # Method 1: Named Entity Recognition (PERSON entities)
+        for ent in doc.ents:
+            if ent.label_ == "PERSON":
+                candidates.append(ent.text)
+
+        # Method 2: Capitalized proper nouns (if include_all=True)
+        if include_all:
+            for sent in doc.sents:
+                for token in sent:
+                    # Skip first word of sentence, common words, and short words
+                    if (
+                        token.i != sent.start
+                        and token.text[0].isupper()
+                        and token.pos_ == "PROPN"
+                        and len(token.text) > 2
+                    ):
+                        candidates.append(token.text)
+
+    # Count occurrences across all chunks
     name_counts = Counter(candidates)
 
     # Filter by frequency and limit
@@ -84,7 +142,7 @@ def extract_names_from_text(
     }
 
     logger.info(
-        f"Extracted {len(filtered)} names from text "
+        f"Extracted {len(filtered)} names from {total_chunks} chunks "
         f"(min_count={min_count}, max={max_names})"
     )
 

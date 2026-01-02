@@ -3433,6 +3433,18 @@ def _split_text_into_segments(
     is_flag=True,
     help="Show extracted names without saving to file.",
 )
+@click.option(
+    "--chunk-size",
+    type=int,
+    default=100000,
+    help="Size of text chunks to process at once in characters (default: 100000).",
+)
+@click.option(
+    "--chapters",
+    type=str,
+    default=None,
+    help="Chapters to extract from (e.g., '1-5', '1,3,5', 'all').",
+)
 def extract_names(
     input_file: Path,
     output: Path,
@@ -3441,6 +3453,8 @@ def extract_names(
     language: str,
     include_all: bool,
     preview: bool,
+    chunk_size: int,
+    chapters: str | None,
 ) -> None:
     """Extract proper names from a book and generate phoneme dictionary.
 
@@ -3461,6 +3475,14 @@ def extract_names(
         \b
         # Extract frequent names only (10+ occurrences)
         ttsforge extract-names mybook.epub --min-count 10 -o names.json
+
+        \b
+        # Extract from specific chapters
+        ttsforge extract-names mybook.epub --chapters 1,3,5-10
+
+        \b
+        # Extract from chapter range
+        ttsforge extract-names mybook.epub --start 5 --end 15
 
         \b
         # Then use the dictionary for conversion
@@ -3491,12 +3513,39 @@ def extract_names(
 
             with console.status("Loading EPUB..."):
                 parser = EPUBParser(str(input_file))
-                chapters = parser.get_chapters()
-                text = "\n\n".join(chapter.text for chapter in chapters)
+                all_chapters = parser.get_chapters()
+
+                # Determine which chapters to process
+                if chapters is not None:
+                    # Parse chapter selection (supports 'all', ranges, and specific chapters)
+                    if chapters.lower() == "all":
+                        selected_chapters = all_chapters
+                    else:
+                        selected_indices = _parse_chapter_selection(
+                            chapters, len(all_chapters)
+                        )
+                        selected_chapters = [all_chapters[i] for i in selected_indices]
+
+                    if len(selected_chapters) < len(all_chapters):
+                        console.print(
+                            f"[dim]Processing {len(selected_chapters)} of {len(all_chapters)} chapters[/dim]"
+                        )
+                else:
+                    # Use all chapters by default
+                    selected_chapters = all_chapters
+
+                text = "\n\n".join(chapter.text for chapter in selected_chapters)
 
         elif input_file.suffix.lower() in [".txt", ".text"]:
             with open(input_file, encoding="utf-8") as f:
                 text = f.read()
+
+            # For text files, chapter selection doesn't apply
+            if chapters:
+                console.print(
+                    "[yellow]Warning:[/yellow] Chapter selection is only supported for EPUB files. "
+                    "Processing entire text file."
+                )
         else:
             console.print(
                 f"[red]Error:[/red] Unsupported file format: {input_file.suffix}. "
@@ -3526,7 +3575,16 @@ def extract_names(
         TextColumn("[progress.description]{task.description}"),
         console=console,
     ) as progress:
-        progress.add_task("Analyzing text and extracting names...", total=None)
+        task = progress.add_task("Analyzing text and extracting names...", total=None)
+
+        # Progress callback to update progress bar
+        def update_progress(current: int, total: int) -> None:
+            progress.update(
+                task,
+                description=f"Processing chunk {current}/{total}...",
+                completed=current,
+                total=total,
+            )
 
         try:
             names = extract_names_from_text(
@@ -3534,6 +3592,8 @@ def extract_names(
                 min_count=min_count,
                 max_names=max_names,
                 include_all=include_all,
+                chunk_size=chunk_size,
+                progress_callback=update_progress,
             )
         except ImportError as e:
             console.print(f"[red]Error:[/red] {e}")
@@ -3606,11 +3666,25 @@ def extract_names(
     default="count",
     help="Sort by: name (same as alpha), count (occurrences), alpha (alphabetical).",
 )
-def list_names(phoneme_dict: Path, sort_by: str) -> None:
+@click.option(
+    "--play",
+    is_flag=True,
+    help="Play audio preview for each name (interactive mode).",
+)
+@click.option(
+    "-v",
+    "--voice",
+    type=str,
+    default="af_sky",
+    help="Voice to use for audio preview (default: af_sky).",
+)
+def list_names(phoneme_dict: Path, sort_by: str, play: bool, voice: str) -> None:
     """List all names in a phoneme dictionary for review.
 
     Displays the contents of a phoneme dictionary in a readable table format,
     making it easy to review and identify names that need phoneme corrections.
+
+    Use --play to interactively listen to each name pronunciation.
 
     Examples:
 
@@ -3621,6 +3695,14 @@ def list_names(phoneme_dict: Path, sort_by: str) -> None:
         \b
         # List names alphabetically
         ttsforge list-names custom_phonemes.json --sort-by alpha
+
+        \b
+        # Interactive audio preview
+        ttsforge list-names custom_phonemes.json --play
+
+        \b
+        # Audio preview with different voice
+        ttsforge list-names custom_phonemes.json --play --voice af_bella
     """
     import json
 
@@ -3708,6 +3790,130 @@ def list_names(phoneme_dict: Path, sort_by: str) -> None:
     console.print(table)
     console.print(f"\n[green]Total entries:[/green] {len(entries)}")
 
+    # Interactive audio preview mode
+    if play:
+        import tempfile
+
+        console.print("\n[bold]Audio Preview Mode[/bold]")
+        console.print(
+            "[dim]Press Enter to play each name, or type a number to jump to that entry.[/dim]"
+        )
+        console.print("[dim]Type 'q' to quit, 's' to skip, 'r' to replay.[/dim]\n")
+
+        from .conversion import ConversionOptions, TTSConverter
+
+        # Initialize converter with phoneme dictionary
+        try:
+            options = ConversionOptions(
+                phoneme_dictionary_path=str(phoneme_dict),
+                voice=voice,
+            )
+            converter = TTSConverter(options)
+
+            idx = 0
+            while idx < len(items):
+                name, value = items[idx]
+
+                if isinstance(value, str):
+                    phoneme = value
+                else:
+                    phoneme = value.get("phoneme", "")
+
+                console.print(
+                    f"\n[cyan]{idx + 1}/{len(items)}:[/cyan] [bold]{name}[/bold] → [green]{phoneme}[/green]"
+                )
+
+                # Get user input
+                user_input = (
+                    input("  [Enter=play, 's'=skip, 'r'=replay, 'q'=quit]: ")
+                    .strip()
+                    .lower()
+                )
+
+                if user_input == "q":
+                    console.print("[dim]Exiting preview mode.[/dim]")
+                    break
+                elif user_input == "s":
+                    idx += 1
+                    continue
+                elif user_input.isdigit():
+                    # Jump to specific entry
+                    target_idx = int(user_input) - 1
+                    if 0 <= target_idx < len(items):
+                        idx = target_idx
+                        console.print(f"[dim]Jumping to entry {user_input}...[/dim]")
+                        continue
+                    else:
+                        console.print(
+                            f"[yellow]Invalid entry number. Must be 1-{len(items)}[/yellow]"
+                        )
+                        continue
+
+                # Play audio (Enter or 'r')
+                try:
+                    # Create a test sentence with the name
+                    test_text = f"The name {name} appears in the story."
+
+                    # Create temp file
+                    with tempfile.NamedTemporaryFile(
+                        suffix=".wav", delete=False
+                    ) as tmp:
+                        temp_output = Path(tmp.name)
+
+                    try:
+                        with console.status(f"Generating audio for '{name}'..."):
+                            result = converter.convert_text(test_text, temp_output)
+
+                        if result.success:
+                            # Play the audio
+                            import sounddevice as sd  # type: ignore[import-untyped]
+                            import soundfile as sf
+
+                            audio_data, sample_rate = sf.read(str(temp_output))
+                            console.print("[dim]▶ Playing...[/dim]")
+                            sd.play(audio_data, sample_rate)
+                            sd.wait()
+                            console.print("[green]✓ Done[/green]")
+                        else:
+                            console.print(f"[red]Error:[/red] {result.error_message}")
+
+                    finally:
+                        # Cleanup temp file
+                        if temp_output.exists():
+                            temp_output.unlink()
+
+                    # Don't auto-advance on 'r' (replay)
+                    if user_input != "r":
+                        idx += 1
+
+                except Exception as e:
+                    console.print(f"[red]Error playing audio:[/red] {e}")
+                    idx += 1
+                    continue
+
+        except Exception as e:
+            console.print(f"[red]Error initializing audio preview:[/red] {e}")
+            console.print("[yellow]Make sure you have the TTS model loaded.[/yellow]")
+
+    # Show suggestions
+    needs_review = sum(
+        1
+        for entry in entries.values()
+        if isinstance(entry, dict)
+        and entry.get("suggestion_quality") == "auto"
+        and not entry.get("verified")
+    )
+
+    if needs_review > 0 and not play:
+        console.print(
+            f"\n[yellow]⚠ {needs_review} entries need review[/yellow] "
+            f"(auto-generated, not verified)"
+        )
+        console.print(
+            f"\n[dim]Tip:[/dim] Listen to samples with:\n"
+            f"  [cyan]ttsforge list-names {phoneme_dict} --play[/cyan]"
+        )
+
     # Show suggestions
     needs_review = sum(
         1
@@ -3724,8 +3930,7 @@ def list_names(phoneme_dict: Path, sort_by: str) -> None:
         )
         console.print(
             f"\n[dim]Tip:[/dim] Listen to samples with:\n"
-            f'  [cyan]ttsforge sample "Name goes here" '
-            f"--phoneme-dict {phoneme_dict}[/cyan]"
+            f"  [cyan]ttsforge list-names {phoneme_dict} --play[/cyan]"
         )
 
 

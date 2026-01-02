@@ -16,6 +16,7 @@ except ImportError:
     pass
 
 from ttsforge.name_extractor import (
+    _split_text_into_chunks,
     extract_names_from_text,
     generate_phoneme_suggestions,
     load_simple_dictionary,
@@ -202,3 +203,69 @@ class TestNameExtraction:
 
         # Might find some depending on spaCy's NER, but should be few or none
         assert len(names) <= 2  # Allowing for some false positives
+
+    def test_text_splitting_small(self):
+        """Test that small text is not split."""
+        text = "This is a short text."
+        chunks = _split_text_into_chunks(text, chunk_size=100)
+
+        assert len(chunks) == 1
+        assert chunks[0] == text
+
+    def test_text_splitting_large(self):
+        """Test that large text is split into chunks."""
+        # Create text with multiple paragraphs
+        paragraphs = [f"Paragraph {i} with some content." for i in range(100)]
+        text = "\n\n".join(paragraphs)
+
+        chunks = _split_text_into_chunks(text, chunk_size=500)
+
+        # Should create multiple chunks
+        assert len(chunks) > 1
+
+        # Chunks should be roughly the target size (allowing some variance)
+        for chunk in chunks[:-1]:  # All but last chunk
+            # Should be close to chunk_size, allowing for paragraph boundaries
+            assert 300 <= len(chunk) <= 800
+
+        # All text should be preserved
+        reconstructed = "\n\n".join(chunks)
+        assert reconstructed == text
+
+    def test_extract_with_chunking(self):
+        """Test extraction with chunking on large text."""
+        # Create large text with repeated names
+        paragraphs = []
+        for i in range(50):
+            paragraphs.append(
+                f"Alice and Bob went shopping. Charlie joined them. "
+                f"Alice, Bob, and Charlie had fun."
+            )
+        text = "\n\n".join(paragraphs)
+
+        # Extract with small chunk size to force chunking
+        names = extract_names_from_text(text, min_count=10, chunk_size=1000)
+
+        # Should still find the names across chunks
+        assert any("alice" in name.lower() for name in names)
+        assert any("bob" in name.lower() for name in names)
+
+    def test_extract_with_progress_callback(self):
+        """Test extraction with progress callback."""
+        text = "Alice and Bob met Charlie. " * 50
+
+        callback_calls = []
+
+        def progress_callback(current: int, total: int) -> None:
+            callback_calls.append((current, total))
+
+        names = extract_names_from_text(
+            text, min_count=5, chunk_size=200, progress_callback=progress_callback
+        )
+
+        # Callback should have been called
+        assert len(callback_calls) > 0
+
+        # Last call should have current == total
+        last_call = callback_calls[-1]
+        assert last_call[0] == last_call[1]
