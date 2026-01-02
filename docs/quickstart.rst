@@ -43,6 +43,31 @@ Convert with a specific voice:
    ttsforge convert mybook.epub -v am_adam  # Male voice
 
 
+Voice Blending
+--------------
+
+Mix multiple voices for unique narration by specifying voice blends in the ``--voice`` parameter:
+
+.. code-block:: bash
+
+   # 50/50 blend of two voices
+   ttsforge sample "Hello world" --voice "af_nicole:50,am_michael:50" -p
+
+   # Weighted blend (70% Nicole, 30% Michael)
+   ttsforge convert mybook.epub --voice "af_nicole:70,am_michael:30"
+
+   # Three-way blend
+   ttsforge sample "Testing" --voice "af_sky:40,af_bella:30,am_adam:30" -p
+
+The format is: ``voice1:weight1,voice2:weight2,...`` where weights are percentages (0-100).
+
+You can also use the traditional ``--voice-blend`` parameter:
+
+.. code-block:: bash
+
+   ttsforge convert mybook.epub --voice-blend "af_nicole:50,am_michael:50"
+
+
 Output Formats
 --------------
 

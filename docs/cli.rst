@@ -39,7 +39,12 @@ Options
    Default: ``m4b``.
 
 ``-v, --voice VOICE``
-   Voice to use for TTS. See :doc:`voices` for available voices.
+   Voice to use for TTS. Can be a single voice name or a voice blend.
+   
+   - Single voice: ``af_heart``, ``am_adam``, etc.
+   - Voice blend: ``af_nicole:50,am_michael:50`` (auto-detects blend format)
+   
+   See :doc:`voices` for available voices.
    Default: ``af_heart``.
 
 ``-l, --language LANG``
@@ -96,8 +101,11 @@ Options
    Keep individual chapter audio files after conversion.
 
 ``--voice-blend SPEC``
-   Blend multiple voices. Format: ``voice1:weight1,voice2:weight2``.
+   Blend multiple voices (traditional method). Format: ``voice1:weight1,voice2:weight2``.
    Example: ``af_nicole:50,am_michael:50``.
+   
+   **Note:** You can also specify blends directly in the ``--voice`` parameter,
+   which will auto-detect the blend format. Both methods work identically.
 
 ``--voice-db PATH``
    Path to custom voice database (SQLite).
@@ -230,7 +238,10 @@ Options
    Output audio format. Default: ``wav``.
 
 ``-v, --voice VOICE``
-   TTS voice to use.
+   TTS voice to use. Can be a single voice or voice blend.
+   
+   - Single voice: ``af_heart``
+   - Voice blend: ``af_nicole:50,am_michael:50`` (auto-detects blend format)
 
 ``-l, --language LANG``
    Language for TTS.
@@ -627,6 +638,13 @@ Options
 ``-l, --language LANG``
    Language code for phonemization. Default: ``a``.
 
+``-v, --voice VOICE``
+   Voice to use for audio preview (when using ``--play``).
+   Can be a single voice or voice blend (e.g., ``af_nicole:50,am_michael:50``).
+
+``--play``
+   Generate and play audio preview of the phonemes.
+
 ``--tokens``
    Show token IDs in addition to phonemes.
 
@@ -646,3 +664,9 @@ Examples
 
    # Different language
    ttsforge phonemes preview "Bonjour!" -l f
+
+   # With audio playback
+   ttsforge phonemes preview "Test audio" --play
+
+   # With voice blend
+   ttsforge phonemes preview "Test blend" --voice "af_nicole:60,am_michael:40" --play

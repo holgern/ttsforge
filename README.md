@@ -197,8 +197,21 @@ ttsforge demo --separate -o ./voices/
 
 ### Voice Blending
 
+Mix multiple voices for custom narration:
+
 ```bash
+# Using --voice parameter (auto-detects blend format)
+ttsforge convert book.epub --voice "af_nicole:50,am_michael:50"
+
+# Using --voice-blend parameter (traditional method)
 ttsforge convert book.epub --voice-blend "af_nicole:50,am_michael:50"
+
+# Weighted blends (70% Nicole, 30% Michael)
+ttsforge convert book.epub --voice "af_nicole:70,am_michael:30"
+
+# Works with all commands
+ttsforge sample "Hello world" --voice "af_sky:60,bf_emma:40" -p
+ttsforge phonemes preview "Test blend" --voice "am_adam:50,am_michael:50" --play
 ```
 
 ### Mixed-Language Support

@@ -427,18 +427,39 @@ Mandarin Chinese (z)
 Voice Blending
 --------------
 
-Combine multiple voices for unique narration:
+Combine multiple voices for unique narration. You can specify voice blends in two ways:
+
+**Using --voice parameter (recommended):**
+
+The ``--voice`` parameter now auto-detects blend format when you include colons and commas:
 
 .. code-block:: bash
 
    # 50/50 blend of two voices
+   ttsforge convert book.epub --voice "af_nicole:50,am_michael:50"
+
+   # Weighted blend (70% Nicole, 30% Michael)
+   ttsforge convert book.epub --voice "af_nicole:70,am_michael:30"
+
+   # Works with sample command
+   ttsforge sample "Hello world" --voice "af_sky:60,bf_emma:40" -p
+
+   # Works with phonemes preview
+   ttsforge phonemes preview "Test" --voice "am_adam:50,am_michael:50" --play
+
+**Using --voice-blend parameter (traditional):**
+
+.. code-block:: bash
+
+   # Explicit voice-blend parameter
    ttsforge convert book.epub --voice-blend "af_nicole:50,am_michael:50"
 
-   # Weighted blend (60% Nicole, 40% Michael)
-   ttsforge convert book.epub --voice-blend "af_nicole:60,am_michael:40"
+   # Can combine with regular voice (blend takes precedence)
+   ttsforge convert book.epub --voice af_sky --voice-blend "af_nicole:60,am_michael:40"
 
 Voice blending creates a mixed voice by interpolating the voice embeddings.
-This can create interesting narrator voices, but results may vary.
+This can create interesting narrator voices, but results may vary. Blending works best
+with voices of the same language and similar characteristics.
 
 
 Recommendations
