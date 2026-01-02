@@ -208,3 +208,20 @@ __marimo__/
 ttsforge/_version.py
 checkpoints/
 onnx/
+
+# Audio files (test outputs and demos)
+*.wav
+*.m4b
+*.mp3
+*.m4a
+
+# Test/demo scripts at project root
+test_*.py
+demo_*.py
+
+# Binary data files
+*.bin
+
+# Test data files
+test_*.txt
+punctuation_phonemes.json
