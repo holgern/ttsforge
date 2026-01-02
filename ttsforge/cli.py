@@ -2364,9 +2364,9 @@ def phonemes_convert(
 @click.option(
     "-l",
     "--language",
-    type=click.Choice(list(LANGUAGE_DESCRIPTIONS.keys())),
+    type=str,
     default="a",
-    help="Language code for phonemization.",
+    help="Language code for phonemization (e.g., 'de', 'en-us', 'a' for auto).",
 )
 @click.option(
     "--tokens",
@@ -2379,15 +2379,38 @@ def phonemes_convert(
     default="v1.0",
     help="Vocabulary version to use.",
 )
+@click.option(
+    "-p",
+    "--play",
+    is_flag=True,
+    help="Play audio preview of the text.",
+)
+@click.option(
+    "-v",
+    "--voice",
+    type=str,
+    default="af_sky",
+    help="Voice to use for audio preview (default: af_sky).",
+)
+@click.option(
+    "--phoneme-dict",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Path to custom phoneme dictionary file.",
+)
 def phonemes_preview(
     text: str,
     language: str,
     tokens: bool,
     vocab_version: str,
+    play: bool,
+    voice: str,
+    phoneme_dict: Path | None,
 ) -> None:
     """Preview phonemes for given text.
 
     Shows how text will be converted to phonemes and optionally tokens.
+    Use --play to hear the audio output.
 
     Examples:
 
@@ -2395,12 +2418,21 @@ def phonemes_preview(
 
         ttsforge phonemes preview "Hello world" --tokens
 
-        ttsforge phonemes preview "Hello world" --language b
+        ttsforge phonemes preview "Hello world" --language de
+
+        ttsforge phonemes preview "König" --language de --play
+
+        ttsforge phonemes preview "Hermione" --play --phoneme-dict custom.json
     """
     from .onnx_backend import LANG_CODE_TO_ONNX
     from .tokenizer import Tokenizer
 
-    espeak_lang = LANG_CODE_TO_ONNX.get(language, "en-us")
+    # Map language code - support both short codes and ISO codes
+    if language in LANG_CODE_TO_ONNX:
+        espeak_lang = LANG_CODE_TO_ONNX[language]
+    else:
+        # Assume it's already an ISO code like 'de', 'en-us', etc.
+        espeak_lang = language
 
     try:
         tokenizer = Tokenizer(vocab_version=vocab_version)
@@ -2421,6 +2453,57 @@ def phonemes_preview(
         token_ids = tokenizer.tokenize(phonemes)
         console.print(f"[bold]Tokens:[/bold] {token_ids}")
         console.print(f"[dim]Token count: {len(token_ids)}[/dim]")
+
+    # Audio preview
+    if play:
+        import tempfile
+
+        from .conversion import ConversionOptions, TTSConverter
+
+        console.print("\n[bold]Generating audio preview...[/bold]")
+
+        try:
+            # Initialize converter
+            options = ConversionOptions(
+                phoneme_dictionary_path=str(phoneme_dict) if phoneme_dict else None,
+                voice=voice,
+                language=language,
+                output_format="wav",  # Explicitly set WAV format
+            )
+            converter = TTSConverter(options)
+
+            # Create temp file
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+                temp_output = Path(tmp.name)
+
+            try:
+                # Generate audio
+                result = converter.convert_text(text, temp_output)
+
+                if result.success:
+                    # Play the audio
+                    import sounddevice as sd  # type: ignore[import-untyped]
+                    import soundfile as sf
+
+                    audio_data, sample_rate = sf.read(str(temp_output))
+                    console.print("[dim]▶ Playing...[/dim]")
+                    sd.play(audio_data, sample_rate)
+                    sd.wait()
+                    console.print("[green]✓ Playback complete[/green]")
+                else:
+                    console.print(f"[red]Error:[/red] {result.error_message}")
+
+            finally:
+                # Cleanup temp file
+                if temp_output.exists():
+                    temp_output.unlink()
+
+        except Exception as e:
+            console.print(f"[red]Error playing audio:[/red] {e}")
+            import traceback
+
+            console.print(f"[dim]{traceback.format_exc()}[/dim]")
+            sys.exit(1)
 
 
 @phonemes.command("info")
@@ -3678,7 +3761,16 @@ def extract_names(
     default="af_sky",
     help="Voice to use for audio preview (default: af_sky).",
 )
-def list_names(phoneme_dict: Path, sort_by: str, play: bool, voice: str) -> None:
+@click.option(
+    "-l",
+    "--language",
+    type=str,
+    default="a",
+    help="Language code for audio preview (e.g., 'de', 'en-us', 'a' for auto, default: a).",
+)
+def list_names(
+    phoneme_dict: Path, sort_by: str, play: bool, voice: str, language: str
+) -> None:
     """List all names in a phoneme dictionary for review.
 
     Displays the contents of a phoneme dictionary in a readable table format,
@@ -3701,8 +3793,8 @@ def list_names(phoneme_dict: Path, sort_by: str, play: bool, voice: str) -> None
         ttsforge list-names custom_phonemes.json --play
 
         \b
-        # Audio preview with different voice
-        ttsforge list-names custom_phonemes.json --play --voice af_bella
+        # Audio preview with different voice and language
+        ttsforge list-names custom_phonemes.json --play --voice af_bella --language de
     """
     import json
 
@@ -3807,6 +3899,7 @@ def list_names(phoneme_dict: Path, sort_by: str, play: bool, voice: str) -> None
             options = ConversionOptions(
                 phoneme_dictionary_path=str(phoneme_dict),
                 voice=voice,
+                language=language,
             )
             converter = TTSConverter(options)
 
