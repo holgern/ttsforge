@@ -6,8 +6,11 @@ kokorog2p (dictionary + espeak fallback) as the phonemizer backend.
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from kokorog2p import (
@@ -18,6 +21,7 @@ from kokorog2p import (
     get_kokoro_vocab,
     ids_to_phonemes,
     phonemes_to_ids,
+    phonemize_with_markdown,
     validate_for_kokoro,
 )
 from kokorog2p.base import G2PBase
@@ -73,6 +77,10 @@ class TokenizerConfig:
         mixed_language_confidence: Minimum confidence threshold (0.0-1.0) for
             accepting language detection results. Words below this threshold
             fall back to primary_language (default: 0.7).
+        phoneme_dictionary_path: Path to custom phoneme dictionary JSON file.
+            Format: {"word": "/phoneme/"} where phonemes are in IPA format.
+        phoneme_dict_case_sensitive: Whether phoneme dictionary matching should
+            be case-sensitive (default: False).
     """
 
     use_espeak_fallback: bool = True
@@ -82,6 +90,8 @@ class TokenizerConfig:
     mixed_language_primary: str | None = None
     mixed_language_allowed: list[str] | None = None
     mixed_language_confidence: float = 0.7
+    phoneme_dictionary_path: str | None = None
+    phoneme_dict_case_sensitive: bool = False
 
 
 # Backward compatibility alias
@@ -176,6 +186,9 @@ class Tokenizer:
         # G2P instances cache (lazy loaded per language)
         self._g2p_cache: dict[str, G2PBase] = {}
 
+        # Phoneme dictionary cache (lazy loaded)
+        self._phoneme_dictionary: dict[str, str] | None = None
+
         # Log if espeak_config was provided (deprecated)
         if espeak_config is not None and (
             espeak_config.lib_path or espeak_config.data_path
@@ -183,6 +196,19 @@ class Tokenizer:
             logger.warning(
                 "EspeakConfig is deprecated. kokorog2p manages espeak internally."
             )
+
+        # Load phoneme dictionary if specified
+        if self.config.phoneme_dictionary_path:
+            try:
+                self._phoneme_dictionary = self._load_phoneme_dictionary(
+                    self.config.phoneme_dictionary_path
+                )
+            except Exception as e:
+                logger.warning(
+                    f"Failed to load phoneme dictionary from "
+                    f"'{self.config.phoneme_dictionary_path}': {e}. "
+                    f"Continuing without custom phoneme dictionary."
+                )
 
     def _validate_mixed_language_config(self) -> None:
         """Validate mixed-language configuration.
@@ -343,6 +369,105 @@ class Tokenizer:
 
         return self._g2p_cache[lang]
 
+    def _load_phoneme_dictionary(self, path: str | Path) -> dict[str, str]:
+        """Load custom phoneme dictionary from JSON file.
+
+        Args:
+            path: Path to JSON file containing phoneme mappings
+
+        Returns:
+            Dictionary mapping words to phoneme strings
+
+        Raises:
+            FileNotFoundError: If file doesn't exist
+            ValueError: If JSON format is invalid
+        """
+        file_path = Path(path)
+        if not file_path.exists():
+            raise FileNotFoundError(f"Phoneme dictionary not found: {path}")
+
+        with open(file_path, encoding="utf-8") as f:
+            data = json.load(f)
+
+        # Support both simple format and metadata format
+        if isinstance(data, dict):
+            # Check if it's metadata format with "entries" key
+            if "entries" in data and isinstance(data["entries"], dict):
+                entries = data["entries"]
+                # Support both simple string format and dict format with "phoneme" key
+                phoneme_dict = {}
+                for word, value in entries.items():
+                    if isinstance(value, str):
+                        phoneme_dict[word] = value
+                    elif isinstance(value, dict) and "phoneme" in value:
+                        phoneme_dict[word] = value["phoneme"]
+                    else:
+                        raise ValueError(
+                            f"Invalid entry format for '{word}': {value}. "
+                            f"Expected string or dict with 'phoneme' key."
+                        )
+            else:
+                # Simple format: {word: phoneme}
+                phoneme_dict = data
+        else:
+            raise ValueError(
+                f"Phoneme dictionary must be a JSON object, got {type(data)}"
+            )
+
+        # Validate all phoneme values
+        for word, phoneme in phoneme_dict.items():
+            if not isinstance(phoneme, str):
+                raise ValueError(
+                    f"Phoneme for '{word}' must be a string, got {type(phoneme)}"
+                )
+            # Phonemes should be in /.../ format for markdown
+            if not phoneme.startswith("/") or not phoneme.endswith("/"):
+                raise ValueError(
+                    f"Invalid phoneme format for '{word}': '{phoneme}'. "
+                    f"Expected format: '/phoneme/' (e.g., '/mɪsˈɑki/')"
+                )
+
+        logger.info(f"Loaded {len(phoneme_dict)} custom phoneme entries from {path}")
+        return phoneme_dict
+
+    def _apply_phoneme_dictionary(self, text: str) -> str:
+        """Apply custom phoneme dictionary to text.
+
+        Replaces words with markdown phoneme notation: [word](/phoneme/)
+
+        Args:
+            text: Input text
+
+        Returns:
+            Text with phoneme dictionary applied
+        """
+        if not self._phoneme_dictionary:
+            return text
+
+        result = text
+        flags = 0 if self.config.phoneme_dict_case_sensitive else re.IGNORECASE
+
+        # Sort by length (longest first) to handle multi-word entries correctly
+        sorted_words = sorted(
+            self._phoneme_dictionary.items(), key=lambda x: len(x[0]), reverse=True
+        )
+
+        for word, phoneme in sorted_words:
+            # Create regex pattern with word boundaries
+            # Use re.escape to handle special characters in the word
+            pattern = r"\b" + re.escape(word) + r"\b"
+
+            # Replace with markdown format: [word](/phoneme/)
+            # Keep the slashes - kokorog2p requires them to recognize custom phonemes
+            # Use a replacement function to preserve the original case
+            def replace_func(match: re.Match) -> str:
+                matched_word = match.group(0)
+                return f"[{matched_word}]({phoneme})"
+
+            result = re.sub(pattern, replace_func, result, flags=flags)
+
+        return result
+
     @property
     def reverse_vocab(self) -> dict[int, str]:
         """Get the reverse vocabulary (token ID -> phoneme).
@@ -373,6 +498,9 @@ class Tokenizer:
     ) -> str:
         """Convert text to phonemes.
 
+        If a custom phoneme dictionary is configured, words in the dictionary
+        will be replaced with their custom pronunciations before phonemization.
+
         Args:
             text: Input text
             lang: Language code (e.g., 'en-us', 'en-gb')
@@ -390,11 +518,27 @@ class Tokenizer:
         if not text:
             return ""
 
-        # Get G2P instance for language
-        g2p = self._get_g2p(lang)
+        # Apply custom phoneme dictionary first
+        processed_text = self._apply_phoneme_dictionary(text)
 
-        # Convert text to phonemes using kokorog2p
-        phonemes = g2p.phonemize(text)
+        # Use phonemize_with_markdown if we have custom phonemes
+        # Otherwise use standard phonemization
+        if processed_text != text and "[" in processed_text:
+            # Text contains markdown phoneme annotations
+            try:
+                phonemes = phonemize_with_markdown(processed_text, lang)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to use phonemize_with_markdown, "
+                    f"falling back to standard phonemization: {e}"
+                )
+                # Fallback to standard phonemization
+                g2p = self._get_g2p(lang)
+                phonemes = g2p.phonemize(text)
+        else:
+            # Standard phonemization
+            g2p = self._get_g2p(lang)
+            phonemes = g2p.phonemize(text)
 
         # Filter to only characters in vocabulary
         phonemes = filter_for_kokoro(phonemes)

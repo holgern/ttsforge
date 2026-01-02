@@ -251,6 +251,9 @@ class ConversionOptions:
     mixed_language_primary: Optional[str] = None
     mixed_language_allowed: Optional[list[str]] = None
     mixed_language_confidence: float = 0.7
+    # Custom phoneme dictionary for pronunciation overrides
+    phoneme_dictionary_path: Optional[str] = None
+    phoneme_dict_case_sensitive: bool = False
     # Segment pause (random silence between sentences within a paragraph)
     segment_pause_min: float = 0.1
     segment_pause_max: float = 0.3
@@ -375,6 +378,8 @@ class TTSConverter:
             mixed_language_primary=self.options.mixed_language_primary,
             mixed_language_allowed=self.options.mixed_language_allowed,
             mixed_language_confidence=self.options.mixed_language_confidence,
+            phoneme_dictionary_path=self.options.phoneme_dictionary_path,
+            phoneme_dict_case_sensitive=self.options.phoneme_dict_case_sensitive,
         )
 
         # Initialize ONNX backend

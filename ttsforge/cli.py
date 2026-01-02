@@ -285,6 +285,18 @@ def main(
         "(0.0-1.0, default: 0.7)."
     ),
 )
+@click.option(
+    "--phoneme-dict",
+    "phoneme_dictionary_path",
+    type=click.Path(exists=True),
+    help="Path to custom phoneme dictionary JSON file for pronunciation overrides.",
+)
+@click.option(
+    "--phoneme-dict-case-sensitive",
+    "phoneme_dict_case_sensitive",
+    is_flag=True,
+    help="Make phoneme dictionary matching case-sensitive (default: case-insensitive).",
+)
 @click.pass_context
 def convert(
     ctx: click.Context,
@@ -319,6 +331,8 @@ def convert(
     mixed_language_primary: Optional[str],
     mixed_language_allowed: Optional[str],
     mixed_language_confidence: Optional[float],
+    phoneme_dictionary_path: Optional[str],
+    phoneme_dict_case_sensitive: bool,
 ) -> None:
     """Convert an EPUB file to an audiobook.
 
@@ -521,6 +535,13 @@ def convert(
             mixed_language_confidence
             if mixed_language_confidence is not None
             else config.get("mixed_language_confidence", 0.7)
+        ),
+        phoneme_dictionary_path=(
+            phoneme_dictionary_path or config.get("phoneme_dictionary_path")
+        ),
+        phoneme_dict_case_sensitive=(
+            phoneme_dict_case_sensitive
+            or config.get("phoneme_dict_case_sensitive", False)
         ),
         segment_pause_min=(
             segment_pause_min
@@ -829,6 +850,18 @@ DEFAULT_SAMPLE_TEXT = (
         "(0.0-1.0, default: 0.7)."
     ),
 )
+@click.option(
+    "--phoneme-dict",
+    "phoneme_dictionary_path",
+    type=click.Path(exists=True),
+    help="Path to custom phoneme dictionary JSON file for pronunciation overrides.",
+)
+@click.option(
+    "--phoneme-dict-case-sensitive",
+    "phoneme_dict_case_sensitive",
+    is_flag=True,
+    help="Make phoneme dictionary matching case-sensitive (default: case-insensitive).",
+)
 @click.pass_context
 def sample(
     ctx: click.Context,
@@ -847,6 +880,8 @@ def sample(
     mixed_language_primary: Optional[str],
     mixed_language_allowed: Optional[str],
     mixed_language_confidence: Optional[float],
+    phoneme_dictionary_path: Optional[str],
+    phoneme_dict_case_sensitive: bool,
 ) -> None:
     """Generate a sample audio file to test TTS settings.
 
@@ -922,6 +957,13 @@ def sample(
             mixed_language_confidence
             if mixed_language_confidence is not None
             else user_config.get("mixed_language_confidence", 0.7)
+        ),
+        phoneme_dictionary_path=(
+            phoneme_dictionary_path or user_config.get("phoneme_dictionary_path")
+        ),
+        phoneme_dict_case_sensitive=(
+            phoneme_dict_case_sensitive
+            or user_config.get("phoneme_dict_case_sensitive", False)
         ),
         model_path=model_path,
         voices_path=voices_path,
@@ -3348,6 +3390,343 @@ def _split_text_into_segments(
         segments.append(current_segment.strip())
 
     return [s for s in segments if s.strip()]
+
+
+@main.command(name="extract-names")
+@click.argument(
+    "input_file",
+    type=click.Path(exists=True, path_type=Path),
+)
+@click.option(
+    "-o",
+    "--output",
+    type=click.Path(path_type=Path),
+    default="custom_phonemes.json",
+    help="Output JSON file path (default: custom_phonemes.json).",
+)
+@click.option(
+    "--min-count",
+    type=int,
+    default=3,
+    help="Minimum occurrences for a name to be included (default: 3).",
+)
+@click.option(
+    "--max-names",
+    type=int,
+    default=100,
+    help="Maximum number of names to extract (default: 100).",
+)
+@click.option(
+    "-l",
+    "--language",
+    type=str,
+    default="en-us",
+    help="Language for phoneme generation (default: en-us).",
+)
+@click.option(
+    "--include-all",
+    is_flag=True,
+    help="Include all capitalized proper nouns, not just PERSON entities.",
+)
+@click.option(
+    "--preview",
+    is_flag=True,
+    help="Show extracted names without saving to file.",
+)
+def extract_names(
+    input_file: Path,
+    output: Path,
+    min_count: int,
+    max_names: int,
+    language: str,
+    include_all: bool,
+    preview: bool,
+) -> None:
+    """Extract proper names from a book and generate phoneme dictionary.
+
+    Scans INPUT_FILE (EPUB or TXT) for proper names and creates a JSON phoneme
+    dictionary with auto-generated pronunciation suggestions. You can then review
+    and edit the suggestions before using them for TTS conversion.
+
+    Examples:
+
+        \b
+        # Extract names and save to default file
+        ttsforge extract-names mybook.epub
+
+        \b
+        # Preview names without saving
+        ttsforge extract-names mybook.epub --preview
+
+        \b
+        # Extract frequent names only (10+ occurrences)
+        ttsforge extract-names mybook.epub --min-count 10 -o names.json
+
+        \b
+        # Then use the dictionary for conversion
+        ttsforge convert mybook.epub --phoneme-dict custom_phonemes.json
+    """
+    from rich.progress import Progress, SpinnerColumn, TextColumn
+    from rich.table import Table
+
+    from .name_extractor import (
+        extract_names_from_text,
+        generate_phoneme_suggestions,
+        save_phoneme_dictionary,
+    )
+
+    console.print(f"[bold]Extracting names from:[/bold] {input_file}")
+
+    # Read file content
+    try:
+        if input_file.suffix.lower() == ".epub":
+            try:
+                from epub2text import EPUBParser
+            except ImportError:
+                console.print(
+                    "[red]Error:[/red] epub2text is not installed. "
+                    "Run: pip install epub2text"
+                )
+                raise SystemExit(1) from None
+
+            with console.status("Loading EPUB..."):
+                parser = EPUBParser(str(input_file))
+                chapters = parser.get_chapters()
+                text = "\n\n".join(chapter.text for chapter in chapters)
+
+        elif input_file.suffix.lower() in [".txt", ".text"]:
+            with open(input_file, encoding="utf-8") as f:
+                text = f.read()
+        else:
+            console.print(
+                f"[red]Error:[/red] Unsupported file format: {input_file.suffix}. "
+                f"Supported: .epub, .txt"
+            )
+            raise SystemExit(1) from None
+
+    except Exception as e:
+        console.print(f"[red]Error loading file:[/red] {e}")
+        raise SystemExit(1) from None
+
+    # Check if spaCy is available
+    try:
+        import spacy  # noqa: F401
+    except ImportError:
+        console.print(
+            "[red]Error:[/red] spaCy is required for name extraction.\n"
+            "[yellow]Install with:[/yellow]\n"
+            "  pip install spacy\n"
+            "  python -m spacy download en_core_web_sm"
+        )
+        raise SystemExit(1) from None
+
+    # Extract names
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Analyzing text and extracting names...", total=None)
+
+        try:
+            names = extract_names_from_text(
+                text,
+                min_count=min_count,
+                max_names=max_names,
+                include_all=include_all,
+            )
+        except ImportError as e:
+            console.print(f"[red]Error:[/red] {e}")
+            raise SystemExit(1) from None
+
+    if not names:
+        console.print(
+            f"[yellow]No names found[/yellow] (min_count={min_count}). "
+            f"Try lowering --min-count or using --include-all."
+        )
+        return
+
+    console.print(f"\n[green]Found {len(names)} proper names[/green]\n")
+
+    # Generate phoneme suggestions
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        console=console,
+    ) as progress:
+        progress.add_task("Generating phoneme suggestions...", total=None)
+        suggestions = generate_phoneme_suggestions(names, language)
+
+    # Display results in a table
+    table = Table(title=f"Extracted Names (≥{min_count} occurrences)")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Count", justify="right", style="magenta")
+    table.add_column("Suggested Phoneme", style="green")
+
+    for name in sorted(names.keys(), key=lambda n: names[n], reverse=True):
+        entry = suggestions[name]
+        phoneme = entry["phoneme"]
+        count = entry["occurrences"]
+
+        # Highlight errors
+        if entry.get("suggestion_quality") == "error":
+            phoneme_display = f"[red]{phoneme}[/red]"
+        else:
+            phoneme_display = phoneme
+
+        table.add_row(name, str(count), phoneme_display)
+
+    console.print(table)
+
+    # Save or preview
+    if preview:
+        console.print("\n[dim]Preview mode - no file saved.[/dim]")
+        console.print(f"[dim]To save, run without --preview flag.[/dim]")
+    else:
+        save_phoneme_dictionary(
+            suggestions, output, source_file=str(input_file.name), language=language
+        )
+        console.print(f"\n[green]✓ Saved to:[/green] {output}")
+        console.print(
+            "\n[dim]Next steps:[/dim]\n"
+            f"  1. Review and edit {output} to fix any incorrect phonemes\n"
+            f"  2. Use with: [cyan]ttsforge convert {input_file} "
+            f"--phoneme-dict {output}[/cyan]"
+        )
+
+
+@main.command(name="list-names")
+@click.argument(
+    "phoneme_dict",
+    type=click.Path(exists=True, path_type=Path),
+)
+@click.option(
+    "--sort-by",
+    type=click.Choice(["name", "count", "alpha"]),
+    default="count",
+    help="Sort by: name (same as alpha), count (occurrences), alpha (alphabetical).",
+)
+def list_names(phoneme_dict: Path, sort_by: str) -> None:
+    """List all names in a phoneme dictionary for review.
+
+    Displays the contents of a phoneme dictionary in a readable table format,
+    making it easy to review and identify names that need phoneme corrections.
+
+    Examples:
+
+        \b
+        # List names sorted by frequency
+        ttsforge list-names custom_phonemes.json
+
+        \b
+        # List names alphabetically
+        ttsforge list-names custom_phonemes.json --sort-by alpha
+    """
+    import json
+
+    from rich.table import Table
+
+    # Load dictionary
+    try:
+        with open(phoneme_dict, encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        console.print(f"[red]Error loading dictionary:[/red] {e}")
+        raise SystemExit(1) from None
+
+    # Parse dictionary format
+    if "entries" in data:
+        # Metadata format
+        entries = data["entries"]
+        metadata = data.get("_metadata", {})
+    else:
+        # Simple format
+        entries = data
+        metadata = {}
+
+    if not entries:
+        console.print("[yellow]Dictionary is empty.[/yellow]")
+        return
+
+    # Show metadata if available
+    if metadata:
+        console.print("[dim]Dictionary info:[/dim]")
+        if "generated_from" in metadata:
+            console.print(f"  Generated from: {metadata['generated_from']}")
+        if "generated_at" in metadata:
+            console.print(f"  Generated at: {metadata['generated_at']}")
+        if "language" in metadata:
+            console.print(f"  Language: {metadata['language']}")
+        console.print()
+
+    # Create table
+    table = Table(title=f"Phoneme Dictionary: {phoneme_dict.name}")
+    table.add_column("Name", style="cyan", no_wrap=True)
+    table.add_column("Phoneme", style="green")
+    table.add_column("Count", justify="right", style="magenta")
+    table.add_column("Status", style="yellow")
+
+    # Sort entries
+    items = list(entries.items())
+    if sort_by in ["name", "alpha"]:
+        items.sort(key=lambda x: x[0].lower())
+    elif sort_by == "count":
+        items.sort(
+            key=lambda x: (x[1].get("occurrences", 0) if isinstance(x[1], dict) else 0),
+            reverse=True,
+        )
+
+    # Add rows
+    for name, value in items:
+        if isinstance(value, str):
+            # Simple format
+            phoneme = value
+            count = "-"
+            status = "manual"
+        else:
+            # Metadata format
+            phoneme = value.get("phoneme", "-")
+            count = str(value.get("occurrences", "-"))
+
+            # Determine status
+            if value.get("verified"):
+                status = "✓ verified"
+            elif value.get("suggestion_quality") == "error":
+                status = "⚠ error"
+            elif value.get("suggestion_quality") == "auto":
+                status = "auto"
+            else:
+                status = "manual"
+
+        # Highlight issues
+        if phoneme == "/FIXME/":
+            phoneme = "[red]/FIXME/[/red]"
+            status = "[red]needs fix[/red]"
+
+        table.add_row(name, phoneme, count, status)
+
+    console.print(table)
+    console.print(f"\n[green]Total entries:[/green] {len(entries)}")
+
+    # Show suggestions
+    needs_review = sum(
+        1
+        for entry in entries.values()
+        if isinstance(entry, dict)
+        and entry.get("suggestion_quality") == "auto"
+        and not entry.get("verified")
+    )
+
+    if needs_review > 0:
+        console.print(
+            f"\n[yellow]⚠ {needs_review} entries need review[/yellow] "
+            f"(auto-generated, not verified)"
+        )
+        console.print(
+            f"\n[dim]Tip:[/dim] Listen to samples with:\n"
+            f'  [cyan]ttsforge sample "Name goes here" '
+            f"--phoneme-dict {phoneme_dict}[/cyan]"
+        )
 
 
 if __name__ == "__main__":

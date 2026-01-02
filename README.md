@@ -9,6 +9,8 @@ with support for 54 neural voices across 9 languages.
 
 - **EPUB to Audiobook**: Convert EPUB files to M4B, MP3, WAV, FLAC, or OPUS
 - **54 Neural Voices**: High-quality TTS in 9 languages
+- **Custom Phoneme Dictionary**: Control pronunciation of names and technical terms
+- **Auto Name Extraction**: Automatically extract names from books for phoneme customization
 - **Mixed-Language Support**: Auto-detect and handle multiple languages in text
 - **Resumable Conversions**: Interrupt and resume long audiobook conversions
 - **Phoneme Pre-tokenization**: Pre-process text for faster batch conversions
@@ -235,17 +237,155 @@ pip install lingua-language-detector
 Supported languages: `en-us`, `en-gb`, `de`, `fr-fr`, `es`, `it`, `pt`, `pl`, `tr`,
 `ru`, `ko`, `ja`, `zh`/`cmn`
 
+### Custom Phoneme Dictionary
+
+Control pronunciation of character names, technical terms, and foreign words with custom phoneme dictionaries.
+
+#### Quick Start
+
+```bash
+# 1. Extract names from your book (requires spacy)
+ttsforge extract-names mybook.epub
+
+# 2. Review the generated custom_phonemes.json file
+ttsforge list-names custom_phonemes.json
+
+# 3. Test pronunciation with sample
+ttsforge sample "Hermione loves Kubernetes" --phoneme-dict custom_phonemes.json -p
+
+# 4. Convert with custom pronunciations
+ttsforge convert mybook.epub --phoneme-dict custom_phonemes.json
+```
+
+#### Requirements
+
+For automatic name extraction (optional but recommended):
+
+```bash
+pip install spacy
+python -m spacy download en_core_web_sm
+```
+
+#### Workflow
+
+**1. Extract names from your book:**
+
+```bash
+# Extract frequent names (≥3 occurrences)
+ttsforge extract-names mybook.epub
+
+# Preview without saving
+ttsforge extract-names mybook.epub --preview
+
+# Only very frequent names (≥10 occurrences)
+ttsforge extract-names mybook.epub --min-count 10 -o names.json
+
+# Include all proper nouns, not just detected person names
+ttsforge extract-names mybook.epub --include-all
+```
+
+This creates a `custom_phonemes.json` file with auto-generated phoneme suggestions.
+
+**2. Review and edit the dictionary:**
+
+```bash
+# List all entries
+ttsforge list-names custom_phonemes.json
+
+# Sort alphabetically
+ttsforge list-names custom_phonemes.json --sort-by alpha
+```
+
+Edit `custom_phonemes.json` to fix any incorrect phonemes. The file format is:
+
+```json
+{
+  "_metadata": {
+    "generated_from": "mybook.epub",
+    "language": "en-us"
+  },
+  "entries": {
+    "Hermione": {
+      "phoneme": "/hɝmˈIni/",
+      "occurrences": 847,
+      "verified": false
+    },
+    "Kubernetes": {
+      "phoneme": "/kubɚnˈɛtɪs/",
+      "occurrences": 12,
+      "verified": false
+    }
+  }
+}
+```
+
+Or use the simple format:
+
+```json
+{
+  "Hermione": "/hɝmˈIni/",
+  "Kubernetes": "/kubɚnˈɛtɪs/"
+}
+```
+
+**3. Test pronunciation:**
+
+```bash
+# Test specific names
+ttsforge sample "Hermione and Harry" --phoneme-dict custom_phonemes.json -p
+
+# Test and save to file
+ttsforge sample "Hermione and Harry" --phoneme-dict custom_phonemes.json -o test.wav
+```
+
+**4. Convert your book:**
+
+```bash
+# Use the dictionary for conversion
+ttsforge convert mybook.epub --phoneme-dict custom_phonemes.json
+
+# Case-sensitive matching (default is case-insensitive)
+ttsforge convert mybook.epub \
+  --phoneme-dict custom_phonemes.json \
+  --phoneme-dict-case-sensitive
+```
+
+#### Manual Dictionary Creation
+
+You can create a dictionary manually without extraction:
+
+```json
+{
+  "Katniss": "/kætnɪs/",
+  "Peeta": "/pitə/",
+  "Panem": "/pænəm/"
+}
+```
+
+#### Getting IPA Phonemes
+
+To find the correct IPA phonemes for a word:
+
+1. Use `ttsforge sample "word" -p` to hear the default pronunciation
+2. Look up IPA pronunciation online (e.g., Wiktionary, IPA dictionaries)
+3. Or use the auto-generated phonemes as a starting point
+
+**Note:** Phoneme matching is case-insensitive by default and respects word boundaries
+(e.g., "test" won't match "testing").
+
 ## Commands
 
-| Command            | Description               |
-| ------------------ | ------------------------- |
-| `convert`          | Convert EPUB to audiobook |
-| `list`             | List chapters in EPUB     |
-| `info`             | Show EPUB metadata        |
-| `sample`           | Generate sample audio     |
-| `voices`           | List available voices     |
-| `demo`             | Generate voice demo       |
-| `download`         | Download ONNX models      |
+| Command            | Description                            |
+| ------------------ | -------------------------------------- |
+| `convert`          | Convert EPUB to audiobook              |
+| `list`             | List chapters in EPUB                  |
+| `info`             | Show EPUB metadata                     |
+| `sample`           | Generate sample audio                  |
+| `voices`           | List available voices                  |
+| `demo`             | Generate voice demo                    |
+| `extract-names`    | Extract names for phoneme dictionary   |
+| `list-names`       | List names in phoneme dictionary       |
+| `download`         | Download ONNX models                   |
 | `config`           | Manage configuration      |
 | `phonemes export`  | Export EPUB to phonemes   |
 | `phonemes convert` | Convert phonemes to audio |
