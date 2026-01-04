@@ -1,5 +1,6 @@
 """CLI interface for ttsforge - convert EPUB to audiobooks."""
 
+import re
 import sys
 from pathlib import Path
 from typing import Optional, cast
@@ -815,7 +816,10 @@ DEFAULT_SAMPLE_TEXT = (
     "-v",
     "--voice",
     type=str,
-    help="TTS voice to use or voice blend (e.g., 'af_sky' or 'af_nicole:50,am_michael:50').",
+    help=(
+        "TTS voice to use or voice blend "
+        "(e.g., 'af_sky' or 'af_nicole:50,am_michael:50')."
+    ),
 )
 @click.option(
     "-l",
@@ -1951,10 +1955,18 @@ def phonemes_export(
 
             chapter = book.create_chapter(ch.title)
 
+            # Remove <<CHAPTER: ...>> markers that epub2text adds
+            # at the start of content since we now announce chapter titles
+            # separately
+            content = ch.text
+            content = re.sub(
+                r"^<<CHAPTER:[^>]*>>\s*\n*", "", content, count=1, flags=re.MULTILINE
+            )
+
             # Pass entire chapter text - add_text handles splitting based on split_mode
-            if ch.text.strip():
+            if content.strip():
                 chapter.add_text(
-                    ch.text,
+                    content,
                     tokenizer,
                     lang=espeak_lang,
                     split_mode=split_mode,
@@ -2425,7 +2437,10 @@ def phonemes_convert(
     "--voice",
     type=str,
     default="af_sky",
-    help="Voice to use for audio preview, or voice blend (e.g., 'af_nicole:50,am_michael:50').",
+    help=(
+        "Voice to use for audio preview, or voice blend "
+        "(e.g., 'af_nicole:50,am_michael:50')."
+    ),
 )
 @click.option(
     "--phoneme-dict",
@@ -3129,11 +3144,17 @@ def read(
 
                 console.print(f"[dim]{len(epub_chapters)} chapters[/dim]")
 
-                # Convert to our format
+                # Convert to our format - remove chapter markers
                 content_data = [
                     {
                         "title": ch.title or f"Chapter {i + 1}",
-                        "text": ch.text,
+                        "text": re.sub(
+                            r"^<<CHAPTER:[^>]*>>\s*\n*",
+                            "",
+                            ch.text,
+                            count=1,
+                            flags=re.MULTILINE,
+                        ),
                         "index": i,
                     }
                     for i, ch in enumerate(epub_chapters)
@@ -3641,7 +3662,8 @@ def extract_names(
 
                 # Determine which chapters to process
                 if chapters is not None:
-                    # Parse chapter selection (supports 'all', ranges, and specific chapters)
+                    # Parse chapter selection (supports 'all', ranges,
+                    # and specific chapters)
                     if chapters.lower() == "all":
                         selected_chapters = all_chapters
                     else:
@@ -3652,13 +3674,24 @@ def extract_names(
 
                     if len(selected_chapters) < len(all_chapters):
                         console.print(
-                            f"[dim]Processing {len(selected_chapters)} of {len(all_chapters)} chapters[/dim]"
+                            f"[dim]Processing {len(selected_chapters)} of "
+                            f"{len(all_chapters)} chapters[/dim]"
                         )
                 else:
                     # Use all chapters by default
                     selected_chapters = all_chapters
 
-                text = "\n\n".join(chapter.text for chapter in selected_chapters)
+                # Remove chapter markers before joining text
+                text = "\n\n".join(
+                    re.sub(
+                        r"^<<CHAPTER:[^>]*>>\s*\n*",
+                        "",
+                        chapter.text,
+                        count=1,
+                        flags=re.MULTILINE,
+                    )
+                    for chapter in selected_chapters
+                )
 
         elif input_file.suffix.lower() in [".txt", ".text"]:
             with open(input_file, encoding="utf-8") as f:
@@ -3667,8 +3700,8 @@ def extract_names(
             # For text files, chapter selection doesn't apply
             if chapters:
                 console.print(
-                    "[yellow]Warning:[/yellow] Chapter selection is only supported for EPUB files. "
-                    "Processing entire text file."
+                    "[yellow]Warning:[/yellow] Chapter selection is only "
+                    "supported for EPUB files. Processing entire text file."
                 )
         else:
             console.print(
@@ -3765,7 +3798,7 @@ def extract_names(
     # Save or preview
     if preview:
         console.print("\n[dim]Preview mode - no file saved.[/dim]")
-        console.print(f"[dim]To save, run without --preview flag.[/dim]")
+        console.print("[dim]To save, run without --preview flag.[/dim]")
     else:
         save_phoneme_dictionary(
             suggestions, output, source_file=str(input_file.name), language=language
@@ -3807,7 +3840,10 @@ def extract_names(
     "--language",
     type=str,
     default="a",
-    help="Language code for audio preview (e.g., 'de', 'en-us', 'a' for auto, default: a).",
+    help=(
+        "Language code for audio preview "
+        "(e.g., 'de', 'en-us', 'a' for auto, default: a)."
+    ),
 )
 def list_names(
     phoneme_dict: Path, sort_by: str, play: bool, voice: str, language: str
@@ -3929,7 +3965,8 @@ def list_names(
 
         console.print("\n[bold]Audio Preview Mode[/bold]")
         console.print(
-            "[dim]Press Enter to play each name, or type a number to jump to that entry.[/dim]"
+            "[dim]Press Enter to play each name, or type a number to jump "
+            "to that entry.[/dim]"
         )
         console.print("[dim]Type 'q' to quit, 's' to skip, 'r' to replay.[/dim]\n")
 
@@ -3958,7 +3995,8 @@ def list_names(
                     phoneme = value.get("phoneme", "")
 
                 console.print(
-                    f"\n[cyan]{idx + 1}/{len(items)}:[/cyan] [bold]{name}[/bold] → [green]{phoneme}[/green]"
+                    f"\n[cyan]{idx + 1}/{len(items)}:[/cyan] "
+                    f"[bold]{name}[/bold] → [green]{phoneme}[/green]"
                 )
 
                 # Get user input
@@ -3983,7 +4021,8 @@ def list_names(
                         continue
                     else:
                         console.print(
-                            f"[yellow]Invalid entry number. Must be 1-{len(items)}[/yellow]"
+                            f"[yellow]Invalid entry number. "
+                            f"Must be 1-{len(items)}[/yellow]"
                         )
                         continue
 

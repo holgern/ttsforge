@@ -6,15 +6,6 @@ from pathlib import Path
 
 import pytest
 
-# Import will fail if spaCy is not installed - that's okay, tests will be skipped
-spacy_available = False
-try:
-    import spacy  # noqa: F401
-
-    spacy_available = True
-except ImportError:
-    pass
-
 from ttsforge.name_extractor import (
     _split_text_into_chunks,
     extract_names_from_text,
@@ -23,6 +14,15 @@ from ttsforge.name_extractor import (
     merge_dictionaries,
     save_phoneme_dictionary,
 )
+
+# Import will fail if spaCy is not installed - that's okay, tests will be skipped
+spacy_available = False
+try:
+    import spacy  # noqa: F401
+
+    spacy_available = True
+except ImportError:
+    pass
 
 # Skip all tests if spaCy is not available
 pytestmark = pytest.mark.skipif(not spacy_available, reason="spaCy not installed")
@@ -236,10 +236,10 @@ class TestNameExtraction:
         """Test extraction with chunking on large text."""
         # Create large text with repeated names
         paragraphs = []
-        for i in range(50):
+        for _ in range(50):
             paragraphs.append(
-                f"Alice and Bob went shopping. Charlie joined them. "
-                f"Alice, Bob, and Charlie had fun."
+                "Alice and Bob went shopping. Charlie joined them. "
+                "Alice, Bob, and Charlie had fun."
             )
         text = "\n\n".join(paragraphs)
 
@@ -259,7 +259,7 @@ class TestNameExtraction:
         def progress_callback(current: int, total: int) -> None:
             callback_calls.append((current, total))
 
-        names = extract_names_from_text(
+        extract_names_from_text(
             text, min_count=5, chunk_size=200, progress_callback=progress_callback
         )
 

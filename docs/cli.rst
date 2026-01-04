@@ -40,10 +40,10 @@ Options
 
 ``-v, --voice VOICE``
    Voice to use for TTS. Can be a single voice name or a voice blend.
-   
+
    - Single voice: ``af_heart``, ``am_adam``, etc.
    - Voice blend: ``af_nicole:50,am_michael:50`` (auto-detects blend format)
-   
+
    See :doc:`voices` for available voices.
    Default: ``af_heart``.
 
@@ -103,7 +103,7 @@ Options
 ``--voice-blend SPEC``
    Blend multiple voices (traditional method). Format: ``voice1:weight1,voice2:weight2``.
    Example: ``af_nicole:50,am_michael:50``.
-   
+
    **Note:** You can also specify blends directly in the ``--voice`` parameter,
    which will auto-detect the blend format. Both methods work identically.
 
@@ -239,7 +239,7 @@ Options
 
 ``-v, --voice VOICE``
    TTS voice to use. Can be a single voice or voice blend.
-   
+
    - Single voice: ``af_heart``
    - Voice blend: ``af_nicole:50,am_michael:50`` (auto-detects blend format)
 

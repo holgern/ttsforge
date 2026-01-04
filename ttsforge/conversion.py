@@ -765,7 +765,10 @@ class TTSConverter:
             # Announce chapter title if enabled
             if self.options.announce_chapters and chapter.title:
                 # Format: "Chapter N. Title"
-                announcement_text = f"Chapter {chapter.index + 1}. {chapter.title}"
+                if chapter.title:
+                    announcement_text = f"{chapter.title}"
+                else:
+                    announcement_text = f"Chapter {chapter.index + 1}"
                 assert self._kokoro is not None
                 title_samples, _ = self._kokoro.create(
                     announcement_text,

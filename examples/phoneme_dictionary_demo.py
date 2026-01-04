@@ -128,10 +128,10 @@ print("""
 CLI Usage:
   # Use dictionary with convert command
   ttsforge convert book.epub --phoneme-dict phoneme_dictionary.json
-  
+
   # Test with sample command
   ttsforge sample "Misaki uses Kubernetes" --phoneme-dict phoneme_dictionary.json -p
-  
+
   # Case-sensitive matching
   ttsforge convert book.epub --phoneme-dict dict.json --phoneme-dict-case-sensitive
 """)

@@ -4,8 +4,6 @@ import json
 import tempfile
 from pathlib import Path
 
-import pytest
-
 from ttsforge.tokenizer import Tokenizer, TokenizerConfig
 
 
@@ -193,7 +191,7 @@ class TestPhonemeDictionary:
             assert "tˈɛst" in phonemes1
 
             # "testing" should NOT match (different word)
-            phonemes2 = tokenizer.phonemize("testing", "en-us")
+            tokenizer.phonemize("testing", "en-us")
             # Original pronunciation of "testing" should be used
             # (not the custom one for "test")
         finally:

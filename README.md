@@ -10,7 +10,8 @@ with support for 54 neural voices across 9 languages.
 - **EPUB to Audiobook**: Convert EPUB files to M4B, MP3, WAV, FLAC, or OPUS
 - **54 Neural Voices**: High-quality TTS in 9 languages
 - **Custom Phoneme Dictionary**: Control pronunciation of names and technical terms
-- **Auto Name Extraction**: Automatically extract names from books for phoneme customization
+- **Auto Name Extraction**: Automatically extract names from books for phoneme
+  customization
 - **Mixed-Language Support**: Auto-detect and handle multiple languages in text
 - **Resumable Conversions**: Interrupt and resume long audiobook conversions
 - **Phoneme Pre-tokenization**: Pre-process text for faster batch conversions
@@ -252,7 +253,8 @@ Supported languages: `en-us`, `en-gb`, `de`, `fr-fr`, `es`, `it`, `pt`, `pl`, `t
 
 ### Custom Phoneme Dictionary
 
-Control pronunciation of character names, technical terms, and foreign words with custom phoneme dictionaries.
+Control pronunciation of character names, technical terms, and foreign words with custom
+phoneme dictionaries.
 
 #### Quick Start
 
@@ -388,22 +390,22 @@ To find the correct IPA phonemes for a word:
 
 ## Commands
 
-| Command            | Description                            |
-| ------------------ | -------------------------------------- |
-| `convert`          | Convert EPUB to audiobook              |
-| `list`             | List chapters in EPUB                  |
-| `info`             | Show EPUB metadata                     |
-| `sample`           | Generate sample audio                  |
-| `voices`           | List available voices                  |
-| `demo`             | Generate voice demo                    |
-| `extract-names`    | Extract names for phoneme dictionary   |
-| `list-names`       | List names in phoneme dictionary       |
-| `download`         | Download ONNX models                   |
-| `config`           | Manage configuration      |
-| `phonemes export`  | Export EPUB to phonemes   |
-| `phonemes convert` | Convert phonemes to audio |
-| `phonemes info`    | Show phoneme file info    |
-| `phonemes preview` | Preview text as phonemes  |
+| Command            | Description                          |
+| ------------------ | ------------------------------------ |
+| `convert`          | Convert EPUB to audiobook            |
+| `list`             | List chapters in EPUB                |
+| `info`             | Show EPUB metadata                   |
+| `sample`           | Generate sample audio                |
+| `voices`           | List available voices                |
+| `demo`             | Generate voice demo                  |
+| `extract-names`    | Extract names for phoneme dictionary |
+| `list-names`       | List names in phoneme dictionary     |
+| `download`         | Download ONNX models                 |
+| `config`           | Manage configuration                 |
+| `phonemes export`  | Export EPUB to phonemes              |
+| `phonemes convert` | Convert phonemes to audio            |
+| `phonemes info`    | Show phoneme file info               |
+| `phonemes preview` | Preview text as phonemes             |
 
 ## GPU Acceleration
 

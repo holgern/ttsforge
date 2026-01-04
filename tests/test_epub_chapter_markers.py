@@ -103,3 +103,44 @@ class TestEpubChapterMarkerRemoval:
         pattern = r"^<<CHAPTER:[^>]*>>\s*\n*"
         cleaned = re.sub(pattern, "", text, count=1, flags=re.MULTILINE)
         assert cleaned == "Contenu du chapitre."
+
+
+class TestPhonemeChapterMarkerRemoval:
+    """Test that PhonemeChapter.add_text() removes chapter markers."""
+
+    def test_add_text_removes_chapter_markers(self):
+        """Test that add_text() filters out chapter markers."""
+        from ttsforge.phonemes import PhonemeChapter
+        from ttsforge.tokenizer import Tokenizer
+
+        # Create a chapter with text containing a marker
+        chapter = PhonemeChapter(title="Test Chapter", chapter_index=0)
+        tokenizer = Tokenizer()
+
+        text_with_marker = "<<CHAPTER: Test Chapter>>\n\nThis is the actual content."
+
+        # Add text - should remove the marker
+        segments = chapter.add_text(text_with_marker, tokenizer, lang="en-us")
+
+        # Verify the marker was removed
+        assert len(segments) > 0
+        # The segment text should NOT contain "Test Chapter" from the marker
+        assert not segments[0].text.startswith("Test Chapter")
+        # It should start with "This is the actual content"
+        assert "This is the actual content" in segments[0].text
+
+    def test_add_text_without_markers_unchanged(self):
+        """Test that text without markers is processed normally."""
+        from ttsforge.phonemes import PhonemeChapter
+        from ttsforge.tokenizer import Tokenizer
+
+        chapter = PhonemeChapter(title="Test", chapter_index=0)
+        tokenizer = Tokenizer()
+
+        clean_text = "This is clean text without any markers."
+
+        segments = chapter.add_text(clean_text, tokenizer, lang="en-us")
+
+        # Verify text is preserved
+        assert len(segments) > 0
+        assert "This is clean text without any markers" in segments[0].text

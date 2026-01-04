@@ -160,11 +160,10 @@ class TestChapterAnnouncementPhonemeConversion:
 
             # Should call create() for announcements (2 chapters)
             assert mock_kokoro.create.call_count == 2
-            # Verify first announcement
+            # Verify first announcement - now just uses the title
             first_call = mock_kokoro.create.call_args_list[0]
             announcement_text = first_call[0][0]
-            assert "Chapter 1" in announcement_text
-            assert "Chapter One" in announcement_text
+            assert announcement_text == "Chapter One"
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
     @patch("ttsforge.phoneme_conversion.KokoroONNX")

@@ -119,7 +119,15 @@ class PhonemeChapter:
         Returns:
             List of created PhonemeSegments
         """
+        import re
+
         from phrasplit import split_long_lines, split_text
+
+        # Safety filter: Remove <<CHAPTER: ...>> markers that epub2text might add
+        # This provides defense-in-depth even if callers forget to filter
+        text = re.sub(
+            r"^<<CHAPTER:[^>]*>>\s*\n*", "", text, count=1, flags=re.MULTILINE
+        )
 
         def warn(msg: str) -> None:
             """Issue a warning."""

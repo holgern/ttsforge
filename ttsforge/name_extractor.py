@@ -68,8 +68,10 @@ def extract_names_from_text(
         max_names: Maximum number of names to return (default: 100)
         include_all: Include all capitalized proper nouns, not just PERSON entities
             (default: False)
-        chunk_size: Size of text chunks to process at once in characters (default: 100000)
-        progress_callback: Optional callback function(current, total) for progress updates
+        chunk_size: Size of text chunks to process at once in characters
+            (default: 100000)
+        progress_callback: Optional callback function(current, total) for
+            progress updates
 
     Returns:
         Dictionary mapping name -> occurrence count, sorted by frequency
