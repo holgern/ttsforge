@@ -126,7 +126,7 @@ class PhonemeChapter:
         # Safety filter: Remove <<CHAPTER: ...>> markers that epub2text might add
         # This provides defense-in-depth even if callers forget to filter
         text = re.sub(
-            r"^<<CHAPTER:[^>]*>>\s*\n*", "", text, count=1, flags=re.MULTILINE
+            r"^\s*<<CHAPTER:[^>]*>>\s*\n*", "", text, count=1, flags=re.MULTILINE
         )
 
         def warn(msg: str) -> None:

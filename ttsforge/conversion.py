@@ -1577,7 +1577,7 @@ class TTSConverter:
             content = ch.text
             # Pattern matches: <<CHAPTER: anything>> followed by whitespace/newlines
             content = re.sub(
-                r"^<<CHAPTER:[^>]*>>\s*\n*", "", content, count=1, flags=re.MULTILINE
+                r"^\s*<<CHAPTER:[^>]*>>\s*\n*", "", content, count=1, flags=re.MULTILINE
             )
             chapters.append(Chapter(title=ch.title, content=content, index=i))
 

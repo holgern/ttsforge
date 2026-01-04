@@ -1960,7 +1960,7 @@ def phonemes_export(
             # separately
             content = ch.text
             content = re.sub(
-                r"^<<CHAPTER:[^>]*>>\s*\n*", "", content, count=1, flags=re.MULTILINE
+                r"^\s*<<CHAPTER:[^>]*>>\s*\n*", "", content, count=1, flags=re.MULTILINE
             )
 
             # Pass entire chapter text - add_text handles splitting based on split_mode
@@ -3149,7 +3149,7 @@ def read(
                     {
                         "title": ch.title or f"Chapter {i + 1}",
                         "text": re.sub(
-                            r"^<<CHAPTER:[^>]*>>\s*\n*",
+                            r"^\s*<<CHAPTER:[^>]*>>\s*\n*",
                             "",
                             ch.text,
                             count=1,
@@ -3684,7 +3684,7 @@ def extract_names(
                 # Remove chapter markers before joining text
                 text = "\n\n".join(
                     re.sub(
-                        r"^<<CHAPTER:[^>]*>>\s*\n*",
+                        r"^\s*<<CHAPTER:[^>]*>>\s*\n*",
                         "",
                         chapter.text,
                         count=1,

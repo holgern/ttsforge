@@ -37,7 +37,7 @@ class TestEpubChapterMarkerRemoval:
             ),
         ]
 
-        pattern = r"^<<CHAPTER:[^>]*>>\s*\n*"
+        pattern = r"^\s*<<CHAPTER:[^>]*>>\s*\n*"
         for original, expected in test_cases:
             cleaned = re.sub(pattern, "", original, count=1, flags=re.MULTILINE)
             assert cleaned == expected, f"Failed for: {original!r}"
@@ -45,7 +45,7 @@ class TestEpubChapterMarkerRemoval:
     def test_chapter_marker_only_removed_once(self):
         """Test that only the first chapter marker is removed."""
         text = "<<CHAPTER: One>>\n\nSome text with <<CHAPTER: Two>> inside it."
-        pattern = r"^<<CHAPTER:[^>]*>>\s*\n*"
+        pattern = r"^\s*<<CHAPTER:[^>]*>>\s*\n*"
         cleaned = re.sub(pattern, "", text, count=1, flags=re.MULTILINE)
         # First marker removed, but not the one in the middle of content
         assert cleaned == "Some text with <<CHAPTER: Two>> inside it."
@@ -53,7 +53,7 @@ class TestEpubChapterMarkerRemoval:
     def test_no_marker_text_unchanged(self):
         """Test that text without markers is unchanged."""
         text = "This is normal chapter content without any markers."
-        pattern = r"^<<CHAPTER:[^>]*>>\s*\n*"
+        pattern = r"^\s*<<CHAPTER:[^>]*>>\s*\n*"
         cleaned = re.sub(pattern, "", text, count=1, flags=re.MULTILINE)
         assert cleaned == text
 
@@ -78,7 +78,7 @@ class TestEpubChapterMarkerRemoval:
         for i, ch in enumerate(epub_chapters):
             content = ch.text
             content = re.sub(
-                r"^<<CHAPTER:[^>]*>>\s*\n*", "", content, count=1, flags=re.MULTILINE
+                r"^\s*<<CHAPTER:[^>]*>>\s*\n*", "", content, count=1, flags=re.MULTILINE
             )
             chapters.append(Chapter(title=ch.title, content=content, index=i))
 
@@ -93,14 +93,14 @@ class TestEpubChapterMarkerRemoval:
     def test_special_characters_in_chapter_title(self):
         """Test markers with special regex characters in title."""
         text = "<<CHAPTER: Test (Part 1) - The Beginning [Draft]>>\n\nContent."
-        pattern = r"^<<CHAPTER:[^>]*>>\s*\n*"
+        pattern = r"^\s*<<CHAPTER:[^>]*>>\s*\n*"
         cleaned = re.sub(pattern, "", text, count=1, flags=re.MULTILINE)
         assert cleaned == "Content."
 
     def test_unicode_in_chapter_title(self):
         """Test markers with unicode characters."""
         text = "<<CHAPTER: Chapitre 1: L'été français>>\n\nContenu du chapitre."
-        pattern = r"^<<CHAPTER:[^>]*>>\s*\n*"
+        pattern = r"^\s*<<CHAPTER:[^>]*>>\s*\n*"
         cleaned = re.sub(pattern, "", text, count=1, flags=re.MULTILINE)
         assert cleaned == "Contenu du chapitre."
 
