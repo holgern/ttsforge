@@ -368,41 +368,35 @@ def convert(
     # Get format first (needed for output path construction)
     fmt = output_format or config.get("default_format", "m4b")
 
-    # Load chapters from EPUB
+    # Load chapters from input file
     console.print(f"[bold]Loading:[/bold] {epub_file}")
 
-    try:
-        from epub2text import EPUBParser
-    except ImportError:
-        console.print(
-            "[red]Error:[/red] epub2text is not installed. Run: pip install epub2text"
-        )
-        sys.exit(1)
+    from .input_reader import InputReader
 
-    # Parse EPUB
+    # Parse input file
     try:
-        parser = EPUBParser(str(epub_file))
+        reader = InputReader(epub_file)
     except Exception as e:
-        console.print(f"[red]Error loading EPUB:[/red] {e}")
+        console.print(f"[red]Error loading file:[/red] {e}")
         sys.exit(1)
 
-    # Get EPUB metadata
-    metadata = parser.get_metadata()
+    # Get metadata
+    metadata = reader.get_metadata()
     default_title = config.get("default_title", "Untitled")
     epub_title = metadata.title or default_title
     epub_author = metadata.authors[0] if metadata.authors else "Unknown"
     epub_language = metadata.language
 
-    # Use CLI title/author if provided, otherwise use EPUB metadata
+    # Use CLI title/author if provided, otherwise use metadata
     effective_title = title or epub_title
     effective_author = author or epub_author
 
     # Extract chapters
     with console.status("Extracting chapters..."):
-        epub_chapters = parser.get_chapters()
+        epub_chapters = reader.get_chapters()
 
     if not epub_chapters:
-        console.print("[red]Error:[/red] No chapters found in EPUB file.")
+        console.print("[red]Error:[/red] No chapters found in file.")
         sys.exit(1)
 
     console.print(f"[green]Found {len(epub_chapters)} chapters[/green]")
@@ -692,28 +686,22 @@ def convert(
 @main.command("list")
 @click.argument("epub_file", type=click.Path(exists=True, path_type=Path))
 def list_chapters(epub_file: Path) -> None:
-    """List chapters in an EPUB file.
+    """List chapters in a file.
 
-    EPUB_FILE is the path to the EPUB file.
+    EPUB_FILE is the path to the file (EPUB, TXT, or PDF).
     """
-    try:
-        from epub2text import EPUBParser
-    except ImportError:
-        console.print(
-            "[red]Error:[/red] epub2text is not installed. Run: pip install epub2text"
-        )
-        sys.exit(1)
+    from .input_reader import InputReader
 
-    with console.status("Loading EPUB..."):
+    with console.status("Loading file..."):
         try:
-            parser = EPUBParser(str(epub_file))
-            chapters = parser.get_chapters()
+            reader = InputReader(epub_file)
+            chapters = reader.get_chapters()
         except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
             sys.exit(1)
 
     if not chapters:
-        console.print("[yellow]No chapters found in EPUB file.[/yellow]")
+        console.print("[yellow]No chapters found in file.[/yellow]")
         return
 
     table = Table(title=f"Chapters in {epub_file.name}")
@@ -736,24 +724,18 @@ def list_chapters(epub_file: Path) -> None:
 @main.command()
 @click.argument("epub_file", type=click.Path(exists=True, path_type=Path))
 def info(epub_file: Path) -> None:
-    """Show metadata and information about an EPUB file.
+    """Show metadata and information about a file.
 
-    EPUB_FILE is the path to the EPUB file.
+    EPUB_FILE is the path to the file (EPUB, TXT, or PDF).
     """
-    try:
-        from epub2text import EPUBParser
-    except ImportError:
-        console.print(
-            "[red]Error:[/red] epub2text is not installed. Run: pip install epub2text"
-        )
-        sys.exit(1)
+    from .input_reader import InputReader
 
-    # Parse EPUB
-    with console.status("Loading EPUB..."):
+    # Parse file
+    with console.status("Loading file..."):
         try:
-            parser = EPUBParser(str(epub_file))
-            metadata = parser.get_metadata()
-            chapters = parser.get_chapters()
+            reader = InputReader(epub_file)
+            metadata = reader.get_metadata()
+            chapters = reader.get_chapters()
         except Exception as e:
             console.print(f"[red]Error:[/red] {e}")
             sys.exit(1)
@@ -761,7 +743,7 @@ def info(epub_file: Path) -> None:
     total_chars = sum(ch.char_count for ch in chapters) if chapters else 0
 
     # Display info
-    console.print(Panel(f"[bold]{epub_file.name}[/bold]", title="EPUB Information"))
+    console.print(Panel(f"[bold]{epub_file.name}[/bold]", title="File Information"))
 
     table = Table(show_header=False, box=None)
     table.add_column("Field", style="bold")
@@ -1845,30 +1827,23 @@ def phonemes_export(
     from pykokoro import Tokenizer
 
     from .phonemes import PhonemeBook
+    from .input_reader import InputReader
 
     config = load_config()
 
     console.print(f"[bold]Loading:[/bold] {epub_file}")
 
+    # Parse file
     try:
-        from epub2text import EPUBParser
-    except ImportError:
-        console.print(
-            "[red]Error:[/red] epub2text is not installed. Run: pip install epub2text"
-        )
-        sys.exit(1)
-
-    # Parse EPUB
-    try:
-        parser = EPUBParser(str(epub_file))
-        metadata = parser.get_metadata()
-        epub_chapters = parser.get_chapters()
+        reader = InputReader(epub_file)
+        metadata = reader.get_metadata()
+        epub_chapters = reader.get_chapters()
     except Exception as e:
-        console.print(f"[red]Error loading EPUB:[/red] {e}")
+        console.print(f"[red]Error loading file:[/red] {e}")
         sys.exit(1)
 
     if not epub_chapters:
-        console.print("[red]Error:[/red] No chapters found in EPUB file.")
+        console.print("[red]Error:[/red] No chapters found in file.")
         sys.exit(1)
 
     # Chapter selection
@@ -3079,32 +3054,29 @@ def read(
 
         file_identifier = str(input_file.resolve())
 
-        # Handle different file types
+        # Handle different file types using InputReader
+        try:
+            from .input_reader import InputReader
+
+            reader = InputReader(input_file)
+            metadata = reader.get_metadata()
+        except Exception as e:
+            console.print(f"[red]Error loading file:[/red] {e}")
+            sys.exit(1)
+
+        # Show book info
+        title = metadata.title or input_file.stem
+        author = metadata.authors[0] if metadata.authors else "Unknown"
+        console.print(f"[bold]{title}[/bold] by {author}")
+
+        # For EPUB files, check if we can use pages mode
         if input_file.suffix.lower() == ".epub":
-            try:
-                from epub2text import EPUBParser
-            except ImportError:
-                console.print(
-                    "[red]Error:[/red] epub2text is not installed. "
-                    "Run: pip install epub2text"
-                )
-                sys.exit(1)
-
-            try:
-                parser = EPUBParser(str(input_file))
-                metadata = parser.get_metadata()
-            except Exception as e:
-                console.print(f"[red]Error loading EPUB:[/red] {e}")
-                sys.exit(1)
-
-            # Show book info
-            title = metadata.title or input_file.stem
-            author = metadata.authors[0] if metadata.authors else "Unknown"
-            console.print(f"[bold]{title}[/bold] by {author}")
-
             # Load content based on mode (chapters or pages)
             if effective_content_mode == "pages":
                 try:
+                    from epub2text import EPUBParser
+
+                    parser = EPUBParser(str(input_file))
                     epub_pages = parser.get_pages(
                         synthetic_page_size=effective_page_size
                     )
@@ -3134,14 +3106,10 @@ def read(
                 content_label = "page"
             else:
                 # Default: chapters mode
-                try:
-                    epub_chapters = parser.get_chapters()
-                except Exception as e:
-                    console.print(f"[red]Error loading chapters:[/red] {e}")
-                    sys.exit(1)
+                epub_chapters = reader.get_chapters()
 
                 if not epub_chapters:
-                    console.print("[red]Error:[/red] No chapters found in EPUB file.")
+                    console.print("[red]Error:[/red] No chapters found in file.")
                     sys.exit(1)
 
                 console.print(f"[dim]{len(epub_chapters)} chapters[/dim]")
@@ -3164,21 +3132,20 @@ def read(
                 content_label = "chapter"
 
         elif input_file.suffix.lower() in (".txt", ".text"):
-            # Plain text file
-            try:
-                text_content = input_file.read_text(encoding="utf-8")
-            except Exception as e:
-                console.print(f"[red]Error reading file:[/red] {e}")
+            # Plain text file - use InputReader's chapters
+            text_chapters = reader.get_chapters()
+
+            if not text_chapters:
+                console.print("[red]Error:[/red] No content found in file.")
                 sys.exit(1)
 
-            if not text_content.strip():
-                console.print("[red]Error:[/red] File is empty.")
-                sys.exit(1)
-
+            # If it's a single chapter, use it as-is
+            # If multiple chapters detected, use them
             content_data = [
-                {"title": input_file.stem, "text": text_content, "index": 0}
+                {"title": ch.title or input_file.stem, "text": ch.text, "index": i}
+                for i, ch in enumerate(text_chapters)
             ]
-            content_label = "section"
+            content_label = "chapter" if len(text_chapters) > 1 else "section"
         else:
             console.print(
                 f"[red]Error:[/red] Unsupported file type: {input_file.suffix}"
@@ -3643,74 +3610,44 @@ def extract_names(
         generate_phoneme_suggestions,
         save_phoneme_dictionary,
     )
+    from .input_reader import InputReader
 
     console.print(f"[bold]Extracting names from:[/bold] {input_file}")
 
     # Read file content
     try:
-        if input_file.suffix.lower() == ".epub":
-            try:
-                from epub2text import EPUBParser
-            except ImportError:
+        reader = InputReader(input_file)
+        all_chapters = reader.get_chapters()
+
+        # Determine which chapters to process
+        if chapters is not None:
+            # Parse chapter selection (supports 'all', ranges, and specific chapters)
+            if chapters.lower() == "all":
+                selected_chapters = all_chapters
+            else:
+                selected_indices = _parse_chapter_selection(chapters, len(all_chapters))
+                selected_chapters = [all_chapters[i] for i in selected_indices]
+
+            if len(selected_chapters) < len(all_chapters):
                 console.print(
-                    "[red]Error:[/red] epub2text is not installed. "
-                    "Run: pip install epub2text"
-                )
-                raise SystemExit(1) from None
-
-            with console.status("Loading EPUB..."):
-                parser = EPUBParser(str(input_file))
-                all_chapters = parser.get_chapters()
-
-                # Determine which chapters to process
-                if chapters is not None:
-                    # Parse chapter selection (supports 'all', ranges,
-                    # and specific chapters)
-                    if chapters.lower() == "all":
-                        selected_chapters = all_chapters
-                    else:
-                        selected_indices = _parse_chapter_selection(
-                            chapters, len(all_chapters)
-                        )
-                        selected_chapters = [all_chapters[i] for i in selected_indices]
-
-                    if len(selected_chapters) < len(all_chapters):
-                        console.print(
-                            f"[dim]Processing {len(selected_chapters)} of "
-                            f"{len(all_chapters)} chapters[/dim]"
-                        )
-                else:
-                    # Use all chapters by default
-                    selected_chapters = all_chapters
-
-                # Remove chapter markers before joining text
-                text = "\n\n".join(
-                    re.sub(
-                        r"^\s*<<CHAPTER:[^>]*>>\s*\n*",
-                        "",
-                        chapter.text,
-                        count=1,
-                        flags=re.MULTILINE,
-                    )
-                    for chapter in selected_chapters
-                )
-
-        elif input_file.suffix.lower() in [".txt", ".text"]:
-            with open(input_file, encoding="utf-8") as f:
-                text = f.read()
-
-            # For text files, chapter selection doesn't apply
-            if chapters:
-                console.print(
-                    "[yellow]Warning:[/yellow] Chapter selection is only "
-                    "supported for EPUB files. Processing entire text file."
+                    f"[dim]Processing {len(selected_chapters)} of "
+                    f"{len(all_chapters)} chapters[/dim]"
                 )
         else:
-            console.print(
-                f"[red]Error:[/red] Unsupported file format: {input_file.suffix}. "
-                f"Supported: .epub, .txt"
+            # Use all chapters by default
+            selected_chapters = all_chapters
+
+        # Remove chapter markers before joining text
+        text = "\n\n".join(
+            re.sub(
+                r"^\s*<<CHAPTER:[^>]*>>\s*\n*",
+                "",
+                chapter.text,
+                count=1,
+                flags=re.MULTILINE,
             )
-            raise SystemExit(1) from None
+            for chapter in selected_chapters
+        )
 
     except Exception as e:
         console.print(f"[red]Error loading file:[/red] {e}")

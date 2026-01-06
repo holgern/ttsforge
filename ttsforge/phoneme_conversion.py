@@ -1089,7 +1089,10 @@ class PhonemeConverter:
             )
 
         except Exception as e:
-            return PhonemeConversionResult(success=False, error_message=str(e))
+            import traceback
+
+            error_msg = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            return PhonemeConversionResult(success=False, error_message=error_msg)
         finally:
             prevent_sleep_end()
 
@@ -1246,6 +1249,9 @@ class PhonemeConverter:
             )
 
         except Exception as e:
-            return PhonemeConversionResult(success=False, error_message=str(e))
+            import traceback
+
+            error_msg = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            return PhonemeConversionResult(success=False, error_message=error_msg)
         finally:
             prevent_sleep_end()

@@ -1060,6 +1060,14 @@ class TTSConverter:
                             "warning",
                         )
                         state = None
+                    # Verify chapter count matches
+                    elif len(state.chapters) != len(chapters):
+                        self.log(
+                            f"Chapter count changed ({len(state.chapters)} -> {len(chapters)}), "
+                            "starting fresh conversion",
+                            "warning",
+                        )
+                        state = None
                     else:
                         # Check if settings differ from saved state
                         settings_changed = (
@@ -1172,6 +1180,20 @@ class TTSConverter:
                         chapters_dir=work_dir,
                     )
 
+                # Validate chapter index to prevent index errors
+                if chapter_idx >= len(state.chapters):
+                    error_msg = (
+                        f"Chapter index {chapter_idx} out of range. "
+                        f"State has {len(state.chapters)} chapters but trying to access "
+                        f"chapter {chapter_idx + 1}/{len(chapters)}. "
+                        "This usually means the state file is corrupted. "
+                        "Try using --fresh to start a new conversion."
+                    )
+                    return ConversionResult(
+                        success=False,
+                        error_message=error_msg,
+                    )
+
                 chapter_state = state.chapters[chapter_idx]
 
                 # Skip already completed chapters
@@ -1272,7 +1294,10 @@ class TTSConverter:
             )
 
         except Exception as e:
-            return ConversionResult(success=False, error_message=str(e))
+            import traceback
+
+            error_msg = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            return ConversionResult(success=False, error_message=error_msg)
         finally:
             prevent_sleep_end()
 
@@ -1492,7 +1517,10 @@ class TTSConverter:
             )
 
         except Exception as e:
-            return ConversionResult(success=False, error_message=str(e))
+            import traceback
+
+            error_msg = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
+            return ConversionResult(success=False, error_message=error_msg)
         finally:
             prevent_sleep_end()
 
