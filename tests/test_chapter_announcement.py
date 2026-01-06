@@ -7,9 +7,10 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from pykokoro import PhonemeSegment
 from ttsforge.conversion import Chapter, ConversionOptions
 from ttsforge.phoneme_conversion import PhonemeConversionOptions, PhonemeConverter
-from ttsforge.phonemes import PhonemeBook, PhonemeSegment
+from ttsforge.phonemes import PhonemeBook
 
 
 class TestChapterAnnouncementConversion:
@@ -37,7 +38,7 @@ class TestChapterAnnouncementConversion:
         ]
 
     @patch("ttsforge.conversion.are_models_downloaded")
-    @patch("ttsforge.conversion.KokoroONNX")
+    @patch("ttsforge.conversion.Kokoro")
     @patch("ttsforge.conversion.prevent_sleep_start")
     @patch("ttsforge.conversion.prevent_sleep_end")
     def test_announce_chapters_enabled_by_default(
@@ -57,7 +58,7 @@ class TestChapterAnnouncementConversion:
         assert options.chapter_pause_after_title == 2.0
 
     @patch("ttsforge.conversion.are_models_downloaded")
-    @patch("ttsforge.conversion.KokoroONNX")
+    @patch("ttsforge.conversion.Kokoro")
     @patch("ttsforge.conversion.prevent_sleep_start")
     @patch("ttsforge.conversion.prevent_sleep_end")
     def test_announce_chapters_can_be_disabled(
@@ -130,7 +131,7 @@ class TestChapterAnnouncementPhonemeConversion:
         assert options.chapter_pause_after_title == 2.0
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroONNX")
+    @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_phoneme_chapter_announcement_calls_create(
@@ -166,7 +167,7 @@ class TestChapterAnnouncementPhonemeConversion:
             assert announcement_text == "Chapter One"
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroONNX")
+    @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_phoneme_no_announcement_when_disabled(
@@ -201,7 +202,7 @@ class TestChapterAnnouncementPhonemeConversion:
             )
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroONNX")
+    @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_phoneme_empty_chapter_no_announcement(

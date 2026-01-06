@@ -1,5 +1,10 @@
 """Constants for ttsforge - voices, languages, and formats."""
 
+from pykokoro.onnx_backend import LANG_CODE_TO_ONNX, SAMPLE_RATE, VOICE_NAMES
+
+# Re-export from pykokoro for convenience
+VOICES = VOICE_NAMES
+
 # Program Information
 PROGRAM_NAME = "ttsforge"
 PROGRAM_DESCRIPTION = "Generate audiobooks from EPUB files using Kokoro ONNX TTS."
@@ -39,75 +44,6 @@ ISO_TO_LANG_CODE = {
     "zh-cn": "z",
     "zh-tw": "z",
 }
-
-# All available Kokoro voices
-VOICES = [
-    # American English Female
-    "af_alloy",
-    "af_aoede",
-    "af_bella",
-    "af_heart",
-    "af_jessica",
-    "af_kore",
-    "af_nicole",
-    "af_nova",
-    "af_river",
-    "af_sarah",
-    "af_sky",
-    # American English Male
-    "am_adam",
-    "am_echo",
-    "am_eric",
-    "am_fenrir",
-    "am_liam",
-    "am_michael",
-    "am_onyx",
-    "am_puck",
-    "am_santa",
-    # British English Female
-    "bf_alice",
-    "bf_emma",
-    "bf_isabella",
-    "bf_lily",
-    # British English Male
-    "bm_daniel",
-    "bm_fable",
-    "bm_george",
-    "bm_lewis",
-    # Spanish
-    "ef_dora",
-    "em_alex",
-    "em_santa",
-    # French
-    "ff_siwis",
-    # Hindi
-    "hf_alpha",
-    "hf_beta",
-    "hm_omega",
-    "hm_psi",
-    # Italian
-    "if_sara",
-    "im_nicola",
-    # Japanese
-    "jf_alpha",
-    "jf_gongitsune",
-    "jf_nezumi",
-    "jf_tebukuro",
-    "jm_kumo",
-    # Brazilian Portuguese
-    "pf_dora",
-    "pm_alex",
-    "pm_santa",
-    # Mandarin Chinese
-    "zf_xiaobei",
-    "zf_xiaoni",
-    "zf_xiaoxiao",
-    "zf_xiaoyi",
-    "zm_yunjian",
-    "zm_yunxi",
-    "zm_yunxia",
-    "zm_yunyang",
-]
 
 # Voice prefix to language code mapping
 VOICE_PREFIX_TO_LANG = {
@@ -198,7 +134,7 @@ DEFAULT_CONFIG = {
 }
 
 # Audio settings
-SAMPLE_RATE = 24000
+# SAMPLE_RATE is imported from pykokoro.onnx_backend above
 AUDIO_CHANNELS = 1
 
 # Sample texts for voice preview (per language)

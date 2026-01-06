@@ -283,13 +283,13 @@ def load_tts_pipeline() -> tuple[Any, Any]:
     Load numpy and Kokoro ONNX TTS backend.
 
     Returns:
-        Tuple of (numpy module, KokoroONNX class)
+        Tuple of (numpy module, Kokoro class)
     """
     import numpy as np
 
-    from .onnx_backend import KokoroONNX
+    from pykokoro import Kokoro
 
-    return np, KokoroONNX
+    return np, Kokoro
 
 
 class LoadPipelineThread(Thread):

@@ -76,19 +76,24 @@ class TestVoices:
         assert len(VOICES) > 0
 
     def test_voice_naming_convention(self):
-        """All voices should follow naming convention: XX_name."""
+        """All voices should follow naming convention: XX or XX_name."""
         for voice in VOICES:
-            assert "_" in voice, f"Voice {voice} should contain underscore"
+            assert len(voice) >= 2, f"Voice {voice} should be at least 2 characters"
             prefix = voice[:2]
             assert prefix.isalpha(), f"Voice {voice} prefix should be alphabetic"
+            # Voice can be just a prefix (like 'af') or prefix_name (like 'af_nicole')
+            if "_" in voice:
+                # For full voice names, ensure format is correct
+                parts = voice.split("_")
+                assert len(parts) == 2, f"Voice {voice} should have format XX_name"
 
     def test_voice_prefixes_are_valid(self):
         """All voice prefixes should be in VOICE_PREFIX_TO_LANG."""
         for voice in VOICES:
             prefix = voice[:2]
-            assert (
-                prefix in VOICE_PREFIX_TO_LANG
-            ), f"Prefix {prefix} from {voice} not in mapping"
+            assert prefix in VOICE_PREFIX_TO_LANG, (
+                f"Prefix {prefix} from {voice} not in mapping"
+            )
 
     def test_american_english_voices_exist(self):
         """American English voices should exist."""
@@ -123,9 +128,9 @@ class TestDefaultVoiceForLang:
     def test_all_languages_have_default_voice(self):
         """All languages should have a default voice."""
         for lang in LANGUAGE_DESCRIPTIONS:
-            assert (
-                lang in DEFAULT_VOICE_FOR_LANG
-            ), f"Language {lang} needs default voice"
+            assert lang in DEFAULT_VOICE_FOR_LANG, (
+                f"Language {lang} needs default voice"
+            )
 
     def test_default_voices_exist_in_voices_list(self):
         """All default voices should exist in VOICES list."""

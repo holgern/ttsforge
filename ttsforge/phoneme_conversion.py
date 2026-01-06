@@ -15,14 +15,10 @@ from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import soundfile as sf
+from pykokoro import Kokoro, VoiceBlend
+from pykokoro.onnx_backend import are_models_downloaded, download_all_models
 
 from .constants import SAMPLE_RATE, SUPPORTED_OUTPUT_FORMATS
-from .onnx_backend import (
-    KokoroONNX,
-    VoiceBlend,
-    are_models_downloaded,
-    download_all_models,
-)
 from .phonemes import PhonemeBook, PhonemeChapter
 from .utils import (
     create_process,
@@ -314,7 +310,7 @@ class PhonemeConverter:
         self.progress_callback = progress_callback
         self.log_callback = log_callback
         self._cancelled = False
-        self._kokoro: Optional[KokoroONNX] = None
+        self._kokoro: Optional[Kokoro] = None
         self._voice_style: Optional[Union[str, np.ndarray]] = None
 
     def log(self, message: str, level: str = "info") -> None:
@@ -340,7 +336,7 @@ class PhonemeConverter:
             self.log("Model download complete.")
 
         # Initialize ONNX backend
-        self._kokoro = KokoroONNX(
+        self._kokoro = Kokoro(
             model_path=self.options.model_path,
             voices_path=self.options.voices_path,
             use_gpu=self.options.use_gpu,

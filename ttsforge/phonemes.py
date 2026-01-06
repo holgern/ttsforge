@@ -12,59 +12,13 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
+from pykokoro import PhonemeSegment
+
 if TYPE_CHECKING:
-    from .tokenizer import Tokenizer
+    from pykokoro import Tokenizer
 
 # Version of the phoneme export format
 FORMAT_VERSION = "1.0"
-
-
-@dataclass
-class PhonemeSegment:
-    """A segment of text with its phoneme representation.
-
-    Attributes:
-        text: Original text
-        phonemes: IPA phoneme string
-        tokens: Token IDs
-        lang: Language code used for phonemization
-        paragraph: Paragraph index (0-based) for pause calculation
-        sentence: Sentence index within paragraph (0-based, or None)
-    """
-
-    text: str
-    phonemes: str
-    tokens: list[int]
-    lang: str = "en-us"
-    paragraph: int = 0
-    sentence: int | None = None
-
-    def to_dict(self) -> dict[str, Any]:
-        """Convert to dictionary for JSON serialization."""
-        return {
-            "text": self.text,
-            "phonemes": self.phonemes,
-            "tokens": self.tokens,
-            "lang": self.lang,
-            "paragraph": self.paragraph,
-            "sentence": self.sentence,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> PhonemeSegment:
-        """Create from dictionary."""
-        return cls(
-            text=data["text"],
-            phonemes=data["phonemes"],
-            tokens=data["tokens"],
-            lang=data.get("lang", "en-us"),
-            paragraph=data.get("paragraph", 0),
-            sentence=data.get("sentence"),
-        )
-
-    def format_readable(self) -> str:
-        """Format as human-readable string: text [phonemes]."""
-        return f"{self.text} [{self.phonemes}]"
 
 
 @dataclass

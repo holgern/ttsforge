@@ -36,7 +36,7 @@ from .conversion import (
     detect_language_from_iso,
     get_default_voice_for_language,
 )
-from .onnx_backend import (
+from pykokoro.onnx_backend import (
     DEFAULT_MODEL_QUALITY,
     MODEL_QUALITY_FILES,
     VOICE_NAMES,
@@ -1253,7 +1253,7 @@ def demo(
     """
     import numpy as np
 
-    from .onnx_backend import KokoroONNX, VoiceBlend
+    from pykokoro import Kokoro, VoiceBlend
 
     config = load_config()
     gpu = use_gpu if use_gpu is not None else config.get("use_gpu", False)
@@ -1317,7 +1317,7 @@ def demo(
 
         # Initialize TTS engine
         try:
-            kokoro = KokoroONNX(
+            kokoro = Kokoro(
                 model_path=model_path,
                 voices_path=voices_path,
                 use_gpu=gpu,
@@ -1443,7 +1443,7 @@ def demo(
 
     # Initialize TTS engine
     try:
-        kokoro = KokoroONNX(
+        kokoro = Kokoro(
             model_path=model_path,
             voices_path=voices_path,
             use_gpu=gpu,
@@ -1842,8 +1842,9 @@ def phonemes_export(
 
         ttsforge phonemes export book.epub --split-mode clause
     """
+    from pykokoro import Tokenizer
+
     from .phonemes import PhonemeBook
-    from .tokenizer import Tokenizer
 
     config = load_config()
 
@@ -1903,7 +1904,7 @@ def phonemes_export(
         output = epub_file.parent / f"{output_filename}{suffix}"
 
     # Get language code for espeak
-    from .onnx_backend import LANG_CODE_TO_ONNX
+    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
 
     espeak_lang = LANG_CODE_TO_ONNX.get(language, "en-us")
 
@@ -2476,8 +2477,8 @@ def phonemes_preview(
 
         ttsforge phonemes preview "Hello" --play --voice "af_nicole:50,am_michael:50"
     """
-    from .onnx_backend import LANG_CODE_TO_ONNX
-    from .tokenizer import Tokenizer
+    from pykokoro import Tokenizer
+    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
 
     # Map language code - support both short codes and ISO codes
     if language in LANG_CODE_TO_ONNX:
@@ -2986,7 +2987,8 @@ def read(
         load_playback_position,
         save_playback_position,
     )
-    from .onnx_backend import LANG_CODE_TO_ONNX, KokoroONNX
+    from pykokoro import Kokoro
+    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
 
     # Get model path from global context
     model_path = ctx.obj.get("model_path") if ctx.obj else None
@@ -3269,7 +3271,7 @@ def read(
     # Initialize TTS model
     console.print("[dim]Loading TTS model...[/dim]")
     try:
-        kokoro = KokoroONNX(
+        kokoro = Kokoro(
             model_path=model_path,
             voices_path=voices_path,
             use_gpu=effective_use_gpu,

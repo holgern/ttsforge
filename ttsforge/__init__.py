@@ -4,9 +4,30 @@ ttsforge - Generate audiobooks from EPUB files with TTS.
 A CLI tool for converting EPUB books to audiobooks using Kokoro ONNX TTS.
 """
 
+from pykokoro import (
+    Kokoro,
+    PhonemeSegment,
+    Tokenizer,
+    VoiceBlend,
+    trim,
+)
+from pykokoro.onnx_backend import (
+    are_models_downloaded,
+    download_all_models,
+    download_model,
+    get_model_dir,
+)
+from pykokoro.tokenizer import (
+    EspeakConfig,
+    MAX_PHONEME_LENGTH,
+    SUPPORTED_LANGUAGES,
+)
+
 from .constants import (
     DEFAULT_CONFIG,
     LANGUAGE_DESCRIPTIONS,
+    LANG_CODE_TO_ONNX,
+    SAMPLE_RATE,
     SUPPORTED_OUTPUT_FORMATS,
     VOICES,
 )
@@ -17,35 +38,24 @@ from .conversion import (
     ConversionResult,
     TTSConverter,
 )
-from .onnx_backend import (
-    KokoroONNX,
-    VoiceBlend,
-    are_models_downloaded,
-    download_all_models,
-    download_model,
-    get_model_dir,
-    get_onnx_lang_code,
-)
 from .phonemes import (
     FORMAT_VERSION,
     PhonemeBook,
     PhonemeChapter,
-    PhonemeSegment,
     create_phoneme_book_from_chapters,
     phonemize_text_list,
 )
-from .tokenizer import (
-    MAX_PHONEME_LENGTH,
-    SAMPLE_RATE,
-    SUPPORTED_LANGUAGES,
-    EspeakConfig,
-    Tokenizer,
-)
-from .trim import trim
 from .utils import (
     load_config,
     save_config,
 )
+
+
+# Language code mapping for backward compatibility
+def get_onnx_lang_code(ttsforge_lang: str) -> str:
+    """Convert ttsforge language code to kokoro language code."""
+    return LANG_CODE_TO_ONNX.get(ttsforge_lang, "en-us")
+
 
 __all__ = [
     # Constants
@@ -59,15 +69,15 @@ __all__ = [
     "ConversionProgress",
     "ConversionResult",
     "TTSConverter",
-    # ONNX Backend
-    "KokoroONNX",
+    # ONNX Backend (from pykokoro)
+    "Kokoro",
     "VoiceBlend",
     "are_models_downloaded",
     "download_all_models",
     "download_model",
     "get_model_dir",
     "get_onnx_lang_code",
-    # Tokenizer
+    # Tokenizer (from pykokoro)
     "EspeakConfig",
     "MAX_PHONEME_LENGTH",
     "SAMPLE_RATE",
@@ -80,7 +90,7 @@ __all__ = [
     "PhonemeSegment",
     "create_phoneme_book_from_chapters",
     "phonemize_text_list",
-    # Trim
+    # Trim (from pykokoro)
     "trim",
     # Utils
     "load_config",

@@ -26,11 +26,10 @@ dependencies = [
     "chardet",
     "charset-normalizer",
     "platformdirs>=3.0.0",
-    "onnxruntime>=1.16.0",
     "phrasplit",
-    # Tokenizer dependencies (kokorog2p for G2P)
-    "kokorog2p",
     "sounddevice>=0.4.6",
+    # TTS engine (includes onnxruntime and kokorog2p)
+    "pykokoro",
 ]
 classifiers=[
     'Intended Audience :: End Users/Desktop',

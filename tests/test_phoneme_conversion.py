@@ -7,6 +7,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pytest
 
+from pykokoro import PhonemeSegment
 from ttsforge.phoneme_conversion import (
     PhonemeChapterState,
     PhonemeConversionOptions,
@@ -16,7 +17,7 @@ from ttsforge.phoneme_conversion import (
     PhonemeConverter,
     parse_chapter_selection,
 )
-from ttsforge.phonemes import PhonemeBook, PhonemeSegment
+from ttsforge.phonemes import PhonemeBook
 
 
 class TestParseChapterSelection:
@@ -372,7 +373,7 @@ class TestPhonemeConverterConversion:
         return book
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroONNX")
+    @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_convert_creates_output(
@@ -407,7 +408,7 @@ class TestPhonemeConverterConversion:
             assert output_path.exists()
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroONNX")
+    @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_convert_streaming_creates_output(
@@ -463,7 +464,7 @@ class TestPhonemeConverterConversion:
             assert "Unsupported format" in result.error_message
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroONNX")
+    @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_convert_with_chapter_selection(
@@ -501,7 +502,7 @@ class TestPhonemeConverterConversion:
             assert mock_kokoro.create_from_segment.call_count == 1
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroONNX")
+    @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_progress_callback_called(

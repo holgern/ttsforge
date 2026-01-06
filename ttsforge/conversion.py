@@ -13,6 +13,8 @@ from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 import numpy as np
 import soundfile as sf
+from pykokoro import Kokoro, VoiceBlend
+from pykokoro.onnx_backend import are_models_downloaded, download_all_models
 
 from .constants import (
     DEFAULT_VOICE_FOR_LANG,
@@ -20,13 +22,6 @@ from .constants import (
     SAMPLE_RATE,
     SUPPORTED_OUTPUT_FORMATS,
     VOICE_PREFIX_TO_LANG,
-)
-from .onnx_backend import (
-    KokoroONNX,
-    VoiceBlend,
-    are_models_downloaded,
-    download_all_models,
-    get_onnx_lang_code,
 )
 from .utils import (
     create_process,
@@ -40,6 +35,14 @@ from .utils import (
 
 if TYPE_CHECKING:
     from phrasplit import Segment
+
+
+# Helper function for language code conversion
+def get_onnx_lang_code(ttsforge_lang: str) -> str:
+    """Convert ttsforge language code to kokoro language code."""
+    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
+
+    return LANG_CODE_TO_ONNX.get(ttsforge_lang, "en-us")
 
 
 @dataclass
@@ -322,10 +325,6 @@ def get_default_voice_for_language(lang_code: str) -> str:
 class TTSConverter:
     """Converts text to speech using Kokoro ONNX TTS."""
 
-    # Split patterns for different languages
-    PUNCTUATION_SENTENCE = ".!?।。！？"
-    PUNCTUATION_SENTENCE_COMMA = ".!?,।。！？、，"
-
     def __init__(
         self,
         options: ConversionOptions,
@@ -344,7 +343,7 @@ class TTSConverter:
         self.progress_callback = progress_callback
         self.log_callback = log_callback
         self._cancelled = False
-        self._kokoro: Optional[KokoroONNX] = None
+        self._kokoro: Optional[Kokoro] = None
         self._np = np
         self._voice_style: Optional[Union[str, np.ndarray]] = None
 
@@ -371,7 +370,7 @@ class TTSConverter:
             self.log("Model download complete.")
 
         # Create TokenizerConfig from ConversionOptions (for mixed-language support)
-        from .tokenizer import TokenizerConfig
+        from pykokoro import TokenizerConfig
 
         tokenizer_config = TokenizerConfig(
             use_mixed_language=self.options.use_mixed_language,
@@ -383,7 +382,7 @@ class TTSConverter:
         )
 
         # Initialize ONNX backend
-        self._kokoro = KokoroONNX(
+        self._kokoro = Kokoro(
             model_path=self.options.model_path,
             voices_path=self.options.voices_path,
             use_gpu=self.options.use_gpu,
@@ -414,20 +413,6 @@ class TTSConverter:
             else:
                 self._voice_style = self.options.voice
                 self.log(f"Using voice: {self.options.voice}")
-
-    def _get_split_pattern(self) -> str:
-        """Get the split pattern based on language (used for auto mode)."""
-        lang = self.options.language
-
-        # English languages use newline splitting
-        if lang in ["a", "b"]:
-            return "\n"
-
-        # CJK languages use no spacing
-        spacing = r"\s*" if lang in ["z", "j"] else r"\s+"
-
-        # Default to sentence-based splitting for non-English
-        return rf"(?<=[{self.PUNCTUATION_SENTENCE}]){spacing}|\n+"
 
     def _get_spacy_model(self) -> str:
         """Get the appropriate spaCy model for the current language."""
