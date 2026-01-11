@@ -28,7 +28,8 @@ class TestPhonemeDictionary:
 
             assert tokenizer._phoneme_dictionary is not None
             assert len(tokenizer._phoneme_dictionary) == 2
-            assert tokenizer._phoneme_dictionary["Misaki"] == "/misˈɑki/"
+            # Slashes are now stripped by pykokoro
+            assert tokenizer._phoneme_dictionary["Misaki"] == "misˈɑki"
         finally:
             Path(temp_path).unlink()
 
@@ -55,8 +56,9 @@ class TestPhonemeDictionary:
 
             assert tokenizer._phoneme_dictionary is not None
             assert len(tokenizer._phoneme_dictionary) == 2
-            assert tokenizer._phoneme_dictionary["Misaki"] == "/misˈɑki/"
-            assert tokenizer._phoneme_dictionary["nginx"] == "/ˈɛnʤɪnˈɛks/"
+            # Slashes are now stripped by pykokoro
+            assert tokenizer._phoneme_dictionary["Misaki"] == "misˈɑki"
+            assert tokenizer._phoneme_dictionary["nginx"] == "ˈɛnʤɪnˈɛks"
         finally:
             Path(temp_path).unlink()
 
@@ -82,9 +84,9 @@ class TestPhonemeDictionary:
         finally:
             Path(temp_path).unlink()
 
-    def test_invalid_phoneme_format(self):
-        """Test that invalid phoneme format raises error."""
-        test_dict = {"Misaki": "misˈɑki"}  # Missing / / delimiters
+    def test_phoneme_format_without_slashes(self):
+        """Test that phoneme format without slashes is now valid."""
+        test_dict = {"Misaki": "misˈɑki"}  # Without / / delimiters (now valid)
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(test_dict, f)
@@ -92,10 +94,10 @@ class TestPhonemeDictionary:
 
         try:
             config = TokenizerConfig(phoneme_dictionary_path=temp_path)
-            # Should warn and continue without dictionary
             tokenizer = Tokenizer(config=config)
-            # Dictionary should be None due to invalid format
-            assert tokenizer._phoneme_dictionary is None
+            # Dictionary should be loaded successfully
+            assert tokenizer._phoneme_dictionary is not None
+            assert tokenizer._phoneme_dictionary["Misaki"] == "misˈɑki"
         finally:
             Path(temp_path).unlink()
 

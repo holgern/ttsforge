@@ -1,6 +1,6 @@
 """Constants for ttsforge - voices, languages, and formats."""
 
-from pykokoro.onnx_backend import LANG_CODE_TO_ONNX, SAMPLE_RATE, VOICE_NAMES
+from pykokoro.onnx_backend import VOICE_NAMES
 
 # Re-export from pykokoro for convenience
 VOICES = VOICE_NAMES
@@ -111,10 +111,11 @@ DEFAULT_CONFIG = {
     "default_split_mode": "auto",
     "default_content_mode": "chapters",  # Content mode for read: chapters or pages
     "default_page_size": 2000,  # Synthetic page size in characters for pages mode
-    "segment_pause_min": 0.1,
-    "segment_pause_max": 0.3,
-    "paragraph_pause_min": 0.5,
-    "paragraph_pause_max": 1.0,
+    "pause_clause": 0.25,
+    "pause_sentence": 0.2,
+    "pause_paragraph": 0.75,
+    "pause_variance": 0.05,
+    "trim_silence": True,
     # Language override for phonemization (e.g., 'de', 'fr', 'en-us')
     # If None, language is determined from voice prefix
     "phonemization_lang": None,

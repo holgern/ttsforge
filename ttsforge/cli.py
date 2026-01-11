@@ -6,6 +6,25 @@ from pathlib import Path
 from typing import Optional, cast
 
 import click
+from pykokoro.onnx_backend import (
+    DEFAULT_MODEL_QUALITY,
+    MODEL_QUALITY_FILES,
+    ModelQuality,
+    are_models_downloaded,
+    are_voices_downloaded,
+    download_all_voices,
+    download_config,
+    download_model,
+    get_config_path,
+    get_model_dir,
+    get_model_path,
+    get_voices_bin_path,
+    is_config_downloaded,
+    is_model_downloaded,
+)
+from pykokoro.onnx_backend import (
+    VOICE_NAMES_V1_0 as VOICE_NAMES,
+)
 from rich.console import Console
 from rich.panel import Panel
 from rich.progress import (
@@ -35,24 +54,6 @@ from .conversion import (
     TTSConverter,
     detect_language_from_iso,
     get_default_voice_for_language,
-)
-from pykokoro.onnx_backend import (
-    DEFAULT_MODEL_QUALITY,
-    MODEL_QUALITY_FILES,
-    VOICE_NAMES,
-    ModelQuality,
-    are_models_downloaded,
-    are_voices_downloaded,
-    download_all_voices,
-    download_config,
-    download_model,
-    get_config_path,
-    get_model_dir,
-    get_model_filename,
-    get_model_path,
-    get_voices_bin_path,
-    is_config_downloaded,
-    is_model_downloaded,
 )
 from .utils import (
     format_chapters_range,
@@ -184,28 +185,34 @@ def main(
     help="Silence duration between chapters in seconds.",
 )
 @click.option(
-    "--segment-pause-min",
+    "--pause-clause",
     type=float,
     default=None,
-    help="Minimum pause between sentences in seconds (default: 0.1).",
+    help="Pause after clauses in seconds (default: 0.25).",
 )
 @click.option(
-    "--segment-pause-max",
+    "--pause-sentence",
     type=float,
     default=None,
-    help="Maximum pause between sentences in seconds (default: 0.3).",
+    help="Pause after sentences in seconds (default: 0.2).",
 )
 @click.option(
-    "--paragraph-pause-min",
+    "--pause-paragraph",
     type=float,
     default=None,
-    help="Minimum pause between paragraphs in seconds (default: 0.5).",
+    help="Pause after paragraphs in seconds (default: 0.75).",
 )
 @click.option(
-    "--paragraph-pause-max",
+    "--pause-variance",
     type=float,
     default=None,
-    help="Maximum pause between paragraphs in seconds (default: 1.0).",
+    help="Random variance added to pauses in seconds (default: 0.05).",
+)
+@click.option(
+    "--trim-silence/--no-trim-silence",
+    "trim_silence",
+    default=None,
+    help="Trim leading/trailing silence from audio (default: enabled).",
 )
 @click.option(
     "--announce-chapters/--no-announce-chapters",
@@ -333,10 +340,11 @@ def convert(
     use_gpu: Optional[bool],
     chapters: Optional[str],
     silence: Optional[float],
-    segment_pause_min: Optional[float],
-    segment_pause_max: Optional[float],
-    paragraph_pause_min: Optional[float],
-    paragraph_pause_max: Optional[float],
+    pause_clause: Optional[float],
+    pause_sentence: Optional[float],
+    pause_paragraph: Optional[float],
+    pause_variance: Optional[float],
+    trim_silence: Optional[bool],
     announce_chapters: Optional[bool],
     chapter_pause: Optional[float],
     title: Optional[str],
@@ -560,25 +568,30 @@ def convert(
             phoneme_dict_case_sensitive
             or config.get("phoneme_dict_case_sensitive", False)
         ),
-        segment_pause_min=(
-            segment_pause_min
-            if segment_pause_min is not None
-            else config.get("segment_pause_min", 0.1)
+        pause_clause=(
+            pause_clause
+            if pause_clause is not None
+            else config.get("pause_clause", 0.25)
         ),
-        segment_pause_max=(
-            segment_pause_max
-            if segment_pause_max is not None
-            else config.get("segment_pause_max", 0.3)
+        pause_sentence=(
+            pause_sentence
+            if pause_sentence is not None
+            else config.get("pause_sentence", 0.2)
         ),
-        paragraph_pause_min=(
-            paragraph_pause_min
-            if paragraph_pause_min is not None
-            else config.get("paragraph_pause_min", 0.5)
+        pause_paragraph=(
+            pause_paragraph
+            if pause_paragraph is not None
+            else config.get("pause_paragraph", 0.75)
         ),
-        paragraph_pause_max=(
-            paragraph_pause_max
-            if paragraph_pause_max is not None
-            else config.get("paragraph_pause_max", 1.0)
+        pause_variance=(
+            pause_variance
+            if pause_variance is not None
+            else config.get("pause_variance", 0.05)
+        ),
+        trim_silence=(
+            trim_silence
+            if trim_silence is not None
+            else config.get("trim_silence", True)
         ),
         announce_chapters=(
             announce_chapters
@@ -1234,7 +1247,6 @@ def demo(
         ttsforge demo -v af_heart --play  # Play a single voice demo
     """
     import numpy as np
-
     from pykokoro import Kokoro, VoiceBlend
 
     config = load_config()
@@ -1559,8 +1571,7 @@ def download(force: bool, quality: Optional[str]) -> None:
 
         if model_path.exists():
             console.print(
-                f"  {get_model_filename(model_quality)}: "
-                f"{format_size(model_path.stat().st_size)}"
+                f"  {model_path.name}: {format_size(model_path.stat().st_size)}"
             )
         if voices_path.exists():
             console.print(
@@ -1600,7 +1611,8 @@ def download(force: bool, quality: Optional[str]) -> None:
             console.print("  [dim]config.json: already downloaded[/dim]")
 
         # Download model
-        model_filename = get_model_filename(model_quality)
+        model_path = get_model_path(model_quality)
+        model_filename = model_path.name
         if not is_model_downloaded(model_quality) or force:
             model_task = progress.add_task(
                 f"Downloading {model_filename}...", total=100
@@ -1826,8 +1838,8 @@ def phonemes_export(
     """
     from pykokoro import Tokenizer
 
-    from .phonemes import PhonemeBook
     from .input_reader import InputReader
+    from .phonemes import PhonemeBook
 
     config = load_config()
 
@@ -2010,28 +2022,34 @@ def phonemes_export(
     help="Silence between chapters in seconds.",
 )
 @click.option(
-    "--segment-pause-min",
+    "--pause-clause",
     type=float,
     default=None,
-    help="Minimum pause between sentences in seconds (default: 0.1).",
+    help="Pause after clauses in seconds (default: 0.25).",
 )
 @click.option(
-    "--segment-pause-max",
+    "--pause-sentence",
     type=float,
     default=None,
-    help="Maximum pause between sentences in seconds (default: 0.3).",
+    help="Pause after sentences in seconds (default: 0.2).",
 )
 @click.option(
-    "--paragraph-pause-min",
+    "--pause-paragraph",
     type=float,
     default=None,
-    help="Minimum pause between paragraphs in seconds (default: 0.5).",
+    help="Pause after paragraphs in seconds (default: 0.75).",
 )
 @click.option(
-    "--paragraph-pause-max",
+    "--pause-variance",
     type=float,
     default=None,
-    help="Maximum pause between paragraphs in seconds (default: 1.0).",
+    help="Random variance added to pauses in seconds (default: 0.05).",
+)
+@click.option(
+    "--trim-silence/--no-trim-silence",
+    "trim_silence",
+    default=None,
+    help="Trim leading/trailing silence from audio (default: enabled).",
 )
 @click.option(
     "--announce-chapters/--no-announce-chapters",
@@ -2108,10 +2126,11 @@ def phonemes_convert(
     speed: float,
     use_gpu: Optional[bool],
     silence: float,
-    segment_pause_min: Optional[float],
-    segment_pause_max: Optional[float],
-    paragraph_pause_min: Optional[float],
-    paragraph_pause_max: Optional[float],
+    pause_clause: Optional[float],
+    pause_sentence: Optional[float],
+    pause_paragraph: Optional[float],
+    pause_variance: Optional[float],
+    trim_silence: Optional[bool],
     announce_chapters: Optional[bool],
     chapter_pause: Optional[float],
     chapters: Optional[str],
@@ -2263,25 +2282,30 @@ def phonemes_convert(
         output_format=fmt,
         use_gpu=gpu,
         silence_between_chapters=silence,
-        segment_pause_min=(
-            segment_pause_min
-            if segment_pause_min is not None
-            else config.get("segment_pause_min", 0.1)
+        pause_clause=(
+            pause_clause
+            if pause_clause is not None
+            else config.get("pause_clause", 0.25)
         ),
-        segment_pause_max=(
-            segment_pause_max
-            if segment_pause_max is not None
-            else config.get("segment_pause_max", 0.3)
+        pause_sentence=(
+            pause_sentence
+            if pause_sentence is not None
+            else config.get("pause_sentence", 0.2)
         ),
-        paragraph_pause_min=(
-            paragraph_pause_min
-            if paragraph_pause_min is not None
-            else config.get("paragraph_pause_min", 0.5)
+        pause_paragraph=(
+            pause_paragraph
+            if pause_paragraph is not None
+            else config.get("pause_paragraph", 0.75)
         ),
-        paragraph_pause_max=(
-            paragraph_pause_max
-            if paragraph_pause_max is not None
-            else config.get("paragraph_pause_max", 1.0)
+        pause_variance=(
+            pause_variance
+            if pause_variance is not None
+            else config.get("pause_variance", 0.05)
+        ),
+        trim_silence=(
+            trim_silence
+            if trim_silence is not None
+            else config.get("trim_silence", True)
         ),
         announce_chapters=(
             announce_chapters
@@ -2884,28 +2908,34 @@ def _show_conversion_summary(
     help="Text splitting mode: sentence (shorter) or paragraph (grouped).",
 )
 @click.option(
-    "--segment-pause-min",
+    "--pause-clause",
     type=float,
     default=None,
-    help="Minimum pause between sentences in seconds.",
+    help="Pause after clauses in seconds.",
 )
 @click.option(
-    "--segment-pause-max",
+    "--pause-sentence",
     type=float,
     default=None,
-    help="Maximum pause between sentences in seconds.",
+    help="Pause after sentences in seconds.",
 )
 @click.option(
-    "--paragraph-pause-min",
+    "--pause-paragraph",
     type=float,
     default=None,
-    help="Minimum pause between paragraphs in seconds.",
+    help="Pause after paragraphs in seconds.",
 )
 @click.option(
-    "--paragraph-pause-max",
+    "--pause-variance",
     type=float,
     default=None,
-    help="Maximum pause between paragraphs in seconds.",
+    help="Random variance added to pauses in seconds.",
+)
+@click.option(
+    "--trim-silence/--no-trim-silence",
+    "trim_silence",
+    default=None,
+    help="Trim leading/trailing silence from audio.",
 )
 @click.pass_context
 def read(
@@ -2924,10 +2954,11 @@ def read(
     resume: bool,
     list_content: bool,
     split_mode: Optional[str],
-    segment_pause_min: Optional[float],
-    segment_pause_max: Optional[float],
-    paragraph_pause_min: Optional[float],
-    paragraph_pause_max: Optional[float],
+    pause_clause: Optional[float],
+    pause_sentence: Optional[float],
+    pause_paragraph: Optional[float],
+    pause_variance: Optional[float],
+    trim_silence: Optional[bool],
 ) -> None:
     """Read an EPUB or text file aloud with streaming playback.
 
@@ -2956,14 +2987,15 @@ def read(
     import sys
     import time
 
+    from pykokoro import Kokoro
+    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
+
     from .audio_player import (
         PlaybackPosition,
         clear_playback_position,
         load_playback_position,
         save_playback_position,
     )
-    from pykokoro import Kokoro
-    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
 
     # Get model path from global context
     model_path = ctx.obj.get("model_path") if ctx.obj else None
@@ -2990,25 +3022,26 @@ def read(
     else:
         effective_split_mode = config_split_mode
     # Pause settings
-    effective_segment_pause_min = (
-        segment_pause_min
-        if segment_pause_min is not None
-        else config.get("segment_pause_min", 0.1)
+    effective_pause_clause = (
+        pause_clause if pause_clause is not None else config.get("pause_clause", 0.25)
     )
-    effective_segment_pause_max = (
-        segment_pause_max
-        if segment_pause_max is not None
-        else config.get("segment_pause_max", 0.3)
+    effective_pause_sentence = (
+        pause_sentence
+        if pause_sentence is not None
+        else config.get("pause_sentence", 0.2)
     )
-    effective_paragraph_pause_min = (
-        paragraph_pause_min
-        if paragraph_pause_min is not None
-        else config.get("paragraph_pause_min", 0.5)
+    effective_pause_paragraph = (
+        pause_paragraph
+        if pause_paragraph is not None
+        else config.get("pause_paragraph", 0.75)
     )
-    effective_paragraph_pause_max = (
-        paragraph_pause_max
-        if paragraph_pause_max is not None
-        else config.get("paragraph_pause_max", 1.0)
+    effective_pause_variance = (
+        pause_variance
+        if pause_variance is not None
+        else config.get("pause_variance", 0.05)
+    )
+    effective_trim_silence = (
+        trim_silence if trim_silence is not None else config.get("trim_silence", True)
     )
 
     # Get language code for TTS
@@ -3371,15 +3404,15 @@ def read(
                     next_content_idx = all_segments[i + 1][0]
                     if next_content_idx != content_idx:
                         # Paragraph pause (between content items)
-                        pause = random.uniform(
-                            effective_paragraph_pause_min, effective_paragraph_pause_max
+                        pause = effective_pause_paragraph + random.uniform(
+                            -effective_pause_variance, effective_pause_variance
                         )
                     else:
                         # Segment pause (within content item)
-                        pause = random.uniform(
-                            effective_segment_pause_min, effective_segment_pause_max
+                        pause = effective_pause_sentence + random.uniform(
+                            -effective_pause_variance, effective_pause_variance
                         )
-                    time.sleep(pause)
+                    time.sleep(max(0, pause))  # Ensure non-negative
 
             # Swap futures: next becomes current
             if next_future:
@@ -3605,12 +3638,12 @@ def extract_names(
     from rich.progress import Progress, SpinnerColumn, TextColumn
     from rich.table import Table
 
+    from .input_reader import InputReader
     from .name_extractor import (
         extract_names_from_text,
         generate_phoneme_suggestions,
         save_phoneme_dictionary,
     )
-    from .input_reader import InputReader
 
     console.print(f"[bold]Extracting names from:[/bold] {input_file}")
 

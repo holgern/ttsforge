@@ -286,7 +286,6 @@ def load_tts_pipeline() -> tuple[Any, Any]:
         Tuple of (numpy module, Kokoro class)
     """
     import numpy as np
-
     from pykokoro import Kokoro
 
     return np, Kokoro

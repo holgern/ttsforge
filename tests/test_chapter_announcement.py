@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-
 from pykokoro import PhonemeSegment
+
 from ttsforge.conversion import Chapter, ConversionOptions
 from ttsforge.phoneme_conversion import PhonemeConversionOptions, PhonemeConverter
 from ttsforge.phonemes import PhonemeBook
@@ -147,7 +147,7 @@ class TestChapterAnnouncementPhonemeConversion:
         mock_kokoro = MagicMock()
         fake_audio = np.zeros(24000, dtype="float32")
         mock_kokoro.create.return_value = (fake_audio, 24000)
-        mock_kokoro.create_from_segment.return_value = (fake_audio, 24000)
+        mock_kokoro.create_from_segments.return_value = (fake_audio, 24000)
         mock_kokoro_class.return_value = mock_kokoro
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -182,7 +182,7 @@ class TestChapterAnnouncementPhonemeConversion:
         mock_models_downloaded.return_value = True
         mock_kokoro = MagicMock()
         fake_audio = np.zeros(24000, dtype="float32")
-        mock_kokoro.create_from_segment.return_value = (fake_audio, 24000)
+        mock_kokoro.create_from_segments.return_value = (fake_audio, 24000)
         mock_kokoro_class.return_value = mock_kokoro
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -195,7 +195,7 @@ class TestChapterAnnouncementPhonemeConversion:
             converter.convert(output_path)
 
             # Should NOT call create() for announcements
-            # (Only create_from_segment for actual content)
+            # (Only create_from_segments for actual content)
             assert (
                 not hasattr(mock_kokoro.create, "call_count")
                 or mock_kokoro.create.call_count == 0

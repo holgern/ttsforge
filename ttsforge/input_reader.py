@@ -167,7 +167,7 @@ class InputReader:
 
         Parses the header of a Gutenberg text file to extract metadata.
         """
-        with open(self.file_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(self.file_path, encoding="utf-8", errors="ignore") as f:
             # Read first 1000 lines for metadata (Gutenberg header is typically short)
             header_lines = []
             for i, line in enumerate(f):
@@ -216,7 +216,7 @@ class InputReader:
         - "ONE", "TWO", etc. (capitalized chapter titles)
         - "PART I", etc.
         """
-        with open(self.file_path, "r", encoding="utf-8", errors="ignore") as f:
+        with open(self.file_path, encoding="utf-8", errors="ignore") as f:
             full_text = f.read()
 
         # Find the start and end markers

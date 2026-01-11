@@ -91,9 +91,9 @@ class TestVoices:
         """All voice prefixes should be in VOICE_PREFIX_TO_LANG."""
         for voice in VOICES:
             prefix = voice[:2]
-            assert prefix in VOICE_PREFIX_TO_LANG, (
-                f"Prefix {prefix} from {voice} not in mapping"
-            )
+            assert (
+                prefix in VOICE_PREFIX_TO_LANG
+            ), f"Prefix {prefix} from {voice} not in mapping"
 
     def test_american_english_voices_exist(self):
         """American English voices should exist."""
@@ -128,9 +128,9 @@ class TestDefaultVoiceForLang:
     def test_all_languages_have_default_voice(self):
         """All languages should have a default voice."""
         for lang in LANGUAGE_DESCRIPTIONS:
-            assert lang in DEFAULT_VOICE_FOR_LANG, (
-                f"Language {lang} needs default voice"
-            )
+            assert (
+                lang in DEFAULT_VOICE_FOR_LANG
+            ), f"Language {lang} needs default voice"
 
     def test_default_voices_exist_in_voices_list(self):
         """All default voices should exist in VOICES list."""

@@ -6,7 +6,6 @@ bypassing text-to-phoneme conversion since phonemes/tokens are pre-computed.
 
 import json
 import os
-import random
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -15,7 +14,7 @@ from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import soundfile as sf
-from pykokoro import Kokoro, VoiceBlend
+from pykokoro import Kokoro, PhonemeSegment, VoiceBlend
 from pykokoro.onnx_backend import are_models_downloaded, download_all_models
 
 from .constants import SAMPLE_RATE, SUPPORTED_OUTPUT_FORMATS
@@ -159,10 +158,11 @@ class PhonemeConversionState:
     speed: float = 1.0
     output_format: str = "m4b"
     silence_between_chapters: float = 2.0
-    segment_pause_min: float = 0.1
-    segment_pause_max: float = 0.3
-    paragraph_pause_min: float = 0.5
-    paragraph_pause_max: float = 1.0
+    pause_clause: float = 0.25
+    pause_sentence: float = 0.2
+    pause_paragraph: float = 0.75
+    pause_variance: float = 0.05
+    trim_silence: bool = True
     lang: Optional[str] = None  # Language override for phonemization
     chapters: list[PhonemeChapterState] = field(default_factory=list)
     started_at: str = ""
@@ -192,14 +192,31 @@ class PhonemeConversionState:
                 data["silence_between_chapters"] = 2.0
             if "selected_chapters" not in data:
                 data["selected_chapters"] = []
-            if "segment_pause_min" not in data:
-                data["segment_pause_min"] = 0.1
-            if "segment_pause_max" not in data:
-                data["segment_pause_max"] = 0.3
-            if "paragraph_pause_min" not in data:
-                data["paragraph_pause_min"] = 0.5
-            if "paragraph_pause_max" not in data:
-                data["paragraph_pause_max"] = 1.0
+
+            # Migrate old pause parameters to new system
+            if "segment_pause_min" in data or "segment_pause_max" in data:
+                seg_min = data.get("segment_pause_min", 0.1)
+                seg_max = data.get("segment_pause_max", 0.3)
+                data["pause_sentence"] = (seg_min + seg_max) / 2.0
+                if "pause_variance" not in data:
+                    data["pause_variance"] = max(0.01, (seg_max - seg_min) / 4.0)
+
+            if "paragraph_pause_min" in data or "paragraph_pause_max" in data:
+                para_min = data.get("paragraph_pause_min", 0.5)
+                para_max = data.get("paragraph_pause_max", 1.0)
+                data["pause_paragraph"] = (para_min + para_max) / 2.0
+
+            # Set defaults for new parameters
+            if "pause_clause" not in data:
+                data["pause_clause"] = 0.25
+            if "pause_sentence" not in data:
+                data["pause_sentence"] = 0.2
+            if "pause_paragraph" not in data:
+                data["pause_paragraph"] = 0.75
+            if "pause_variance" not in data:
+                data["pause_variance"] = 0.05
+            if "trim_silence" not in data:
+                data["trim_silence"] = True
             if "lang" not in data:
                 data["lang"] = None
 
@@ -219,10 +236,11 @@ class PhonemeConversionState:
             "speed": self.speed,
             "output_format": self.output_format,
             "silence_between_chapters": self.silence_between_chapters,
-            "segment_pause_min": self.segment_pause_min,
-            "segment_pause_max": self.segment_pause_max,
-            "paragraph_pause_min": self.paragraph_pause_min,
-            "paragraph_pause_max": self.paragraph_pause_max,
+            "pause_clause": self.pause_clause,
+            "pause_sentence": self.pause_sentence,
+            "pause_paragraph": self.pause_paragraph,
+            "pause_variance": self.pause_variance,
+            "trim_silence": self.trim_silence,
             "lang": self.lang,
             "chapters": [
                 {
@@ -255,12 +273,12 @@ class PhonemeConversionOptions:
     # Language override for phonemization (e.g., 'de', 'en-us', 'fr')
     # If None, language from PhonemeSegments is used
     lang: Optional[str] = None
-    # Segment pause (random silence between sentences within a paragraph)
-    segment_pause_min: float = 0.1
-    segment_pause_max: float = 0.3
-    # Paragraph pause (random silence between paragraphs - longer than segment pause)
-    paragraph_pause_min: float = 0.5
-    paragraph_pause_max: float = 1.0
+    # Pause settings (pykokoro built-in pause handling)
+    pause_clause: float = 0.25  # For clause boundaries (commas)
+    pause_sentence: float = 0.2  # For sentence boundaries
+    pause_paragraph: float = 0.75  # For paragraph boundaries
+    pause_variance: float = 0.05  # Standard deviation for natural variation
+    trim_silence: bool = True  # Enable automatic silence trimming
     # Chapter announcement settings
     announce_chapters: bool = True  # Read chapter titles aloud before content
     chapter_pause_after_title: float = 2.0  # Pause after chapter title (seconds)
@@ -371,24 +389,6 @@ class PhonemeConverter:
         """Generate silence audio of given duration."""
         samples = int(duration * SAMPLE_RATE)
         return np.zeros(samples, dtype="float32")
-
-    def _generate_segment_pause(self) -> np.ndarray:
-        """Generate random silence for inter-segment (sentence) pause."""
-        min_pause = self.options.segment_pause_min
-        max_pause = self.options.segment_pause_max
-        if min_pause <= 0 and max_pause <= 0:
-            return np.array([], dtype="float32")
-        duration = random.uniform(min_pause, max_pause)
-        return self._generate_silence(duration)
-
-    def _generate_paragraph_pause(self) -> np.ndarray:
-        """Generate random silence for inter-paragraph pause (longer than segment)."""
-        min_pause = self.options.paragraph_pause_min
-        max_pause = self.options.paragraph_pause_max
-        if min_pause <= 0 and max_pause <= 0:
-            return np.array([], dtype="float32")
-        duration = random.uniform(min_pause, max_pause)
-        return self._generate_silence(duration)
 
     def _setup_output(
         self, output_path: Path
@@ -635,45 +635,56 @@ class PhonemeConverter:
                     out_file.write(pause_audio)
                     duration += pause_duration
 
+            # Build list of segments with pause metadata
+            segments_with_pauses = []
+
             for seg_idx, segment in enumerate(chapter.segments):
                 if self._cancelled:
                     break
 
-                # Generate audio from segment
-                assert self._kokoro is not None
-                samples, sample_rate = self._kokoro.create_from_segment(
-                    segment,
-                    voice=self._voice_style or self.options.voice,
-                    speed=self.options.speed,
-                    lang=self.options.lang,
-                )
-
-                if self._cancelled:
-                    break
-
-                out_file.write(samples)
-                duration += len(samples) / SAMPLE_RATE
-                segments_processed += 1
-
-                # Add pause between segments (not after the last segment)
-                # Use longer pause for paragraph boundaries, shorter for sentences
+                # Determine pause after this segment
+                pause_after = 0.0
                 if seg_idx < total_segments - 1:
                     next_segment = chapter.segments[seg_idx + 1]
                     if next_segment.paragraph != segment.paragraph:
                         # Paragraph change - use longer pause
-                        pause_audio = self._generate_paragraph_pause()
+                        pause_after = self.options.pause_paragraph
                     else:
                         # Same paragraph - use shorter sentence pause
-                        pause_audio = self._generate_segment_pause()
-                    if len(pause_audio) > 0:
-                        out_file.write(pause_audio)
-                        duration += len(pause_audio) / SAMPLE_RATE
+                        pause_after = self.options.pause_sentence
 
-                # Update progress
+                # Create new PhonemeSegment preserving all fields
+                seg_with_pause = PhonemeSegment(
+                    text=segment.text,
+                    phonemes=segment.phonemes,
+                    tokens=segment.tokens,
+                    lang=segment.lang,
+                    paragraph=segment.paragraph,
+                    sentence=segment.sentence if hasattr(segment, "sentence") else None,
+                    pause_after=pause_after,
+                )
+                segments_with_pauses.append(seg_with_pause)
+
+            if not self._cancelled and segments_with_pauses:
+                # Single API call for entire chapter
+                assert self._kokoro is not None
+                samples, sample_rate = self._kokoro.create_from_segments(
+                    segments_with_pauses,
+                    voice=self._voice_style or self.options.voice,
+                    speed=self.options.speed,
+                    pause_variance=self.options.pause_variance,
+                    trim_silence=self.options.trim_silence,
+                )
+
+                out_file.write(samples)
+                duration += len(samples) / SAMPLE_RATE
+                segments_processed = total_segments
+
+                # Update progress once per chapter
                 if progress and self.progress_callback:
                     progress.current_segment = segments_processed
                     progress.segments_processed = segments_before + segments_processed
-                    progress.current_text = segment.text[:100]
+                    progress.current_text = f"Completed {chapter.title or 'chapter'} ({segments_processed} segments)"
                     if start_time and progress.total_segments_all > 0:
                         elapsed = time.time() - start_time
                         if progress.segments_processed > 0 and elapsed > 0.5:
@@ -890,19 +901,21 @@ class PhonemeConverter:
                         or state.speed != self.options.speed
                         or state.silence_between_chapters
                         != self.options.silence_between_chapters
-                        or state.segment_pause_min != self.options.segment_pause_min
-                        or state.segment_pause_max != self.options.segment_pause_max
-                        or state.paragraph_pause_min != self.options.paragraph_pause_min
-                        or state.paragraph_pause_max != self.options.paragraph_pause_max
+                        or state.pause_clause != self.options.pause_clause
+                        or state.pause_sentence != self.options.pause_sentence
+                        or state.pause_paragraph != self.options.pause_paragraph
+                        or state.pause_variance != self.options.pause_variance
+                        or state.trim_silence != self.options.trim_silence
                     ):
                         self.log(
                             f"Restoring settings from previous session: "
                             f"voice={state.voice}, speed={state.speed}, "
                             f"silence={state.silence_between_chapters}s, "
-                            f"segment_pause={state.segment_pause_min}-"
-                            f"{state.segment_pause_max}s, "
-                            f"paragraph_pause={state.paragraph_pause_min}-"
-                            f"{state.paragraph_pause_max}s",
+                            f"pause_clause={state.pause_clause}s, "
+                            f"pause_sentence={state.pause_sentence}s, "
+                            f"pause_paragraph={state.pause_paragraph}s, "
+                            f"pause_variance={state.pause_variance}s, "
+                            f"trim_silence={state.trim_silence}",
                             "info",
                         )
                         # Apply saved settings for consistency
@@ -912,10 +925,11 @@ class PhonemeConverter:
                         self.options.silence_between_chapters = (
                             state.silence_between_chapters
                         )
-                        self.options.segment_pause_min = state.segment_pause_min
-                        self.options.segment_pause_max = state.segment_pause_max
-                        self.options.paragraph_pause_min = state.paragraph_pause_min
-                        self.options.paragraph_pause_max = state.paragraph_pause_max
+                        self.options.pause_clause = state.pause_clause
+                        self.options.pause_sentence = state.pause_sentence
+                        self.options.pause_paragraph = state.pause_paragraph
+                        self.options.pause_variance = state.pause_variance
+                        self.options.trim_silence = state.trim_silence
 
             if state is None:
                 # Create new state
@@ -927,10 +941,11 @@ class PhonemeConverter:
                     speed=self.options.speed,
                     output_format=self.options.output_format,
                     silence_between_chapters=self.options.silence_between_chapters,
-                    segment_pause_min=self.options.segment_pause_min,
-                    segment_pause_max=self.options.segment_pause_max,
-                    paragraph_pause_min=self.options.paragraph_pause_min,
-                    paragraph_pause_max=self.options.paragraph_pause_max,
+                    pause_clause=self.options.pause_clause,
+                    pause_sentence=self.options.pause_sentence,
+                    pause_paragraph=self.options.pause_paragraph,
+                    pause_variance=self.options.pause_variance,
+                    trim_silence=self.options.trim_silence,
                     chapters=[
                         PhonemeChapterState(
                             index=idx,
@@ -1157,46 +1172,61 @@ class PhonemeConverter:
                 self.log(f"Converting chapter {ch_num}/{total_ch}: {chapter.title}")
 
                 chapter_start = current_time
+
+                # Build list of segments with pause metadata
+                segments_with_pauses = []
                 total_chapter_segments = len(chapter.segments)
 
                 for seg_idx, segment in enumerate(chapter.segments):
                     if self._cancelled:
                         break
 
-                    # Generate audio from segment
-                    assert self._kokoro is not None
-                    samples, sample_rate = self._kokoro.create_from_segment(
-                        segment,
-                        voice=self._voice_style or self.options.voice,
-                        speed=self.options.speed,
-                        lang=self.options.lang,
-                    )
-
-                    if self._cancelled:
-                        break
-
-                    self._write_audio_chunk(samples, out_file, ffmpeg_proc)
-                    current_time += len(samples) / SAMPLE_RATE
-                    segments_processed += 1
-
-                    # Add pause between segments (not after the last segment)
-                    # Use longer pause for paragraph boundaries, shorter for sentences
+                    # Determine pause after this segment
+                    pause_after = 0.0
                     if seg_idx < total_chapter_segments - 1:
                         next_segment = chapter.segments[seg_idx + 1]
                         if next_segment.paragraph != segment.paragraph:
                             # Paragraph change - use longer pause
-                            pause_audio = self._generate_paragraph_pause()
+                            pause_after = self.options.pause_paragraph
                         else:
                             # Same paragraph - use shorter sentence pause
-                            pause_audio = self._generate_segment_pause()
-                        if len(pause_audio) > 0:
-                            self._write_audio_chunk(pause_audio, out_file, ffmpeg_proc)
-                            current_time += len(pause_audio) / SAMPLE_RATE
+                            pause_after = self.options.pause_sentence
 
-                    # Update progress
-                    progress.current_segment = seg_idx + 1
+                    # Create new PhonemeSegment preserving all fields
+                    seg_with_pause = PhonemeSegment(
+                        text=segment.text,
+                        phonemes=segment.phonemes,
+                        tokens=segment.tokens,
+                        lang=segment.lang,
+                        paragraph=segment.paragraph,
+                        sentence=segment.sentence
+                        if hasattr(segment, "sentence")
+                        else None,
+                        pause_after=pause_after,
+                    )
+                    segments_with_pauses.append(seg_with_pause)
+
+                if not self._cancelled and segments_with_pauses:
+                    # Single API call for entire chapter
+                    assert self._kokoro is not None
+                    samples, sample_rate = self._kokoro.create_from_segments(
+                        segments_with_pauses,
+                        voice=self._voice_style or self.options.voice,
+                        speed=self.options.speed,
+                        pause_variance=self.options.pause_variance,
+                        trim_silence=self.options.trim_silence,
+                    )
+
+                    self._write_audio_chunk(samples, out_file, ffmpeg_proc)
+                    current_time += len(samples) / SAMPLE_RATE
+                    segments_processed += total_chapter_segments
+
+                    # Update progress once per chapter
+                    progress.current_segment = total_chapter_segments
                     progress.segments_processed = segments_processed
-                    progress.current_text = segment.text[:100]
+                    progress.current_text = (
+                        f"Completed {chapter.title} ({total_chapter_segments} segments)"
+                    )
                     if segments_processed > 0:
                         elapsed = time.time() - start_time
                         if elapsed > 0.5:

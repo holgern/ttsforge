@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-import random
 import re
 import subprocess
 import time
@@ -121,10 +120,11 @@ class ConversionState:
     split_mode: str = "auto"
     output_format: str = "m4b"
     silence_between_chapters: float = 2.0
-    segment_pause_min: float = 0.1
-    segment_pause_max: float = 0.3
-    paragraph_pause_min: float = 0.5
-    paragraph_pause_max: float = 1.0
+    pause_clause: float = 0.25
+    pause_sentence: float = 0.2
+    pause_paragraph: float = 0.75
+    pause_variance: float = 0.05
+    trim_silence: bool = True
     lang: Optional[str] = None  # Language override for phonemization
     chapters: list[ChapterState] = field(default_factory=list)
     started_at: str = ""
@@ -146,14 +146,31 @@ class ConversionState:
             # Handle missing fields for backward compatibility
             if "silence_between_chapters" not in data:
                 data["silence_between_chapters"] = 2.0
-            if "segment_pause_min" not in data:
-                data["segment_pause_min"] = 0.1
-            if "segment_pause_max" not in data:
-                data["segment_pause_max"] = 0.3
-            if "paragraph_pause_min" not in data:
-                data["paragraph_pause_min"] = 0.5
-            if "paragraph_pause_max" not in data:
-                data["paragraph_pause_max"] = 1.0
+
+            # Migrate old pause parameters to new system
+            if "segment_pause_min" in data or "segment_pause_max" in data:
+                seg_min = data.get("segment_pause_min", 0.1)
+                seg_max = data.get("segment_pause_max", 0.3)
+                data["pause_sentence"] = (seg_min + seg_max) / 2.0
+                if "pause_variance" not in data:
+                    data["pause_variance"] = max(0.01, (seg_max - seg_min) / 4.0)
+
+            if "paragraph_pause_min" in data or "paragraph_pause_max" in data:
+                para_min = data.get("paragraph_pause_min", 0.5)
+                para_max = data.get("paragraph_pause_max", 1.0)
+                data["pause_paragraph"] = (para_min + para_max) / 2.0
+
+            # Set defaults for new parameters
+            if "pause_clause" not in data:
+                data["pause_clause"] = 0.25
+            if "pause_sentence" not in data:
+                data["pause_sentence"] = 0.2
+            if "pause_paragraph" not in data:
+                data["pause_paragraph"] = 0.75
+            if "pause_variance" not in data:
+                data["pause_variance"] = 0.05
+            if "trim_silence" not in data:
+                data["trim_silence"] = True
             if "lang" not in data:
                 data["lang"] = None
 
@@ -176,10 +193,11 @@ class ConversionState:
             "split_mode": self.split_mode,
             "output_format": self.output_format,
             "silence_between_chapters": self.silence_between_chapters,
-            "segment_pause_min": self.segment_pause_min,
-            "segment_pause_max": self.segment_pause_max,
-            "paragraph_pause_min": self.paragraph_pause_min,
-            "paragraph_pause_max": self.paragraph_pause_max,
+            "pause_clause": self.pause_clause,
+            "pause_sentence": self.pause_sentence,
+            "pause_paragraph": self.pause_paragraph,
+            "pause_variance": self.pause_variance,
+            "trim_silence": self.trim_silence,
             "lang": self.lang,
             "chapters": [
                 {
@@ -257,12 +275,12 @@ class ConversionOptions:
     # Custom phoneme dictionary for pronunciation overrides
     phoneme_dictionary_path: Optional[str] = None
     phoneme_dict_case_sensitive: bool = False
-    # Segment pause (random silence between sentences within a paragraph)
-    segment_pause_min: float = 0.1
-    segment_pause_max: float = 0.3
-    # Paragraph pause (random silence between paragraphs - longer than segment pause)
-    paragraph_pause_min: float = 0.5
-    paragraph_pause_max: float = 1.0
+    # Pause settings (pykokoro built-in pause handling)
+    pause_clause: float = 0.25  # For clause boundaries (commas)
+    pause_sentence: float = 0.2  # For sentence boundaries
+    pause_paragraph: float = 0.75  # For paragraph boundaries
+    pause_variance: float = 0.05  # Standard deviation for natural variation
+    trim_silence: bool = True  # Enable automatic silence trimming
     # Chapter announcement settings
     announce_chapters: bool = True  # Read chapter titles aloud before content
     chapter_pause_after_title: float = 2.0  # Pause after chapter title (seconds)
@@ -509,24 +527,6 @@ class TTSConverter:
         """Generate silence audio of given duration."""
         samples = int(duration * SAMPLE_RATE)
         return self._np.zeros(samples, dtype="float32")
-
-    def _generate_segment_pause(self) -> Any:
-        """Generate random silence for inter-segment (sentence) pause."""
-        min_pause = self.options.segment_pause_min
-        max_pause = self.options.segment_pause_max
-        if min_pause <= 0 and max_pause <= 0:
-            return self._np.array([], dtype="float32")
-        duration = random.uniform(min_pause, max_pause)
-        return self._generate_silence(duration)
-
-    def _generate_paragraph_pause(self) -> Any:
-        """Generate random silence for inter-paragraph pause (longer than segment)."""
-        min_pause = self.options.paragraph_pause_min
-        max_pause = self.options.paragraph_pause_max
-        if min_pause <= 0 and max_pause <= 0:
-            return self._np.array([], dtype="float32")
-        duration = random.uniform(min_pause, max_pause)
-        return self._generate_silence(duration)
 
     def _write_audio_chunk(
         self,
@@ -776,101 +776,100 @@ class TTSConverter:
 
             if use_phrasplit:
                 segments = self._split_text_with_phrasplit(chapter.content)
-                # Filter out empty segments first to know total count
+                # Filter out empty segments first
                 segments = [s for s in segments if s.text.strip()]
-                total_segments = len(segments)
 
-                for seg_idx, segment in enumerate(segments):
-                    if self._cancelled:
-                        break
+                # Combine all segment texts into full chapter text
+                # Preserve paragraph structure for pykokoro's split_mode
+                chapter_text_parts = []
+                current_paragraph = None
 
-                    # Use ONNX backend
-                    assert self._kokoro is not None
-                    samples, sample_rate = self._kokoro.create(
-                        segment.text,
-                        voice=self._voice_style
-                        if self._voice_style is not None
-                        else self.options.voice,
-                        speed=self.options.speed,
-                        lang=lang_code,
-                    )
+                for segment in segments:
+                    if current_paragraph is None:
+                        current_paragraph = segment.paragraph
+                    elif segment.paragraph != current_paragraph:
+                        # Add paragraph break (double newline)
+                        chapter_text_parts.append("\n\n")
+                        current_paragraph = segment.paragraph
+                    else:
+                        # Add sentence break (single space or newline)
+                        chapter_text_parts.append(" ")
 
-                    if self._cancelled:
-                        break
-                    out_file.write(samples)
-                    duration += len(samples) / SAMPLE_RATE
+                    chapter_text_parts.append(segment.text)
 
-                    # Add pause between segments (not after the last segment)
-                    # Use longer pause for paragraph boundaries, shorter for sentences
-                    if seg_idx < total_segments - 1:
-                        next_segment = segments[seg_idx + 1]
-                        if next_segment.paragraph != segment.paragraph:
-                            # Paragraph change - use longer pause
-                            pause_audio = self._generate_paragraph_pause()
-                        else:
-                            # Same paragraph - use shorter sentence pause
-                            pause_audio = self._generate_segment_pause()
-                        if len(pause_audio) > 0:
-                            out_file.write(pause_audio)
-                            duration += len(pause_audio) / SAMPLE_RATE
+                full_chapter_text = "".join(chapter_text_parts)
 
-                    # Update progress
-                    grapheme_len = len(segment.text)
-                    chars_processed += grapheme_len
-                    if progress and self.progress_callback:
-                        progress.chars_processed = chars_before + chars_processed
-                        progress.current_text = segment.text[:100]
-                        if start_time and total_chars > 0:
-                            elapsed = time.time() - start_time
-                            if chars_processed > 0 and elapsed > 0.5:
-                                avg_time = elapsed / chars_processed
-                                remaining = total_chars - progress.chars_processed
-                                progress.estimated_remaining = avg_time * remaining
-                            progress.elapsed_time = elapsed
-                        self.progress_callback(progress)
-            else:
-                # Use chunk-based generation for progress tracking
+                # Single call to pykokoro for entire chapter
                 assert self._kokoro is not None
-                # Collect chunks to know total count for proper pause insertion
-                chunks_data = list(
-                    self._kokoro.generate_chunks(
-                        chapter.content,
-                        voice=self._voice_style
-                        if self._voice_style is not None
-                        else self.options.voice,
-                        speed=self.options.speed,
-                        lang=lang_code,
-                    )
+                samples, sample_rate = self._kokoro.create(
+                    full_chapter_text,
+                    voice=self._voice_style
+                    if self._voice_style is not None
+                    else self.options.voice,
+                    speed=self.options.speed,
+                    lang=lang_code,
+                    split_mode="paragraph",  # Let pykokoro handle segmentation
+                    trim_silence=self.options.trim_silence,
+                    pause_clause=self.options.pause_clause,
+                    pause_sentence=self.options.pause_sentence,
+                    pause_paragraph=self.options.pause_paragraph,
+                    pause_variance=self.options.pause_variance,
                 )
-                total_chunks = len(chunks_data)
 
-                for chunk_idx, (samples, _sample_rate, chunk) in enumerate(chunks_data):
-                    if self._cancelled:
-                        break
-                    out_file.write(samples)
-                    duration += len(samples) / SAMPLE_RATE
+                out_file.write(samples)
+                duration += len(samples) / SAMPLE_RATE
 
-                    # Add random pause between chunks (not after the last chunk)
-                    if chunk_idx < total_chunks - 1:
-                        pause_audio = self._generate_segment_pause()
-                        if len(pause_audio) > 0:
-                            out_file.write(pause_audio)
-                            duration += len(pause_audio) / SAMPLE_RATE
+                # Update progress once for entire chapter
+                chars_processed = sum(len(seg.text) for seg in segments)
+                if progress and self.progress_callback:
+                    progress.chars_processed = chars_before + chars_processed
+                    progress.current_text = (
+                        f"Completed chapter with {len(segments)} segments"
+                    )
+                    if start_time and total_chars > 0:
+                        elapsed = time.time() - start_time
+                        if chars_processed > 0 and elapsed > 0.5:
+                            avg_time = elapsed / chars_processed
+                            remaining = total_chars - progress.chars_processed
+                            progress.estimated_remaining = avg_time * remaining
+                        progress.elapsed_time = elapsed
+                    self.progress_callback(progress)
+            else:
+                # Non-phrasplit mode: use pykokoro's built-in segmentation
+                assert self._kokoro is not None
+                samples, sample_rate = self._kokoro.create(
+                    chapter.content,
+                    voice=self._voice_style
+                    if self._voice_style is not None
+                    else self.options.voice,
+                    speed=self.options.speed,
+                    lang=lang_code,
+                    split_mode="sentence",  # Let pykokoro handle segmentation
+                    trim_silence=self.options.trim_silence,
+                    pause_clause=self.options.pause_clause,
+                    pause_sentence=self.options.pause_sentence,
+                    pause_paragraph=self.options.pause_paragraph,
+                    pause_variance=self.options.pause_variance,
+                )
 
-                    # Update progress
-                    grapheme_len = len(chunk)
-                    chars_processed += grapheme_len
-                    if progress and self.progress_callback:
-                        progress.chars_processed = chars_before + chars_processed
-                        progress.current_text = chunk[:100]
-                        if start_time and total_chars > 0:
-                            elapsed = time.time() - start_time
-                            if chars_processed > 0 and elapsed > 0.5:
-                                avg_time = elapsed / chars_processed
-                                remaining = total_chars - progress.chars_processed
-                                progress.estimated_remaining = avg_time * remaining
-                            progress.elapsed_time = elapsed
-                        self.progress_callback(progress)
+                out_file.write(samples)
+                duration += len(samples) / SAMPLE_RATE
+
+                # Update progress once for entire chapter
+                chars_processed = len(chapter.content)
+                if progress and self.progress_callback:
+                    progress.chars_processed = chars_before + chars_processed
+                    progress.current_text = (
+                        f"Completed chapter: {chapter.title or 'Untitled'}"
+                    )
+                    if start_time and total_chars > 0:
+                        elapsed = time.time() - start_time
+                        if chars_processed > 0 and elapsed > 0.5:
+                            avg_time = elapsed / chars_processed
+                            remaining = total_chars - progress.chars_processed
+                            progress.estimated_remaining = avg_time * remaining
+                        progress.elapsed_time = elapsed
+                    self.progress_callback(progress)
 
         return duration, chars_processed
 
@@ -1077,12 +1076,11 @@ class TTSConverter:
                             or state.split_mode != self.options.split_mode
                             or state.silence_between_chapters
                             != self.options.silence_between_chapters
-                            or state.segment_pause_min != self.options.segment_pause_min
-                            or state.segment_pause_max != self.options.segment_pause_max
-                            or state.paragraph_pause_min
-                            != self.options.paragraph_pause_min
-                            or state.paragraph_pause_max
-                            != self.options.paragraph_pause_max
+                            or state.pause_clause != self.options.pause_clause
+                            or state.pause_sentence != self.options.pause_sentence
+                            or state.pause_paragraph != self.options.pause_paragraph
+                            or state.pause_variance != self.options.pause_variance
+                            or state.trim_silence != self.options.trim_silence
                             or state.lang != self.options.lang
                         )
 
@@ -1093,10 +1091,9 @@ class TTSConverter:
                                 f"lang_override={state.lang}, "
                                 f"speed={state.speed}, split_mode={state.split_mode}, "
                                 f"silence={state.silence_between_chapters}s, "
-                                f"segment_pause={state.segment_pause_min}-"
-                                f"{state.segment_pause_max}s, "
-                                f"paragraph_pause={state.paragraph_pause_min}-"
-                                f"{state.paragraph_pause_max}s",
+                                f"pauses: clause={state.pause_clause}s sent={state.pause_sentence}s "
+                                f"para={state.pause_paragraph}s var={state.pause_variance}s "
+                                f"trim={state.trim_silence}",
                                 "info",
                             )
 
@@ -1109,10 +1106,11 @@ class TTSConverter:
                         self.options.silence_between_chapters = (
                             state.silence_between_chapters
                         )
-                        self.options.segment_pause_min = state.segment_pause_min
-                        self.options.segment_pause_max = state.segment_pause_max
-                        self.options.paragraph_pause_min = state.paragraph_pause_min
-                        self.options.paragraph_pause_max = state.paragraph_pause_max
+                        self.options.pause_clause = state.pause_clause
+                        self.options.pause_sentence = state.pause_sentence
+                        self.options.pause_paragraph = state.pause_paragraph
+                        self.options.pause_variance = state.pause_variance
+                        self.options.trim_silence = state.trim_silence
                         self.options.lang = state.lang
 
             if state is None:
@@ -1129,10 +1127,11 @@ class TTSConverter:
                     split_mode=self.options.split_mode,
                     output_format=self.options.output_format,
                     silence_between_chapters=self.options.silence_between_chapters,
-                    segment_pause_min=self.options.segment_pause_min,
-                    segment_pause_max=self.options.segment_pause_max,
-                    paragraph_pause_min=self.options.paragraph_pause_min,
-                    paragraph_pause_max=self.options.paragraph_pause_max,
+                    pause_clause=self.options.pause_clause,
+                    pause_sentence=self.options.pause_sentence,
+                    pause_paragraph=self.options.pause_paragraph,
+                    pause_variance=self.options.pause_variance,
+                    trim_silence=self.options.trim_silence,
                     lang=self.options.lang,
                     chapters=[
                         ChapterState(
@@ -1378,58 +1377,61 @@ class TTSConverter:
 
                 # Generate TTS for this chapter
                 if use_phrasplit:
-                    # Pre-split text using phrasplit, then process each segment
+                    # Pre-split text using phrasplit, then combine for pykokoro
                     segments = self._split_text_with_phrasplit(chapter.content)
-                    # Filter out empty segments to know total count
+                    # Filter out empty segments
                     segments = [s for s in segments if s.text.strip()]
-                    total_segments = len(segments)
 
-                    for seg_idx, segment in enumerate(segments):
-                        if self._cancelled:
-                            break
+                    # Combine all segment texts into full chapter text
+                    # Preserve paragraph structure for pykokoro's split_mode
+                    chapter_text_parts = []
+                    current_paragraph = None
 
-                        # Process each segment using ONNX backend
-                        assert self._kokoro is not None
-                        samples, sample_rate = self._kokoro.create(
-                            segment.text,
-                            voice=self._voice_style
-                            if self._voice_style is not None
-                            else self.options.voice,
-                            speed=self.options.speed,
-                            lang=lang_code,
-                        )
+                    for segment in segments:
+                        if current_paragraph is None:
+                            current_paragraph = segment.paragraph
+                        elif segment.paragraph != current_paragraph:
+                            # Add paragraph break (double newline)
+                            chapter_text_parts.append("\n\n")
+                            current_paragraph = segment.paragraph
+                        else:
+                            # Add sentence break (single space)
+                            chapter_text_parts.append(" ")
 
-                        if self._cancelled:
-                            break
+                        chapter_text_parts.append(segment.text)
 
+                    full_chapter_text = "".join(chapter_text_parts)
+
+                    # Single call to pykokoro for entire chapter
+                    assert self._kokoro is not None
+                    samples, sample_rate = self._kokoro.create(
+                        full_chapter_text,
+                        voice=self._voice_style
+                        if self._voice_style is not None
+                        else self.options.voice,
+                        speed=self.options.speed,
+                        lang=lang_code,
+                        split_mode="paragraph",  # Let pykokoro handle segmentation
+                        trim_silence=self.options.trim_silence,
+                        pause_clause=self.options.pause_clause,
+                        pause_sentence=self.options.pause_sentence,
+                        pause_paragraph=self.options.pause_paragraph,
+                        pause_variance=self.options.pause_variance,
+                    )
+
+                    if not self._cancelled:
                         # Write audio
                         self._write_audio_chunk(samples, out_file, ffmpeg_proc)
-
                         # Update timing
                         chunk_duration = len(samples) / SAMPLE_RATE
                         current_time += chunk_duration
 
-                        # Add pause between segments (not after the last segment)
-                        # Longer pause for paragraph boundaries, shorter for sentences
-                        if seg_idx < total_segments - 1:
-                            next_segment = segments[seg_idx + 1]
-                            if next_segment.paragraph != segment.paragraph:
-                                # Paragraph change - use longer pause
-                                pause_audio = self._generate_paragraph_pause()
-                            else:
-                                # Same paragraph - use shorter sentence pause
-                                pause_audio = self._generate_segment_pause()
-                            if len(pause_audio) > 0:
-                                self._write_audio_chunk(
-                                    pause_audio, out_file, ffmpeg_proc
-                                )
-                                current_time += len(pause_audio) / SAMPLE_RATE
-
                         # Update progress
-                        grapheme_len = len(segment.text)
-                        chars_processed += grapheme_len
+                        chars_processed += sum(len(seg.text) for seg in segments)
                         progress.chars_processed = chars_processed
-                        progress.current_text = segment.text[:100]
+                        progress.current_text = (
+                            f"Completed chapter with {len(segments)} segments"
+                        )
 
                         elapsed = time.time() - start_time
                         if chars_processed > 0 and elapsed > 0.5:
@@ -1441,48 +1443,36 @@ class TTSConverter:
                         if self.progress_callback:
                             self.progress_callback(progress)
                 else:
-                    # Use chunk-based generation for progress tracking
+                    # Non-phrasplit mode: use pykokoro's built-in segmentation
                     assert self._kokoro is not None
-                    # Collect chunks to know total count for proper pause insertion
-                    chunks_data = list(
-                        self._kokoro.generate_chunks(
-                            chapter.content,
-                            voice=self._voice_style
-                            if self._voice_style is not None
-                            else self.options.voice,
-                            speed=self.options.speed,
-                            lang=lang_code,
-                        )
+                    samples, sample_rate = self._kokoro.create(
+                        chapter.content,
+                        voice=self._voice_style
+                        if self._voice_style is not None
+                        else self.options.voice,
+                        speed=self.options.speed,
+                        lang=lang_code,
+                        split_mode="sentence",  # Let pykokoro handle segmentation
+                        trim_silence=self.options.trim_silence,
+                        pause_clause=self.options.pause_clause,
+                        pause_sentence=self.options.pause_sentence,
+                        pause_paragraph=self.options.pause_paragraph,
+                        pause_variance=self.options.pause_variance,
                     )
-                    total_chunks = len(chunks_data)
 
-                    for chunk_idx, (samples, _sample_rate, chunk) in enumerate(
-                        chunks_data
-                    ):
-                        if self._cancelled:
-                            break
-
+                    if not self._cancelled:
                         # Write audio
                         self._write_audio_chunk(samples, out_file, ffmpeg_proc)
-
                         # Update timing
                         chunk_duration = len(samples) / SAMPLE_RATE
                         current_time += chunk_duration
 
-                        # Add random pause between chunks (not after the last chunk)
-                        if chunk_idx < total_chunks - 1:
-                            pause_audio = self._generate_segment_pause()
-                            if len(pause_audio) > 0:
-                                self._write_audio_chunk(
-                                    pause_audio, out_file, ffmpeg_proc
-                                )
-                                current_time += len(pause_audio) / SAMPLE_RATE
-
                         # Update progress
-                        grapheme_len = len(chunk)
-                        chars_processed += grapheme_len
+                        chars_processed += len(chapter.content)
                         progress.chars_processed = chars_processed
-                        progress.current_text = chunk[:100]
+                        progress.current_text = (
+                            f"Completed chapter: {chapter.title or 'Untitled'}"
+                        )
 
                         elapsed = time.time() - start_time
                         if chars_processed > 0 and elapsed > 0.5:

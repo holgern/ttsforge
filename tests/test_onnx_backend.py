@@ -5,15 +5,17 @@ from pathlib import Path
 from pykokoro import VoiceBlend
 from pykokoro.onnx_backend import (
     DEFAULT_MODEL_QUALITY,
-    HF_REPO_ID,
+    HF_REPO_V1_0,
     LANG_CODE_TO_ONNX,
     MODEL_QUALITY_FILES,
-    VOICE_NAMES,
+    MODEL_QUALITY_FILES_HF,
     get_model_dir,
-    get_model_filename,
     get_model_path,
     get_onnx_lang_code,
     is_model_downloaded,
+)
+from pykokoro.onnx_backend import (
+    VOICE_NAMES_V1_0 as VOICE_NAMES,
 )
 from pykokoro.tokenizer import MAX_PHONEME_LENGTH
 
@@ -81,8 +83,8 @@ class TestModelPaths:
 
     def test_huggingface_repo_id_valid(self):
         """Should have valid HuggingFace repo ID."""
-        assert "/" in HF_REPO_ID  # Should be format: org/repo
-        assert "Kokoro" in HF_REPO_ID or "kokoro" in HF_REPO_ID.lower()
+        assert "/" in HF_REPO_V1_0  # Should be format: org/repo
+        assert "Kokoro" in HF_REPO_V1_0 or "kokoro" in HF_REPO_V1_0.lower()
 
     def test_get_model_dir_returns_path(self):
         """Should return a Path object."""
@@ -91,21 +93,22 @@ class TestModelPaths:
 
     def test_get_model_path_returns_full_path(self):
         """Should return full path to model file for given quality."""
+        # Use default source and variant for testing
         path = get_model_path("fp32")
         assert isinstance(path, Path)
-        assert path.name == "model.onnx"
-        assert get_model_dir() in path.parents or path.parent == get_model_dir()
+        # The actual filename includes subdirectory for HuggingFace
+        assert "model.onnx" in str(path)
 
     def test_get_model_path_q8(self):
         """Should return correct path for q8 quality."""
         path = get_model_path("q8")
-        assert path.name == "model_quantized.onnx"
+        assert "model_quantized.onnx" in str(path)
 
     def test_get_model_filename(self):
         """Should return correct filename for each quality."""
-        assert get_model_filename("fp32") == "model.onnx"
-        assert get_model_filename("fp16") == "model_fp16.onnx"
-        assert get_model_filename("q8") == "model_quantized.onnx"
+        assert MODEL_QUALITY_FILES_HF["fp32"] == "model.onnx"
+        assert MODEL_QUALITY_FILES_HF["fp16"] == "model_fp16.onnx"
+        assert MODEL_QUALITY_FILES_HF["q8"] == "model_quantized.onnx"
 
     def test_is_model_downloaded_false_for_missing_file(self):
         """Should return False when model file doesn't exist."""

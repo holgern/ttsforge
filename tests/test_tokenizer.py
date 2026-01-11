@@ -1,17 +1,17 @@
 """Tests for pykokoro.tokenizer module (via ttsforge imports)."""
 
 import pytest
-
 from pykokoro import Tokenizer
 from pykokoro.tokenizer import (
-    EspeakConfig,
     MAX_PHONEME_LENGTH,
-    PhonemeResult,
     SAMPLE_RATE,
     SUPPORTED_LANGUAGES,
+    EspeakConfig,
+    PhonemeResult,
     TokenizerConfig,
     create_tokenizer,
 )
+
 from ttsforge.vocab import DEFAULT_VERSION, get_vocab_info, list_versions, load_vocab
 
 
@@ -402,9 +402,9 @@ class TestKokorog2pIntegration:
             if token.text.lower() in ["hello", "world"]:
                 rating = token.get("rating")
                 # Rating 3-4 = dictionary, 1 = espeak
-                assert rating is None or rating >= 3, (
-                    f"Expected {token.text} to use dictionary"
-                )
+                assert (
+                    rating is None or rating >= 3
+                ), f"Expected {token.text} to use dictionary"
 
     def test_unknown_word_handling(self, tokenizer):
         """Test that unknown words are handled via espeak fallback."""
