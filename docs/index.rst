@@ -11,6 +11,7 @@ Kokoro ONNX TTS (Text-to-Speech).
    installation
    quickstart
    cli
+   ssmd
    configuration
    filename_templates
    voices
@@ -27,6 +28,7 @@ Features
 
 - **EPUB to Audiobook Conversion**: Convert EPUB files to M4B, MP3, WAV, FLAC, or OPUS formats
 - **50+ High-Quality Voices**: Support for 9 languages with multiple voice options
+- **SSMD Editing**: Edit intermediate SSMD files to fine-tune pronunciation and pacing
 - **Resumable Conversions**: Long audiobook conversions can be interrupted and resumed
 - **Phoneme Pre-tokenization**: Pre-process text to phonemes for faster batch conversions
 - **Configurable Filename Templates**: Customize output filenames with book metadata

@@ -22,6 +22,13 @@ from .constants import (
     SUPPORTED_OUTPUT_FORMATS,
     VOICE_PREFIX_TO_LANG,
 )
+from .ssmd_generator import (
+    SSMDGenerationError,
+    chapter_to_ssmd,
+    load_ssmd_file,
+    save_ssmd_file,
+    validate_ssmd,
+)
 from .utils import (
     create_process,
     ensure_ffmpeg,
@@ -103,6 +110,8 @@ class ChapterState:
     audio_file: Optional[str] = None  # Relative path to chapter audio
     duration: float = 0.0  # Duration in seconds
     char_count: int = 0
+    ssmd_file: Optional[str] = None  # Relative path to SSMD file
+    ssmd_hash: Optional[str] = None  # Hash of SSMD content for change detection
 
 
 @dataclass
@@ -208,6 +217,8 @@ class ConversionState:
                     "audio_file": ch.audio_file,
                     "duration": ch.duration,
                     "char_count": ch.char_count,
+                    "ssmd_file": ch.ssmd_file,
+                    "ssmd_hash": ch.ssmd_hash,
                 }
                 for ch in self.chapters
             ],
@@ -708,26 +719,29 @@ class TTSConverter:
         self,
         chapter: Chapter,
         output_file: Path,
+        ssmd_file: Optional[Path] = None,
+        html_content: Optional[str] = None,
         progress: Optional[ConversionProgress] = None,
         start_time: Optional[float] = None,
         total_chars: int = 0,
         chars_before: int = 0,
-    ) -> tuple[float, int]:
+    ) -> tuple[float, int, str]:
         """
-        Convert a single chapter to a WAV file.
+        Convert a single chapter to a WAV file using SSMD intermediate format.
 
         Args:
             chapter: Chapter to convert
             output_file: Output WAV file path
+            ssmd_file: Optional path to SSMD file (if None, will be generated)
+            html_content: Optional HTML content for emphasis detection
             progress: Optional progress object to update
             start_time: Conversion start time for ETA calculation
             total_chars: Total characters in conversion
             chars_before: Characters processed before this chapter
 
         Returns:
-            Tuple of (duration in seconds, characters processed)
+            Tuple of (duration in seconds, characters processed, SSMD hash)
         """
-        use_phrasplit = self._use_phrasplit_mode()
         chars_processed = 0
 
         # Get language code for ONNX
@@ -736,6 +750,91 @@ class TTSConverter:
             self.options.lang if self.options.lang else self.options.language
         )
         lang_code = get_onnx_lang_code(effective_lang)
+
+        # Generate or load SSMD content
+        ssmd_content = None
+        ssmd_hash = None
+
+        if ssmd_file and ssmd_file.exists():
+            # Load existing SSMD file
+            try:
+                ssmd_content, ssmd_hash = load_ssmd_file(ssmd_file)
+                self.log(f"Loaded SSMD from {ssmd_file.name}")
+
+                # Validate SSMD content
+                warnings = validate_ssmd(ssmd_content)
+                if warnings:
+                    for warning in warnings:
+                        self.log(f"SSMD warning: {warning}", "warning")
+            except SSMDGenerationError as e:
+                self.log(f"Failed to load SSMD: {e}, regenerating...", "warning")
+                ssmd_content = None
+
+        if ssmd_content is None:
+            # Generate SSMD from chapter
+            self.log(f"Generating SSMD for chapter: {chapter.title}")
+
+            # Prepare phoneme dictionary if available
+            phoneme_dict = None
+            if self.options.phoneme_dictionary_path:
+                try:
+                    import json
+
+                    with open(
+                        self.options.phoneme_dictionary_path, "r", encoding="utf-8"
+                    ) as f:
+                        phoneme_data = json.load(f)
+                        # Handle both simple dict and metadata format
+                        if "entries" in phoneme_data:
+                            phoneme_dict = {
+                                word: entry["phoneme"]
+                                if isinstance(entry, dict)
+                                else entry
+                                for word, entry in phoneme_data["entries"].items()
+                            }
+                        else:
+                            phoneme_dict = phoneme_data
+                except Exception as e:
+                    self.log(f"Failed to load phoneme dictionary: {e}", "warning")
+
+            # Prepare mixed-language config
+            mixed_language_config = None
+            if self.options.use_mixed_language:
+                mixed_language_config = {
+                    "use_mixed_language": True,
+                    "primary": self.options.mixed_language_primary,
+                    "allowed": self.options.mixed_language_allowed,
+                    "confidence": self.options.mixed_language_confidence,
+                }
+
+            try:
+                ssmd_content = chapter_to_ssmd(
+                    chapter_title=chapter.title,
+                    chapter_text=chapter.content,
+                    phoneme_dict=phoneme_dict,
+                    phoneme_dict_case_sensitive=self.options.phoneme_dict_case_sensitive,
+                    mixed_language_config=mixed_language_config,
+                    html_content=html_content,
+                    include_title=self.options.announce_chapters,
+                )
+
+                # Save SSMD file if path provided
+                if ssmd_file:
+                    ssmd_hash = save_ssmd_file(ssmd_content, ssmd_file)
+                    self.log(f"Saved SSMD to {ssmd_file.name}")
+                else:
+                    # Generate hash even if not saving
+                    import hashlib
+
+                    ssmd_hash = hashlib.md5(ssmd_content.encode("utf-8")).hexdigest()[
+                        :12
+                    ]
+
+            except SSMDGenerationError as e:
+                # Fall back to plain text if SSMD generation fails
+                self.log(f"SSMD generation failed: {e}, using plain text", "error")
+                ssmd_content = chapter.content
+                ssmd_hash = ""
 
         # Open WAV file for writing
         with sf.SoundFile(
@@ -747,131 +846,47 @@ class TTSConverter:
         ) as out_file:
             duration = 0.0
 
-            # Announce chapter title if enabled
-            if self.options.announce_chapters and chapter.title:
-                # Format: "Chapter N. Title"
-                if chapter.title:
-                    announcement_text = f"{chapter.title}"
-                else:
-                    announcement_text = f"Chapter {chapter.index + 1}"
-                assert self._kokoro is not None
-                title_samples, _ = self._kokoro.create(
-                    announcement_text,
-                    voice=self._voice_style
-                    if self._voice_style is not None
-                    else self.options.voice,
-                    speed=self.options.speed,
-                    lang=lang_code,
+            # Convert SSMD to audio using pykokoro
+            # pykokoro automatically detects and processes SSMD markup
+            assert self._kokoro is not None
+            assert ssmd_content is not None
+
+            samples, sample_rate = self._kokoro.create(
+                ssmd_content,
+                voice=self._voice_style
+                if self._voice_style is not None
+                else self.options.voice,
+                speed=self.options.speed,
+                lang=lang_code,
+                # SSMD already has breaks, but let pykokoro handle additional processing
+                split_mode="paragraph",
+                trim_silence=self.options.trim_silence,
+                pause_clause=self.options.pause_clause,
+                pause_sentence=self.options.pause_sentence,
+                pause_paragraph=self.options.pause_paragraph,
+                pause_variance=self.options.pause_variance,
+            )
+
+            out_file.write(samples)
+            duration += len(samples) / SAMPLE_RATE
+
+            # Update progress once for entire chapter
+            chars_processed = len(chapter.content)
+            if progress and self.progress_callback:
+                progress.chars_processed = chars_before + chars_processed
+                progress.current_text = (
+                    f"Completed chapter: {chapter.title or 'Untitled'}"
                 )
-                out_file.write(title_samples)
-                duration += len(title_samples) / SAMPLE_RATE
+                if start_time and total_chars > 0:
+                    elapsed = time.time() - start_time
+                    if chars_processed > 0 and elapsed > 0.5:
+                        avg_time = elapsed / chars_processed
+                        remaining = total_chars - progress.chars_processed
+                        progress.estimated_remaining = avg_time * remaining
+                    progress.elapsed_time = elapsed
+                self.progress_callback(progress)
 
-                # Add pause after chapter title
-                pause_duration = self.options.chapter_pause_after_title
-                if pause_duration > 0:
-                    pause_samples = int(pause_duration * SAMPLE_RATE)
-                    pause_audio = self._np.zeros(pause_samples, dtype="float32")
-                    out_file.write(pause_audio)
-                    duration += pause_duration
-
-            if use_phrasplit:
-                segments = self._split_text_with_phrasplit(chapter.content)
-                # Filter out empty segments first
-                segments = [s for s in segments if s.text.strip()]
-
-                # Combine all segment texts into full chapter text
-                # Preserve paragraph structure for pykokoro's split_mode
-                chapter_text_parts = []
-                current_paragraph = None
-
-                for segment in segments:
-                    if current_paragraph is None:
-                        current_paragraph = segment.paragraph
-                    elif segment.paragraph != current_paragraph:
-                        # Add paragraph break (double newline)
-                        chapter_text_parts.append("\n\n")
-                        current_paragraph = segment.paragraph
-                    else:
-                        # Add sentence break (single space or newline)
-                        chapter_text_parts.append(" ")
-
-                    chapter_text_parts.append(segment.text)
-
-                full_chapter_text = "".join(chapter_text_parts)
-
-                # Single call to pykokoro for entire chapter
-                assert self._kokoro is not None
-                samples, sample_rate = self._kokoro.create(
-                    full_chapter_text,
-                    voice=self._voice_style
-                    if self._voice_style is not None
-                    else self.options.voice,
-                    speed=self.options.speed,
-                    lang=lang_code,
-                    split_mode="paragraph",  # Let pykokoro handle segmentation
-                    trim_silence=self.options.trim_silence,
-                    pause_clause=self.options.pause_clause,
-                    pause_sentence=self.options.pause_sentence,
-                    pause_paragraph=self.options.pause_paragraph,
-                    pause_variance=self.options.pause_variance,
-                )
-
-                out_file.write(samples)
-                duration += len(samples) / SAMPLE_RATE
-
-                # Update progress once for entire chapter
-                chars_processed = sum(len(seg.text) for seg in segments)
-                if progress and self.progress_callback:
-                    progress.chars_processed = chars_before + chars_processed
-                    progress.current_text = (
-                        f"Completed chapter with {len(segments)} segments"
-                    )
-                    if start_time and total_chars > 0:
-                        elapsed = time.time() - start_time
-                        if chars_processed > 0 and elapsed > 0.5:
-                            avg_time = elapsed / chars_processed
-                            remaining = total_chars - progress.chars_processed
-                            progress.estimated_remaining = avg_time * remaining
-                        progress.elapsed_time = elapsed
-                    self.progress_callback(progress)
-            else:
-                # Non-phrasplit mode: use pykokoro's built-in segmentation
-                assert self._kokoro is not None
-                samples, sample_rate = self._kokoro.create(
-                    chapter.content,
-                    voice=self._voice_style
-                    if self._voice_style is not None
-                    else self.options.voice,
-                    speed=self.options.speed,
-                    lang=lang_code,
-                    split_mode="sentence",  # Let pykokoro handle segmentation
-                    trim_silence=self.options.trim_silence,
-                    pause_clause=self.options.pause_clause,
-                    pause_sentence=self.options.pause_sentence,
-                    pause_paragraph=self.options.pause_paragraph,
-                    pause_variance=self.options.pause_variance,
-                )
-
-                out_file.write(samples)
-                duration += len(samples) / SAMPLE_RATE
-
-                # Update progress once for entire chapter
-                chars_processed = len(chapter.content)
-                if progress and self.progress_callback:
-                    progress.chars_processed = chars_before + chars_processed
-                    progress.current_text = (
-                        f"Completed chapter: {chapter.title or 'Untitled'}"
-                    )
-                    if start_time and total_chars > 0:
-                        elapsed = time.time() - start_time
-                        if chars_processed > 0 and elapsed > 0.5:
-                            avg_time = elapsed / chars_processed
-                            remaining = total_chars - progress.chars_processed
-                            progress.estimated_remaining = avg_time * remaining
-                        progress.elapsed_time = elapsed
-                    self.progress_callback(progress)
-
-        return duration, chars_processed
+        return duration, chars_processed, ssmd_hash or ""
 
     def _merge_chapter_files(
         self,
@@ -1195,8 +1210,32 @@ class TTSConverter:
 
                 chapter_state = state.chapters[chapter_idx]
 
-                # Skip already completed chapters
-                if chapter_state.completed and chapter_state.audio_file:
+                # Check if SSMD file was manually edited
+                ssmd_edited = False
+                if chapter_state.ssmd_file and chapter_state.ssmd_hash:
+                    ssmd_path = work_dir / chapter_state.ssmd_file
+                    if ssmd_path.exists():
+                        try:
+                            _, current_hash = load_ssmd_file(ssmd_path)
+                            if current_hash != chapter_state.ssmd_hash:
+                                self.log(
+                                    f"Chapter {chapter_idx + 1} SSMD file was edited, "
+                                    "will regenerate audio",
+                                    "info",
+                                )
+                                ssmd_edited = True
+                                chapter_state.completed = False
+                        except SSMDGenerationError:
+                            # SSMD file corrupted, will regenerate
+                            ssmd_edited = True
+                            chapter_state.completed = False
+
+                # Skip already completed chapters (unless SSMD was edited)
+                if (
+                    chapter_state.completed
+                    and chapter_state.audio_file
+                    and not ssmd_edited
+                ):
                     chapter_file = work_dir / chapter_state.audio_file
                     if chapter_file.exists():
                         ch_num = chapter_idx + 1
@@ -1228,10 +1267,16 @@ class TTSConverter:
                 )
                 chapter_file = work_dir / chapter_filename
 
-                # Convert chapter to WAV
-                duration, _ = self._convert_single_chapter_to_wav(
+                # Generate SSMD filename (same as WAV but with .ssmd extension)
+                ssmd_filename = chapter_filename.replace(".wav", ".ssmd")
+                ssmd_file = work_dir / ssmd_filename
+
+                # Convert chapter to WAV using SSMD intermediate format
+                duration, _, ssmd_hash = self._convert_single_chapter_to_wav(
                     chapter,
                     chapter_file,
+                    ssmd_file=ssmd_file,
+                    html_content=None,  # TODO: Get HTML from input_reader
                     progress=progress,
                     start_time=start_time,
                     total_chars=total_chars,
@@ -1239,8 +1284,9 @@ class TTSConverter:
                 )
 
                 if self._cancelled:
-                    # Remove incomplete file
+                    # Remove incomplete files
                     chapter_file.unlink(missing_ok=True)
+                    ssmd_file.unlink(missing_ok=True)
                     state.save(state_file)
                     return ConversionResult(
                         success=False,
@@ -1251,6 +1297,8 @@ class TTSConverter:
                 # Update state
                 chapter_state.completed = True
                 chapter_state.audio_file = chapter_filename
+                chapter_state.ssmd_file = ssmd_filename
+                chapter_state.ssmd_hash = ssmd_hash
                 chapter_state.duration = duration
                 state.save(state_file)
 

@@ -115,6 +115,19 @@ class InputReader:
 
         return self._chapters
 
+    def get_chapters_with_html(self) -> list[tuple[Chapter, Optional[str]]]:
+        """Extract chapters with their original HTML content for markup detection.
+
+        Returns:
+            List of tuples containing (Chapter, html_content or None)
+        """
+        if self.file_type == "epub":
+            return self._get_epub_chapters_with_html()
+        else:
+            # For non-EPUB files, HTML content is not available
+            chapters = self.get_chapters()
+            return [(ch, None) for ch in chapters]
+
     # EPUB methods
     def _get_epub_metadata(self) -> Metadata:
         """Extract metadata from EPUB file."""
@@ -160,6 +173,38 @@ class InputReader:
             chapters.append(Chapter(title=ch.title, text=content, index=i))
 
         return chapters
+
+    def _get_epub_chapters_with_html(self) -> list[tuple[Chapter, Optional[str]]]:
+        """Extract chapters from EPUB with HTML content preserved."""
+        try:
+            from epub2text import EPUBParser
+        except ImportError:
+            raise ImportError(
+                "epub2text is required for EPUB support. "
+                "Install with: pip install epub2text"
+            )
+
+        parser = EPUBParser(str(self.file_path))
+        epub_chapters = parser.get_chapters()
+
+        # Convert to our Chapter format with HTML
+        chapters_with_html = []
+        for i, ch in enumerate(epub_chapters):
+            # Remove <<CHAPTER: ...>> markers from plain text
+            content = re.sub(
+                r"^\s*<<CHAPTER:[^>]*>>\s*\n*", "", ch.text, count=1, flags=re.MULTILINE
+            )
+            chapter = Chapter(title=ch.title, text=content, index=i)
+
+            # Try to get HTML content
+            # epub2text may have an html attribute or we need to extract it
+            html_content = getattr(ch, "html", None)
+            if html_content is None and hasattr(ch, "content"):
+                html_content = ch.content
+
+            chapters_with_html.append((chapter, html_content))
+
+        return chapters_with_html
 
     # Gutenberg TXT methods
     def _get_gutenberg_metadata(self) -> Metadata:

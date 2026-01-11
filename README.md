@@ -9,6 +9,7 @@ with support for 54 neural voices across 9 languages.
 
 - **EPUB to Audiobook**: Convert EPUB files to M4B, MP3, WAV, FLAC, or OPUS
 - **54 Neural Voices**: High-quality TTS in 9 languages
+- **SSMD Editing**: Edit intermediate SSMD files to fine-tune pronunciation and pacing
 - **Custom Phoneme Dictionary**: Control pronunciation of names and technical terms
 - **Auto Name Extraction**: Automatically extract names from books for phoneme
   customization
@@ -250,6 +251,96 @@ pip install lingua-language-detector
 
 Supported languages: `en-us`, `en-gb`, `de`, `fr-fr`, `es`, `it`, `pt`, `pl`, `tr`,
 `ru`, `ko`, `ja`, `zh`/`cmn`
+
+### SSMD Editing
+
+ttsforge uses SSMD (Speech Synthesis Markdown) as an intermediate format between your
+EPUB and the final audio. This allows you to fine-tune pronunciation, pacing, and
+emphasis before conversion.
+
+#### How It Works
+
+During conversion, ttsforge automatically generates `.ssmd` files for each chapter:
+
+```
+.{book_title}_chapters/
+├── chapter_001_intro.ssmd      # Editable text with speech markup
+├── chapter_001_intro.wav
+├── chapter_002_chapter1.ssmd
+├── chapter_002_chapter1.wav
+```
+
+When you resume a conversion, ttsforge detects if you've edited any SSMD files and
+automatically regenerates the audio.
+
+#### Basic Workflow
+
+```bash
+# 1. Start conversion
+ttsforge convert book.epub
+
+# 2. Pause conversion (Ctrl+C)
+
+# 3. Edit SSMD files to fix pronunciation or pacing
+vim .book_chapters/chapter_001_intro.ssmd
+
+# 4. Resume - automatically detects edits and regenerates audio
+ttsforge convert book.epub
+```
+
+#### SSMD Syntax
+
+SSMD files use a simple markdown-like syntax:
+
+**Structural Breaks** (control pauses):
+
+```
+...p    # Paragraph break (0.5-1.0s pause)
+...s    # Sentence break (0.1-0.3s pause)
+...c    # Clause break (shorter pause)
+```
+
+**Emphasis**:
+
+```
+*text*      # Moderate emphasis
+**text**    # Strong emphasis
+```
+
+**Custom Phonemes**:
+
+```
+[Hermione](ph: /hɝmˈIni/)    # Override pronunciation
+[API](ph: /ˌeɪpiˈaɪ/)        # Technical terms
+```
+
+**Language Switching** (planned):
+
+```
+[Bonjour](fr)    # Mark text as French
+```
+
+#### Example SSMD File
+
+```ssmd
+Chapter One ...p
+
+[Harry](ph: /hæɹi/) Potter was a *highly unusual* boy in many ways. ...s
+For one thing, he **hated** the summer holidays more than any other
+time of year. ...s For another, he really wanted to do his homework,
+but was forced to do it in secret, in the dead of the night. ...p
+
+And he also happened to be a wizard. ...p
+```
+
+#### When to Use SSMD Editing
+
+- **Pronunciation issues**: Character names, technical terms, foreign words
+- **Pacing problems**: Adjust paragraph and sentence breaks
+- **Emphasis corrections**: Add or remove emphasis on specific words
+- **Combine with phoneme dictionary**: Phoneme dictionary applied automatically to SSMD
+
+For detailed SSMD syntax and examples, see [SSMD_QUICKSTART.md](SSMD_QUICKSTART.md).
 
 ### Custom Phoneme Dictionary
 

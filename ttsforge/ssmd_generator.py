@@ -1,0 +1,363 @@
+"""SSMD (Speech Synthesis Markdown) generator for ttsforge.
+
+This module converts chapter text to SSMD format with markup for:
+- Paragraph breaks (...p)
+- Sentence breaks (...s)
+- Emphasis (*text* for moderate, **text** for strong)
+- Language switches ([text](lang_code))
+- Phoneme substitutions ([word](ph: /phoneme/))
+- Clause breaks (...c)
+"""
+
+from __future__ import annotations
+
+import hashlib
+import re
+from pathlib import Path
+from typing import Optional
+
+
+class SSMDGenerationError(Exception):
+    """Exception raised when SSMD generation fails."""
+
+    pass
+
+
+def _hash_content(content: str) -> str:
+    """Generate a hash of content for change detection.
+
+    Args:
+        content: Text content to hash
+
+    Returns:
+        12-character hex hash
+    """
+    return hashlib.md5(content.encode("utf-8")).hexdigest()[:12]
+
+
+def _detect_emphasis_from_html(html_content: str) -> dict[str, str]:
+    """Detect emphasis from HTML tags and map positions to emphasis levels.
+
+    Args:
+        html_content: HTML content with formatting tags
+
+    Returns:
+        Dictionary mapping text positions to emphasis markers
+    """
+    emphasis_map = {}
+
+    # Pattern for <em>, <i> tags (moderate emphasis)
+    em_pattern = r"<(?:em|i)(?:\s[^>]*)?>([^<]+)</(?:em|i)>"
+    for match in re.finditer(em_pattern, html_content, re.IGNORECASE):
+        text = match.group(1)
+        emphasis_map[text] = "*"
+
+    # Pattern for <strong>, <b> tags (strong emphasis)
+    strong_pattern = r"<(?:strong|b)(?:\s[^>]*)?>([^<]+)</(?:strong|b)>"
+    for match in re.finditer(strong_pattern, html_content, re.IGNORECASE):
+        text = match.group(1)
+        emphasis_map[text] = "**"
+
+    return emphasis_map
+
+
+def _apply_emphasis_markers(text: str, emphasis_map: dict[str, str]) -> str:
+    """Apply emphasis markers to text based on emphasis map.
+
+    Args:
+        text: Plain text
+        emphasis_map: Dictionary mapping text segments to emphasis markers
+
+    Returns:
+        Text with emphasis markers applied
+    """
+    result = text
+    # Sort by length (longest first) to avoid partial replacements
+    for emphasized_text in sorted(emphasis_map.keys(), key=len, reverse=True):
+        marker = emphasis_map[emphasized_text]
+        # Use word boundaries to avoid partial matches
+        pattern = rf"\b{re.escape(emphasized_text)}\b"
+        replacement = f"{marker}{emphasized_text}{marker}"
+        result = re.sub(pattern, replacement, result, count=1)
+
+    return result
+
+
+def _inject_phoneme_substitutions(
+    text: str, phoneme_dict: dict[str, str], case_sensitive: bool = False
+) -> str:
+    """Inject phoneme substitutions into text using SSMD [word](ph: /phoneme/) syntax.
+
+    Args:
+        text: Text to process
+        phoneme_dict: Dictionary mapping words to IPA phonemes
+        case_sensitive: Whether to match case-sensitively
+
+    Returns:
+        Text with phoneme substitutions injected
+    """
+    result = text
+
+    # Sort by length (longest first) to handle multi-word entries
+    for word in sorted(phoneme_dict.keys(), key=len, reverse=True):
+        phoneme = phoneme_dict[word]
+
+        # Build regex pattern with word boundaries
+        if case_sensitive:
+            pattern = rf"\b({re.escape(word)})\b"
+        else:
+            pattern = rf"\b({re.escape(word)})\b"
+
+        # Replacement with SSMD phoneme syntax
+        # Preserve the original case of the matched word
+        def replacement(match):
+            matched_word = match.group(1)
+            # Remove slashes if present in phoneme dictionary
+            clean_phoneme = phoneme.strip("/")
+            return f"[{matched_word}](ph: /{clean_phoneme}/)"
+
+        flags = 0 if case_sensitive else re.IGNORECASE
+        result = re.sub(pattern, replacement, result, flags=flags)
+
+    return result
+
+
+def _add_language_markers(
+    text: str, mixed_language_config: Optional[dict] = None
+) -> str:
+    """Add language markers for mixed-language segments.
+
+    Note: This is a placeholder for now. Full implementation would require
+    language detection library (lingua-language-detector).
+
+    Args:
+        text: Text to process
+        mixed_language_config: Configuration for mixed-language mode
+
+    Returns:
+        Text with language markers (currently returns text unchanged)
+    """
+    # TODO: Implement language detection and wrapping
+    # For now, return text unchanged
+    # Future: Use lingua-language-detector to identify foreign segments
+    # and wrap them with [segment](lang_code)
+    return text
+
+
+def _add_structural_breaks(text: str) -> str:
+    """Add SSMD break markers for paragraphs, sentences, and clauses.
+
+    Args:
+        text: Plain text to process
+
+    Returns:
+        Text with SSMD break markers inserted
+    """
+    # Split into paragraphs (double newline or single newline)
+    paragraphs = re.split(r"\n\s*\n+", text)
+    result_paragraphs = []
+
+    for para in paragraphs:
+        if not para.strip():
+            continue
+
+        # Clean up the paragraph
+        para = para.strip()
+
+        # Split into sentences (basic sentence detection)
+        # This is a simple approach - more sophisticated sentence splitting
+        # could use libraries like nltk or spacy
+        sentences = re.split(r"([.!?]+(?:\s+|$))", para)
+
+        # Reconstruct with sentence breaks
+        result_sentences = []
+        i = 0
+        while i < len(sentences):
+            sentence = sentences[i].strip()
+            if not sentence:
+                i += 1
+                continue
+
+            # Check if next element is punctuation
+            if i + 1 < len(sentences) and re.match(
+                r"^[.!?]+$", sentences[i + 1].strip()
+            ):
+                sentence = sentence + sentences[i + 1]
+                i += 2
+            else:
+                i += 1
+
+            # Add clause breaks for commas (basic approach)
+            sentence = re.sub(r",(\s+)", r",...c\1", sentence)
+
+            result_sentences.append(sentence)
+
+        # Join sentences with sentence breaks
+        para_with_breaks = "...s ".join(result_sentences)
+
+        # Clean up any double breaks
+        para_with_breaks = re.sub(r"(\.\.\.s\s*)+", "...s ", para_with_breaks)
+        para_with_breaks = re.sub(r"(\.\.\.c\s*)+", "...c ", para_with_breaks)
+
+        result_paragraphs.append(para_with_breaks)
+
+    # Join paragraphs with paragraph breaks
+    result = "...p\n\n".join(result_paragraphs)
+
+    # Add final paragraph break
+    if result and not result.endswith("...p"):
+        result += "...p"
+
+    return result
+
+
+def chapter_to_ssmd(
+    chapter_title: str,
+    chapter_text: str,
+    phoneme_dict: Optional[dict[str, str]] = None,
+    phoneme_dict_case_sensitive: bool = False,
+    mixed_language_config: Optional[dict] = None,
+    html_content: Optional[str] = None,
+    include_title: bool = True,
+) -> str:
+    """Convert a chapter to SSMD format.
+
+    Args:
+        chapter_title: Title of the chapter
+        chapter_text: Plain text content of the chapter
+        phoneme_dict: Optional dictionary mapping words to IPA phonemes
+        phoneme_dict_case_sensitive: Whether phoneme matching is case-sensitive
+        mixed_language_config: Optional config for mixed-language mode
+        html_content: Optional HTML content for emphasis detection
+        include_title: Whether to include chapter title in SSMD
+
+    Returns:
+        SSMD formatted text
+
+    Raises:
+        SSMDGenerationError: If generation fails
+    """
+    try:
+        result = chapter_text
+
+        # Step 1: Detect emphasis from HTML if available
+        emphasis_map = {}
+        if html_content:
+            emphasis_map = _detect_emphasis_from_html(html_content)
+
+        # Step 2: Apply emphasis markers
+        if emphasis_map:
+            result = _apply_emphasis_markers(result, emphasis_map)
+
+        # Step 3: Inject phoneme substitutions
+        if phoneme_dict:
+            result = _inject_phoneme_substitutions(
+                result, phoneme_dict, phoneme_dict_case_sensitive
+            )
+
+        # Step 4: Add language markers (if mixed-language mode)
+        if mixed_language_config and mixed_language_config.get("use_mixed_language"):
+            result = _add_language_markers(result, mixed_language_config)
+
+        # Step 5: Add structural breaks (paragraphs, sentences, clauses)
+        result = _add_structural_breaks(result)
+
+        # Step 6: Add chapter title if requested
+        if include_title and chapter_title:
+            # Clean title and add as heading
+            clean_title = chapter_title.strip()
+            result = f"# {clean_title}...p\n\n{result}"
+
+        return result
+
+    except Exception as e:
+        raise SSMDGenerationError(
+            f"Failed to generate SSMD for chapter '{chapter_title}': {str(e)}"
+        ) from e
+
+
+def save_ssmd_file(ssmd_content: str, output_path: Path) -> str:
+    """Save SSMD content to a file and return its hash.
+
+    Args:
+        ssmd_content: SSMD formatted text
+        output_path: Path to save the SSMD file
+
+    Returns:
+        Hash of the saved content
+
+    Raises:
+        SSMDGenerationError: If file save fails
+    """
+    try:
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(output_path, "w", encoding="utf-8") as f:
+            f.write(ssmd_content)
+        return _hash_content(ssmd_content)
+    except Exception as e:
+        raise SSMDGenerationError(
+            f"Failed to save SSMD file to {output_path}: {str(e)}"
+        ) from e
+
+
+def load_ssmd_file(ssmd_path: Path) -> tuple[str, str]:
+    """Load SSMD file and return content with hash.
+
+    Args:
+        ssmd_path: Path to the SSMD file
+
+    Returns:
+        Tuple of (content, hash)
+
+    Raises:
+        SSMDGenerationError: If file load fails or doesn't exist
+    """
+    try:
+        if not ssmd_path.exists():
+            raise SSMDGenerationError(f"SSMD file not found: {ssmd_path}")
+
+        with open(ssmd_path, "r", encoding="utf-8") as f:
+            content = f.read()
+
+        return content, _hash_content(content)
+    except SSMDGenerationError:
+        raise
+    except Exception as e:
+        raise SSMDGenerationError(
+            f"Failed to load SSMD file from {ssmd_path}: {str(e)}"
+        ) from e
+
+
+def validate_ssmd(ssmd_content: str) -> list[str]:
+    """Validate SSMD content and return list of warnings.
+
+    Args:
+        ssmd_content: SSMD content to validate
+
+    Returns:
+        List of warning messages (empty if valid)
+    """
+    warnings = []
+
+    # Check for common syntax errors
+    # Unmatched emphasis markers
+    if ssmd_content.count("*") % 2 != 0:
+        warnings.append("Unmatched emphasis markers (*) detected")
+
+    # Malformed phoneme syntax
+    phoneme_pattern = r"\[([^\]]+)\]\(ph:\s*([^\)]+)\)"
+    for match in re.finditer(phoneme_pattern, ssmd_content):
+        phoneme = match.group(2).strip()
+        if not phoneme.startswith("/") or not phoneme.endswith("/"):
+            warnings.append(
+                f"Phoneme '{phoneme}' should be wrapped in forward slashes (/phoneme/)"
+            )
+
+    # Malformed language markers
+    lang_pattern = r"\[([^\]]+)\]\(([a-z]{2}(?:-[a-z]{2})?)\)"
+    for match in re.finditer(lang_pattern, ssmd_content):
+        lang_code = match.group(2)
+        if len(lang_code) > 5:  # Basic validation
+            warnings.append(f"Suspicious language code: {lang_code}")
+
+    return warnings

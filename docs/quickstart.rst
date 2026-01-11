@@ -247,6 +247,56 @@ ttsforge can automatically detect and handle different languages:
    ttsforge config --set mixed_language_confidence 0.7
 
 
+SSMD Editing
+------------
+
+ttsforge uses SSMD (Speech Synthesis Markdown) as an intermediate format between
+EPUB and audio. This allows you to fine-tune pronunciation and pacing.
+
+During conversion, ``.ssmd`` files are automatically generated for each chapter:
+
+.. code-block:: text
+
+   .{book_title}_chapters/
+   ├── chapter_001_intro.ssmd
+   ├── chapter_001_intro.wav
+   └── ...
+
+**Basic workflow**:
+
+.. code-block:: bash
+
+   # 1. Start conversion
+   ttsforge convert book.epub
+
+   # 2. Pause (Ctrl+C) and edit SSMD files
+   vim .book_chapters/chapter_001_intro.ssmd
+
+   # 3. Resume - auto-detects edits and regenerates audio
+   ttsforge convert book.epub
+
+**Common SSMD syntax**:
+
+.. code-block:: ssmd
+
+   ...p                               # Paragraph break
+   ...s                               # Sentence break
+   *text*                             # Moderate emphasis
+   **text**                           # Strong emphasis
+   [Hermione](ph: /hɝmˈIni/)          # Custom pronunciation
+
+**Example SSMD file**:
+
+.. code-block:: ssmd
+
+   Chapter One ...p
+
+   [Harry](ph: /hæɹi/) Potter was a *highly unusual* boy. ...s
+   He **hated** the summer holidays. ...p
+
+For complete SSMD documentation, see :doc:`ssmd`.
+
+
 Configuration
 -------------
 
@@ -288,6 +338,7 @@ Full conversion with all options:
 Next Steps
 ----------
 
+- :doc:`ssmd` - SSMD editing and syntax reference
 - :doc:`cli` - Complete command reference
 - :doc:`voices` - Detailed voice information
 - :doc:`configuration` - All configuration options
