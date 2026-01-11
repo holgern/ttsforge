@@ -281,7 +281,7 @@ class TestVoiceDatabaseMethods:
 
 
 class TestSplitPhonemes:
-    """Tests for _split_phonemes method - these test internal pykokoro implementation."""
+    """Tests for _split_phonemes - internal pykokoro implementation."""
 
     def test_short_phonemes_no_split(self):
         """Short phonemes should not be split."""

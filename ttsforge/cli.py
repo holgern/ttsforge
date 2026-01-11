@@ -266,6 +266,12 @@ def main(
     help="Enable/disable resume capability (default: enabled).",
 )
 @click.option(
+    "--generate-ssmd",
+    "generate_ssmd_only",
+    is_flag=True,
+    help="Generate only SSMD files without creating audio (for manual editing).",
+)
+@click.option(
     "--fresh",
     is_flag=True,
     help="Discard any previous progress and start conversion from scratch.",
@@ -354,6 +360,7 @@ def convert(
     verbose: bool,
     split_mode: Optional[str],
     resume: bool,
+    generate_ssmd_only: bool,
     fresh: bool,
     keep_chapter_files: bool,
     voice_blend: Optional[str],
@@ -617,6 +624,7 @@ def convert(
         ),
         model_path=model_path,
         voices_path=voices_path,
+        generate_ssmd_only=generate_ssmd_only,
     )
 
     # Set up progress display
@@ -3022,9 +3030,6 @@ def read(
     else:
         effective_split_mode = config_split_mode
     # Pause settings
-    effective_pause_clause = (
-        pause_clause if pause_clause is not None else config.get("pause_clause", 0.25)
-    )
     effective_pause_sentence = (
         pause_sentence
         if pause_sentence is not None
@@ -3039,9 +3044,6 @@ def read(
         pause_variance
         if pause_variance is not None
         else config.get("pause_variance", 0.05)
-    )
-    effective_trim_silence = (
-        trim_silence if trim_silence is not None else config.get("trim_silence", True)
     )
 
     # Get language code for TTS

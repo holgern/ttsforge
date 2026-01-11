@@ -9,18 +9,17 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 
 
 @dataclass
 class Metadata:
     """Book metadata."""
 
-    title: Optional[str] = None
+    title: str | None = None
     authors: list[str] = None
-    language: Optional[str] = None
-    publisher: Optional[str] = None
-    publication_year: Optional[int] = None
+    language: str | None = None
+    publisher: str | None = None
+    publication_year: int | None = None
 
     def __post_init__(self):
         """Initialize authors list if None."""
@@ -52,8 +51,8 @@ class InputReader:
             file_path: Path to the input file (EPUB, TXT, or PDF)
         """
         self.file_path = Path(file_path)
-        self._metadata: Optional[Metadata] = None
-        self._chapters: Optional[list[Chapter]] = None
+        self._metadata: Metadata | None = None
+        self._chapters: list[Chapter] | None = None
 
         if not self.file_path.exists():
             raise FileNotFoundError(f"File not found: {self.file_path}")
@@ -115,7 +114,7 @@ class InputReader:
 
         return self._chapters
 
-    def get_chapters_with_html(self) -> list[tuple[Chapter, Optional[str]]]:
+    def get_chapters_with_html(self) -> list[tuple[Chapter, str | None]]:
         """Extract chapters with their original HTML content for markup detection.
 
         Returns:
@@ -133,11 +132,11 @@ class InputReader:
         """Extract metadata from EPUB file."""
         try:
             from epub2text import EPUBParser
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "epub2text is required for EPUB support. "
                 "Install with: pip install epub2text"
-            )
+            ) from e
 
         parser = EPUBParser(str(self.file_path))
         epub_metadata = parser.get_metadata()
@@ -154,11 +153,11 @@ class InputReader:
         """Extract chapters from EPUB file."""
         try:
             from epub2text import EPUBParser
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "epub2text is required for EPUB support. "
                 "Install with: pip install epub2text"
-            )
+            ) from e
 
         parser = EPUBParser(str(self.file_path))
         epub_chapters = parser.get_chapters()
@@ -174,15 +173,15 @@ class InputReader:
 
         return chapters
 
-    def _get_epub_chapters_with_html(self) -> list[tuple[Chapter, Optional[str]]]:
+    def _get_epub_chapters_with_html(self) -> list[tuple[Chapter, str | None]]:
         """Extract chapters from EPUB with HTML content preserved."""
         try:
             from epub2text import EPUBParser
-        except ImportError:
+        except ImportError as e:
             raise ImportError(
                 "epub2text is required for EPUB support. "
                 "Install with: pip install epub2text"
-            )
+            ) from e
 
         parser = EPUBParser(str(self.file_path))
         epub_chapters = parser.get_chapters()
@@ -318,7 +317,8 @@ class InputReader:
             return chapters
         else:
             # No clear chapter structure, check for numbered sections
-            # Pattern 2: Single words in all caps on their own line (like "ONE", "TWO", etc.)
+            # Pattern 2: Single words in all caps on own line
+            # (like "ONE", "TWO", etc.)
             section_pattern = re.compile(r"^([A-Z][A-Z\s-]{2,})$", re.MULTILINE)
             section_matches = list(section_pattern.finditer(content))
 

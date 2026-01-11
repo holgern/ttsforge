@@ -684,7 +684,10 @@ class PhonemeConverter:
                 if progress and self.progress_callback:
                     progress.current_segment = segments_processed
                     progress.segments_processed = segments_before + segments_processed
-                    progress.current_text = f"Completed {chapter.title or 'chapter'} ({segments_processed} segments)"
+                    ch_title = chapter.title or "chapter"
+                    progress.current_text = (
+                        f"Completed {ch_title} ({segments_processed} segments)"
+                    )
                     if start_time and progress.total_segments_all > 0:
                         elapsed = time.time() - start_time
                         if progress.segments_processed > 0 and elapsed > 0.5:

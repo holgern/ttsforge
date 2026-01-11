@@ -316,6 +316,8 @@ class ConversionOptions:
     model_path: Optional[Path] = None
     # Custom voices.bin path (None = use default downloaded voices)
     voices_path: Optional[Path] = None
+    # SSMD generation control
+    generate_ssmd_only: bool = False  # If True, only generate SSMD files, no audio
 
 
 # Pattern to detect chapter markers in text
@@ -781,7 +783,7 @@ class TTSConverter:
                     import json
 
                     with open(
-                        self.options.phoneme_dictionary_path, "r", encoding="utf-8"
+                        self.options.phoneme_dictionary_path, encoding="utf-8"
                     ) as f:
                         phoneme_data = json.load(f)
                         # Handle both simple dict and metadata format
@@ -810,7 +812,7 @@ class TTSConverter:
             try:
                 ssmd_content = chapter_to_ssmd(
                     chapter_title=chapter.title,
-                    chapter_text=chapter.content,
+                    chapter_text=chapter.text,
                     phoneme_dict=phoneme_dict,
                     phoneme_dict_case_sensitive=self.options.phoneme_dict_case_sensitive,
                     mixed_language_config=mixed_language_config,
@@ -833,7 +835,7 @@ class TTSConverter:
             except SSMDGenerationError as e:
                 # Fall back to plain text if SSMD generation fails
                 self.log(f"SSMD generation failed: {e}, using plain text", "error")
-                ssmd_content = chapter.content
+                ssmd_content = chapter.text
                 ssmd_hash = ""
 
         # Open WAV file for writing
@@ -871,7 +873,7 @@ class TTSConverter:
             duration += len(samples) / SAMPLE_RATE
 
             # Update progress once for entire chapter
-            chars_processed = len(chapter.content)
+            chars_processed = len(chapter.text)
             if progress and self.progress_callback:
                 progress.chars_processed = chars_before + chars_processed
                 progress.current_text = (
@@ -887,6 +889,78 @@ class TTSConverter:
                 self.progress_callback(progress)
 
         return duration, chars_processed, ssmd_hash or ""
+
+    def _generate_ssmd_only(
+        self,
+        chapter: Chapter,
+        ssmd_file: Path,
+        html_content: Optional[str] = None,
+    ) -> str:
+        """
+        Generate only SSMD file for a chapter without creating audio.
+
+        Args:
+            chapter: Chapter to convert
+            ssmd_file: Path to save SSMD file
+            html_content: Optional HTML content for emphasis detection
+
+        Returns:
+            SSMD hash string
+        """
+        self.log(f"Generating SSMD for chapter: {chapter.title}")
+
+        # Prepare phoneme dictionary if available
+        phoneme_dict = None
+        if self.options.phoneme_dictionary_path:
+            try:
+                import json
+
+                with open(self.options.phoneme_dictionary_path, encoding="utf-8") as f:
+                    phoneme_data = json.load(f)
+                    # Handle both simple dict and metadata format
+                    if "entries" in phoneme_data:
+                        phoneme_dict = {
+                            word: entry["phoneme"] if isinstance(entry, dict) else entry
+                            for word, entry in phoneme_data["entries"].items()
+                        }
+                    else:
+                        phoneme_dict = phoneme_data
+            except Exception as e:
+                self.log(f"Failed to load phoneme dictionary: {e}", "warning")
+
+        # Prepare mixed-language config
+        mixed_language_config = None
+        if self.options.use_mixed_language:
+            mixed_language_config = {
+                "use_mixed_language": True,
+                "primary": self.options.mixed_language_primary,
+                "allowed": self.options.mixed_language_allowed,
+                "confidence": self.options.mixed_language_confidence,
+            }
+
+        try:
+            ssmd_content = chapter_to_ssmd(
+                chapter_title=chapter.title,
+                chapter_text=chapter.text,
+                phoneme_dict=phoneme_dict,
+                phoneme_dict_case_sensitive=self.options.phoneme_dict_case_sensitive,
+                mixed_language_config=mixed_language_config,
+                html_content=html_content,
+                include_title=self.options.announce_chapters,
+            )
+
+            # Save SSMD file
+            ssmd_hash = save_ssmd_file(ssmd_content, ssmd_file)
+            self.log(f"Saved SSMD to {ssmd_file.name}")
+
+            return ssmd_hash
+
+        except SSMDGenerationError as e:
+            # Fall back to plain text if SSMD generation fails
+            self.log(f"SSMD generation failed: {e}, using plain text", "error")
+            ssmd_content = chapter.text
+            ssmd_hash = save_ssmd_file(ssmd_content, ssmd_file)
+            return ssmd_hash
 
     def _merge_chapter_files(
         self,
@@ -1016,7 +1090,7 @@ class TTSConverter:
 
             self._add_chapters_to_m4b(output_path, chapter_times)
 
-    def convert_chapters_resumable(
+    def convert_chapters_resumable(  # noqa: C901 - Complex but necessary for resume logic
         self,
         chapters: list[Chapter],
         output_path: Path,
@@ -1077,7 +1151,8 @@ class TTSConverter:
                     # Verify chapter count matches
                     elif len(state.chapters) != len(chapters):
                         self.log(
-                            f"Chapter count changed ({len(state.chapters)} -> {len(chapters)}), "
+                            f"Chapter count changed "
+                            f"({len(state.chapters)} -> {len(chapters)}), "
                             "starting fresh conversion",
                             "warning",
                         )
@@ -1104,10 +1179,13 @@ class TTSConverter:
                                 f"Restoring settings from previous session: "
                                 f"voice={state.voice}, language={state.language}, "
                                 f"lang_override={state.lang}, "
-                                f"speed={state.speed}, split_mode={state.split_mode}, "
+                                f"speed={state.speed}, "
+                                f"split_mode={state.split_mode}, "
                                 f"silence={state.silence_between_chapters}s, "
-                                f"pauses: clause={state.pause_clause}s sent={state.pause_sentence}s "
-                                f"para={state.pause_paragraph}s var={state.pause_variance}s "
+                                f"pauses: clause={state.pause_clause}s "
+                                f"sent={state.pause_sentence}s "
+                                f"para={state.pause_paragraph}s "
+                                f"var={state.pause_variance}s "
                                 f"trim={state.trim_silence}",
                                 "info",
                             )
@@ -1198,7 +1276,8 @@ class TTSConverter:
                 if chapter_idx >= len(state.chapters):
                     error_msg = (
                         f"Chapter index {chapter_idx} out of range. "
-                        f"State has {len(state.chapters)} chapters but trying to access "
+                        f"State has {len(state.chapters)} chapters "
+                        f"but trying to access "
                         f"chapter {chapter_idx + 1}/{len(chapters)}. "
                         "This usually means the state file is corrupted. "
                         "Try using --fresh to start a new conversion."
@@ -1271,6 +1350,38 @@ class TTSConverter:
                 ssmd_filename = chapter_filename.replace(".wav", ".ssmd")
                 ssmd_file = work_dir / ssmd_filename
 
+                # If generate_ssmd_only mode, just generate SSMD and skip audio
+                if self.options.generate_ssmd_only:
+                    # Generate SSMD only (skip if file already exists)
+                    if ssmd_file.exists():
+                        ch_num = chapter_idx + 1
+                        self.log(f"SSMD already exists for chapter {ch_num}, skipping")
+                        try:
+                            _, ssmd_hash = load_ssmd_file(ssmd_file)
+                        except SSMDGenerationError:
+                            ssmd_hash = ""
+                    else:
+                        # Generate SSMD
+                        ssmd_hash = self._generate_ssmd_only(
+                            chapter,
+                            ssmd_file,
+                            html_content=None,  # TODO: Get HTML from input_reader
+                        )
+
+                    # Update state
+                    chapter_state.completed = True
+                    chapter_state.ssmd_file = ssmd_filename
+                    chapter_state.ssmd_hash = ssmd_hash
+                    state.save(state_file)
+
+                    # Update progress
+                    chars_processed += chapter.char_count
+                    progress.chars_processed = chars_processed
+                    if self.progress_callback:
+                        self.progress_callback(progress)
+
+                    continue  # Skip audio generation
+
                 # Convert chapter to WAV using SSMD intermediate format
                 duration, _, ssmd_hash = self._convert_single_chapter_to_wav(
                     chapter,
@@ -1315,6 +1426,16 @@ class TTSConverter:
 
                 if self.progress_callback:
                     self.progress_callback(progress)
+
+            # If generate_ssmd_only mode, exit here without merging
+            if self.options.generate_ssmd_only:
+                self.log("SSMD generation complete!")
+                self.log(f"SSMD files saved in: {work_dir}")
+                return ConversionResult(
+                    success=True,
+                    chapters_dir=work_dir,
+                    output_path=None,  # No audio output in SSMD-only mode
+                )
 
             # All chapters completed, merge into final output
             self.log("Merging chapters into final audiobook...")

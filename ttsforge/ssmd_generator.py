@@ -14,7 +14,6 @@ from __future__ import annotations
 import hashlib
 import re
 from pathlib import Path
-from typing import Optional
 
 
 class SSMDGenerationError(Exception):
@@ -110,7 +109,7 @@ def _inject_phoneme_substitutions(
 
         # Replacement with SSMD phoneme syntax
         # Preserve the original case of the matched word
-        def replacement(match):
+        def replacement(match, phoneme=phoneme):  # Bind loop variable
             matched_word = match.group(1)
             # Remove slashes if present in phoneme dictionary
             clean_phoneme = phoneme.strip("/")
@@ -122,9 +121,7 @@ def _inject_phoneme_substitutions(
     return result
 
 
-def _add_language_markers(
-    text: str, mixed_language_config: Optional[dict] = None
-) -> str:
+def _add_language_markers(text: str, mixed_language_config: dict | None = None) -> str:
     """Add language markers for mixed-language segments.
 
     Note: This is a placeholder for now. Full implementation would require
@@ -214,10 +211,10 @@ def _add_structural_breaks(text: str) -> str:
 def chapter_to_ssmd(
     chapter_title: str,
     chapter_text: str,
-    phoneme_dict: Optional[dict[str, str]] = None,
+    phoneme_dict: dict[str, str] | None = None,
     phoneme_dict_case_sensitive: bool = False,
-    mixed_language_config: Optional[dict] = None,
-    html_content: Optional[str] = None,
+    mixed_language_config: dict | None = None,
+    html_content: str | None = None,
     include_title: bool = True,
 ) -> str:
     """Convert a chapter to SSMD format.
@@ -316,7 +313,7 @@ def load_ssmd_file(ssmd_path: Path) -> tuple[str, str]:
         if not ssmd_path.exists():
             raise SSMDGenerationError(f"SSMD file not found: {ssmd_path}")
 
-        with open(ssmd_path, "r", encoding="utf-8") as f:
+        with open(ssmd_path, encoding="utf-8") as f:
             content = f.read()
 
         return content, _hash_content(content)
