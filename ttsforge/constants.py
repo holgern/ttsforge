@@ -5,6 +5,12 @@ from pykokoro.onnx_backend import VOICE_NAMES
 # Re-export from pykokoro for convenience
 VOICES = VOICE_NAMES
 
+# Audio constants from pykokoro
+try:
+    from pykokoro import SAMPLE_RATE
+except ImportError:
+    SAMPLE_RATE = 24000  # Fallback value
+
 # Program Information
 PROGRAM_NAME = "ttsforge"
 PROGRAM_DESCRIPTION = "Generate audiobooks from EPUB files using Kokoro ONNX TTS."
@@ -135,7 +141,7 @@ DEFAULT_CONFIG = {
 }
 
 # Audio settings
-# SAMPLE_RATE is imported from pykokoro.onnx_backend above
+# SAMPLE_RATE is imported from pykokoro at top of file
 AUDIO_CHANNELS = 1
 
 # Sample texts for voice preview (per language)

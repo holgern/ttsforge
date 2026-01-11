@@ -26,11 +26,29 @@ from pykokoro.tokenizer import (
 from .constants import (
     DEFAULT_CONFIG,
     LANGUAGE_DESCRIPTIONS,
-    LANG_CODE_TO_ONNX,
-    SAMPLE_RATE,
     SUPPORTED_OUTPUT_FORMATS,
     VOICES,
 )
+
+# Import from pykokoro
+try:
+    from pykokoro import SAMPLE_RATE
+    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
+except ImportError:
+    # Fallback values if pykokoro not installed
+    SAMPLE_RATE = 24000
+    LANG_CODE_TO_ONNX = {
+        "a": "en-us",
+        "b": "en-gb",
+        "e": "es",
+        "f": "fr-fr",
+        "h": "hi",
+        "i": "it",
+        "j": "ja",
+        "p": "pt",
+        "z": "zh",
+    }
+
 from .conversion import (
     Chapter,
     ConversionOptions,
