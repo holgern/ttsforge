@@ -40,6 +40,11 @@ class Chapter:
         """Return the character count of the chapter."""
         return len(self.text)
 
+    @property
+    def content(self) -> str:
+        """Alias for text to maintain compatibility with conversion.Chapter."""
+        return self.text
+
 
 class InputReader:
     """Unified reader for EPUB, TXT (Gutenberg), and PDF files."""

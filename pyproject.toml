@@ -29,7 +29,7 @@ dependencies = [
     "phrasplit",
     "sounddevice>=0.4.6",
     # TTS engine (includes onnxruntime and kokorog2p)
-    "pykokoro",
+    "pykokoro>=0.2.0",
 ]
 classifiers=[
     'Intended Audience :: End Users/Desktop',
@@ -54,9 +54,6 @@ dev = [
 ]
 gpu = [
     "onnxruntime-gpu>=1.16.0",
-]
-phrasplit = [
-    "phrasplit",
 ]
 
 [project.scripts]

@@ -1,11 +1,15 @@
 """SSMD (Speech Synthesis Markdown) generator for ttsforge.
 
 This module converts chapter text to SSMD format with markup for:
-- Paragraph breaks (...p)
-- Sentence breaks (...s)
 - Emphasis (*text* for moderate, **text** for strong)
 - Language switches ([text](lang_code))
 - Phoneme substitutions ([word](ph: /phoneme/))
+
+Note: Structural breaks (paragraphs, sentences, clauses) are NOT automatically
+added. The SSMD parser in pykokoro handles sentence detection automatically.
+Users can manually add breaks in the SSMD file if desired:
+- Paragraph breaks (...p)
+- Sentence breaks (...s)
 - Clause breaks (...c)
 """
 
@@ -142,68 +146,29 @@ def _add_language_markers(text: str, mixed_language_config: dict | None = None) 
 
 
 def _add_structural_breaks(text: str) -> str:
-    """Add SSMD break markers for paragraphs, sentences, and clauses.
+    """Preserve paragraph structure without adding automatic SSMD breaks.
+
+    The SSMD parser in pykokoro will handle sentence detection automatically.
+    This function only preserves existing paragraph breaks as double newlines.
 
     Args:
         text: Plain text to process
 
     Returns:
-        Text with SSMD break markers inserted
+        Text with normalized paragraph spacing (no SSMD break markers)
     """
-    # Split into paragraphs (double newline or single newline)
+    # Split into paragraphs and normalize spacing
     paragraphs = re.split(r"\n\s*\n+", text)
     result_paragraphs = []
 
     for para in paragraphs:
-        if not para.strip():
-            continue
-
-        # Clean up the paragraph
         para = para.strip()
+        if para:
+            result_paragraphs.append(para)
 
-        # Split into sentences (basic sentence detection)
-        # This is a simple approach - more sophisticated sentence splitting
-        # could use libraries like nltk or spacy
-        sentences = re.split(r"([.!?]+(?:\s+|$))", para)
-
-        # Reconstruct with sentence breaks
-        result_sentences = []
-        i = 0
-        while i < len(sentences):
-            sentence = sentences[i].strip()
-            if not sentence:
-                i += 1
-                continue
-
-            # Check if next element is punctuation
-            if i + 1 < len(sentences) and re.match(
-                r"^[.!?]+$", sentences[i + 1].strip()
-            ):
-                sentence = sentence + sentences[i + 1]
-                i += 2
-            else:
-                i += 1
-
-            # Add clause breaks for commas (basic approach)
-            sentence = re.sub(r",(\s+)", r",...c\1", sentence)
-
-            result_sentences.append(sentence)
-
-        # Join sentences with sentence breaks
-        para_with_breaks = "...s ".join(result_sentences)
-
-        # Clean up any double breaks
-        para_with_breaks = re.sub(r"(\.\.\.s\s*)+", "...s ", para_with_breaks)
-        para_with_breaks = re.sub(r"(\.\.\.c\s*)+", "...c ", para_with_breaks)
-
-        result_paragraphs.append(para_with_breaks)
-
-    # Join paragraphs with paragraph breaks
-    result = "...p\n\n".join(result_paragraphs)
-
-    # Add final paragraph break
-    if result and not result.endswith("...p"):
-        result += "...p"
+    # Join paragraphs with double newlines (standard paragraph separation)
+    # No SSMD markers - let pykokoro's parser handle sentence detection
+    result = "\n\n".join(result_paragraphs)
 
     return result
 
@@ -261,9 +226,9 @@ def chapter_to_ssmd(
 
         # Step 6: Add chapter title if requested
         if include_title and chapter_title:
-            # Clean title and add as heading
+            # Clean title and add as heading with double newline separation
             clean_title = chapter_title.strip()
-            result = f"# {clean_title}...p\n\n{result}"
+            result = f"# {clean_title}\n\n{result}"
 
         return result
 

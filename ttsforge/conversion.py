@@ -58,10 +58,16 @@ class Chapter:
     title: str
     content: str
     index: int = 0
+    html_content: Optional[str] = None  # Optional HTML for emphasis detection
 
     @property
     def char_count(self) -> int:
         return len(self.content)
+
+    @property
+    def text(self) -> str:
+        """Alias for content to maintain compatibility with input_reader.Chapter."""
+        return self.content
 
 
 @dataclass
@@ -318,6 +324,7 @@ class ConversionOptions:
     voices_path: Optional[Path] = None
     # SSMD generation control
     generate_ssmd_only: bool = False  # If True, only generate SSMD files, no audio
+    detect_emphasis: bool = False  # If True, detect emphasis from HTML tags in EPUB
 
 
 # Pattern to detect chapter markers in text
@@ -1365,7 +1372,9 @@ class TTSConverter:
                         ssmd_hash = self._generate_ssmd_only(
                             chapter,
                             ssmd_file,
-                            html_content=None,  # TODO: Get HTML from input_reader
+                            html_content=chapter.html_content
+                            if self.options.detect_emphasis
+                            else None,
                         )
 
                     # Update state
@@ -1387,7 +1396,9 @@ class TTSConverter:
                     chapter,
                     chapter_file,
                     ssmd_file=ssmd_file,
-                    html_content=None,  # TODO: Get HTML from input_reader
+                    html_content=chapter.html_content
+                    if self.options.detect_emphasis
+                    else None,
                     progress=progress,
                     start_time=start_time,
                     total_chars=total_chars,
