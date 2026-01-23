@@ -280,15 +280,15 @@ def ensure_ffmpeg() -> bool:
 
 def load_tts_pipeline() -> tuple[Any, Any]:
     """
-    Load numpy and Kokoro ONNX TTS backend.
+    Load numpy and Kokoro pipeline backend.
 
     Returns:
-        Tuple of (numpy module, Kokoro class)
+        Tuple of (numpy module, KokoroPipeline class)
     """
     import numpy as np
-    from pykokoro import Kokoro
+    from pykokoro import KokoroPipeline
 
-    return np, Kokoro
+    return np, KokoroPipeline
 
 
 class LoadPipelineThread(Thread):

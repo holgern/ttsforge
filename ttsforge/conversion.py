@@ -12,8 +12,16 @@ from typing import TYPE_CHECKING, Any, Callable, Optional, Union
 
 import numpy as np
 import soundfile as sf
-from pykokoro import Kokoro, VoiceBlend
-from pykokoro.onnx_backend import are_models_downloaded, download_all_models
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro.onnx_backend import (
+    Kokoro,
+    VoiceBlend,
+    are_models_downloaded,
+    download_all_models,
+)
+from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
+from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
+from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
 
 from .constants import (
     DEFAULT_VOICE_FOR_LANG,
@@ -48,7 +56,7 @@ def get_onnx_lang_code(ttsforge_lang: str) -> str:
     """Convert ttsforge language code to kokoro language code."""
     from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
 
-    return LANG_CODE_TO_ONNX.get(ttsforge_lang, "en-us")
+    return LANG_CODE_TO_ONNX.get(ttsforge_lang, ttsforge_lang or "en-us")
 
 
 @dataclass
@@ -382,8 +390,9 @@ class TTSConverter:
         self.log_callback = log_callback
         self._cancelled = False
         self._kokoro: Optional[Kokoro] = None
+        self._pipeline: Optional[KokoroPipeline] = None
         self._np = np
-        self._voice_style: Optional[Union[str, np.ndarray]] = None
+        self._voice_style: Optional[Union[str, np.ndarray, VoiceBlend]] = None
 
     def log(self, message: str, level: str = "info") -> None:
         """Log a message."""
@@ -396,7 +405,7 @@ class TTSConverter:
 
     def _init_pipeline(self) -> None:
         """Initialize the TTS pipeline using ONNX backend."""
-        if self._kokoro is not None:
+        if self._pipeline is not None:
             return
 
         self.log("Initializing ONNX TTS pipeline...")
@@ -408,7 +417,7 @@ class TTSConverter:
             self.log("Model download complete.")
 
         # Create TokenizerConfig from ConversionOptions (for mixed-language support)
-        from pykokoro import TokenizerConfig
+        from pykokoro.tokenizer import TokenizerConfig
 
         tokenizer_config = TokenizerConfig(
             use_mixed_language=self.options.use_mixed_language,
@@ -435,7 +444,7 @@ class TTSConverter:
         # Resolve voice (handle blending)
         if self.options.voice_blend:
             blend = VoiceBlend.parse(self.options.voice_blend)
-            self._voice_style = self._kokoro.create_blended_voice(blend)
+            self._voice_style = blend
             voice_names = ", ".join(f"{v}:{int(w * 100)}%" for v, w in blend.voices)
             self.log(f"Using blended voice: {voice_names}")
         else:
@@ -451,6 +460,27 @@ class TTSConverter:
             else:
                 self._voice_style = self.options.voice
                 self.log(f"Using voice: {self.options.voice}")
+
+        default_lang = self.options.lang if self.options.lang else self.options.language
+        default_lang_code = get_onnx_lang_code(default_lang)
+        generation_config = self._build_generation_config(
+            default_lang_code, manual_pauses=False
+        )
+        pipeline_config = PipelineConfig(
+            voice=self._voice_style
+            if self._voice_style is not None
+            else self.options.voice,
+            generation=generation_config,
+            model_path=self.options.model_path,
+            voices_path=self.options.voices_path,
+            tokenizer_config=tokenizer_config,
+        )
+        self._pipeline = KokoroPipeline(
+            pipeline_config,
+            phoneme_processing=OnnxPhonemeProcessorAdapter(self._kokoro),
+            audio_generation=OnnxAudioGenerationAdapter(self._kokoro),
+            audio_postprocessing=OnnxAudioPostprocessingAdapter(self._kokoro),
+        )
 
     def _get_spacy_model(self) -> str:
         """Get the appropriate spaCy model for the current language."""
@@ -470,7 +500,9 @@ class TTSConverter:
         }
         return lang_to_spacy.get(lang, "en_core_web_sm")
 
-    def _split_text_with_phrasplit(self, text: str) -> list["Segment"]:
+    def _split_text_with_phrasplit(
+        self, text: str, mode: Optional[str] = None
+    ) -> list["Segment"]:
         """
         Split text using phrasplit's split_text function.
 
@@ -484,7 +516,7 @@ class TTSConverter:
         Returns:
             List of Segment namedtuples with text, paragraph, and sentence info
         """
-        mode = self.options.split_mode
+        mode = mode or self.options.split_mode
 
         if mode == "line":
             # Simple line splitting - create pseudo-segments
@@ -541,7 +573,47 @@ class TTSConverter:
 
     def _use_phrasplit_mode(self) -> bool:
         """Check if we should use phrasplit for text splitting."""
-        return self.options.split_mode in ["paragraph", "sentence", "clause"]
+        return self.options.split_mode in ["paragraph", "sentence", "clause", "line"]
+
+    def _build_generation_config(
+        self, lang_code: str, manual_pauses: bool
+    ) -> GenerationConfig:
+        """Build GenerationConfig for a pipeline run."""
+        return GenerationConfig(
+            speed=self.options.speed,
+            lang=lang_code,
+            pause_mode="manual" if manual_pauses else "tts",
+            pause_clause=self.options.pause_clause,
+            pause_sentence=self.options.pause_sentence,
+            pause_paragraph=self.options.pause_paragraph,
+            pause_variance=self.options.pause_variance,
+        )
+
+    def _segments_to_ssmd(self, segments: list["Segment"], mode: str) -> str:
+        """Build SSMD with pauses from pre-split segments."""
+        parts: list[str] = []
+        for idx, segment in enumerate(segments):
+            text = segment.text.strip()
+            if not text:
+                continue
+            parts.append(text)
+            if idx >= len(segments) - 1:
+                continue
+            next_segment = segments[idx + 1]
+            if next_segment.paragraph != segment.paragraph:
+                strength = "p"
+            elif mode == "clause":
+                strength = "c"
+            elif mode == "line" or mode == "paragraph":
+                strength = "p"
+            else:
+                strength = "s"
+            parts.append(f"...{strength}")
+            if strength == "p":
+                parts.append("\n")
+            else:
+                parts.append(" ")
+        return "".join(parts).strip()
 
     def _generate_silence(self, duration: float) -> Any:
         """Generate silence audio of given duration."""
@@ -855,26 +927,16 @@ class TTSConverter:
         ) as out_file:
             duration = 0.0
 
-            # Convert SSMD to audio using pykokoro
-            # pykokoro automatically detects and processes SSMD markup
-            assert self._kokoro is not None
+            # Convert SSMD to audio using the pipeline
+            assert self._pipeline is not None
             assert ssmd_content is not None
 
-            samples, sample_rate = self._kokoro.create(
-                ssmd_content,
-                voice=self._voice_style
-                if self._voice_style is not None
-                else self.options.voice,
-                speed=self.options.speed,
-                lang=lang_code,
-                # SSMD already has breaks, but let pykokoro handle additional processing
-                split_mode="paragraph",
-                trim_silence=self.options.trim_silence,
-                pause_clause=self.options.pause_clause,
-                pause_sentence=self.options.pause_sentence,
-                pause_paragraph=self.options.pause_paragraph,
-                pause_variance=self.options.pause_variance,
+            generation = self._build_generation_config(
+                lang_code, manual_pauses=self.options.trim_silence
             )
+            result = self._pipeline.run(ssmd_content, generation=generation)
+            samples = result.audio
+            sample_rate = result.sample_rate
 
             out_file.write(samples)
             duration += len(samples) / SAMPLE_RATE
@@ -1522,7 +1584,14 @@ class TTSConverter:
             out_file, ffmpeg_proc = self._setup_output(output_path)
 
             # Determine splitting strategy
-            use_phrasplit = self._use_phrasplit_mode()
+            use_segmented_ssmd = (
+                self.options.trim_silence or self.options.split_mode != "auto"
+            )
+            segment_mode = (
+                self.options.split_mode
+                if self.options.split_mode != "auto"
+                else "sentence"
+            )
 
             progress = ConversionProgress(
                 total_chapters=len(chapters),
@@ -1556,113 +1625,62 @@ class TTSConverter:
                 lang_code = get_onnx_lang_code(effective_lang)
 
                 # Generate TTS for this chapter
-                if use_phrasplit:
-                    # Pre-split text using phrasplit, then combine for pykokoro
-                    segments = self._split_text_with_phrasplit(chapter.content)
-                    # Filter out empty segments
-                    segments = [s for s in segments if s.text.strip()]
-
-                    # Combine all segment texts into full chapter text
-                    # Preserve paragraph structure for pykokoro's split_mode
-                    chapter_text_parts = []
-                    current_paragraph = None
-
-                    for segment in segments:
-                        if current_paragraph is None:
-                            current_paragraph = segment.paragraph
-                        elif segment.paragraph != current_paragraph:
-                            # Add paragraph break (double newline)
-                            chapter_text_parts.append("\n\n")
-                            current_paragraph = segment.paragraph
-                        else:
-                            # Add sentence break (single space)
-                            chapter_text_parts.append(" ")
-
-                        chapter_text_parts.append(segment.text)
-
-                    full_chapter_text = "".join(chapter_text_parts)
-
-                    # Single call to pykokoro for entire chapter
-                    assert self._kokoro is not None
-                    samples, sample_rate = self._kokoro.create(
-                        full_chapter_text,
-                        voice=self._voice_style
-                        if self._voice_style is not None
-                        else self.options.voice,
-                        speed=self.options.speed,
-                        lang=lang_code,
-                        split_mode="paragraph",  # Let pykokoro handle segmentation
-                        trim_silence=self.options.trim_silence,
-                        pause_clause=self.options.pause_clause,
-                        pause_sentence=self.options.pause_sentence,
-                        pause_paragraph=self.options.pause_paragraph,
-                        pause_variance=self.options.pause_variance,
+                segments: list[Segment] = []
+                if use_segmented_ssmd:
+                    segments = self._split_text_with_phrasplit(
+                        chapter.content, mode=segment_mode
                     )
+                    segments = [s for s in segments if s.text.strip()]
+                    ssmd_text = self._segments_to_ssmd(segments, segment_mode)
+                    if not ssmd_text:
+                        ssmd_text = chapter.content
 
-                    if not self._cancelled:
-                        # Write audio
-                        self._write_audio_chunk(samples, out_file, ffmpeg_proc)
-                        # Update timing
-                        chunk_duration = len(samples) / SAMPLE_RATE
-                        current_time += chunk_duration
+                    generation = self._build_generation_config(
+                        lang_code, manual_pauses=self.options.trim_silence
+                    )
+                    assert self._pipeline is not None
+                    result = self._pipeline.run(ssmd_text, generation=generation)
+                    samples = result.audio
+                else:
+                    generation = self._build_generation_config(
+                        lang_code, manual_pauses=False
+                    )
+                    assert self._pipeline is not None
+                    result = self._pipeline.run(chapter.content, generation=generation)
+                    samples = result.audio
 
-                        # Update progress
-                        chars_processed += sum(len(seg.text) for seg in segments)
+                if not self._cancelled:
+                    self._write_audio_chunk(samples, out_file, ffmpeg_proc)
+                    chunk_duration = len(samples) / SAMPLE_RATE
+                    current_time += chunk_duration
+
+                    if use_segmented_ssmd:
+                        segment_chars = (
+                            sum(len(seg.text) for seg in segments)
+                            if segments
+                            else len(chapter.content)
+                        )
+                        chars_processed += segment_chars
                         progress.chars_processed = chars_processed
                         progress.current_text = (
                             f"Completed chapter with {len(segments)} segments"
                         )
-
-                        elapsed = time.time() - start_time
-                        if chars_processed > 0 and elapsed > 0.5:
-                            avg_time = elapsed / chars_processed
-                            remaining = total_chars - chars_processed
-                            progress.estimated_remaining = avg_time * remaining
-                        progress.elapsed_time = elapsed
-
-                        if self.progress_callback:
-                            self.progress_callback(progress)
-                else:
-                    # Non-phrasplit mode: use pykokoro's built-in segmentation
-                    assert self._kokoro is not None
-                    samples, sample_rate = self._kokoro.create(
-                        chapter.content,
-                        voice=self._voice_style
-                        if self._voice_style is not None
-                        else self.options.voice,
-                        speed=self.options.speed,
-                        lang=lang_code,
-                        split_mode="sentence",  # Let pykokoro handle segmentation
-                        trim_silence=self.options.trim_silence,
-                        pause_clause=self.options.pause_clause,
-                        pause_sentence=self.options.pause_sentence,
-                        pause_paragraph=self.options.pause_paragraph,
-                        pause_variance=self.options.pause_variance,
-                    )
-
-                    if not self._cancelled:
-                        # Write audio
-                        self._write_audio_chunk(samples, out_file, ffmpeg_proc)
-                        # Update timing
-                        chunk_duration = len(samples) / SAMPLE_RATE
-                        current_time += chunk_duration
-
-                        # Update progress
+                    else:
                         chars_processed += len(chapter.content)
                         progress.chars_processed = chars_processed
                         progress.current_text = (
                             f"Completed chapter: {chapter.title or 'Untitled'}"
                         )
 
-                        elapsed = time.time() - start_time
-                        if chars_processed > 0 and elapsed > 0.5:
-                            avg_time = elapsed / chars_processed
-                            remaining = total_chars - chars_processed
-                            progress.estimated_remaining = avg_time * remaining
-                        progress.elapsed_time = elapsed
+                    elapsed = time.time() - start_time
+                    if chars_processed > 0 and elapsed > 0.5:
+                        avg_time = elapsed / chars_processed
+                        remaining = total_chars - chars_processed
+                        progress.estimated_remaining = avg_time * remaining
+                    progress.elapsed_time = elapsed
 
-                        if self.progress_callback:
-                            self.progress_callback(progress)
+                    if self.progress_callback:
+                        self.progress_callback(progress)
 
                 # Add silence between chapters (except after last)
                 if chapter_idx < len(chapters) - 1:

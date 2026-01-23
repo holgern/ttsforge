@@ -2,13 +2,13 @@
 
 from pathlib import Path
 
-from pykokoro import VoiceBlend
 from pykokoro.onnx_backend import (
     DEFAULT_MODEL_QUALITY,
     HF_REPO_V1_0,
     LANG_CODE_TO_ONNX,
     MODEL_QUALITY_FILES,
     MODEL_QUALITY_FILES_HF,
+    VoiceBlend,
     get_model_dir,
     get_model_path,
     get_onnx_lang_code,
@@ -176,13 +176,13 @@ class TestKokoroClass:
 
     def test_import_kokoro_class(self):
         """Should be able to import Kokoro class."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         assert Kokoro is not None
 
     def test_kokoro_init_parameters(self):
         """Should accept expected initialization parameters."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         # Should not raise - test that the constructor accepts standard parameters
         kokoro = Kokoro(
@@ -193,17 +193,17 @@ class TestKokoroClass:
 
     def test_kokoro_has_methods(self):
         """Kokoro should have expected methods."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Check for key methods
-        assert hasattr(kokoro, "create")
-        assert hasattr(kokoro, "create_from_tokens")
-        assert hasattr(kokoro, "tokenize")
+        assert hasattr(kokoro, "get_voices")
+        assert hasattr(kokoro, "get_voice_style")
+        assert hasattr(kokoro, "create_blended_voice")
 
     def test_split_text_method(self):
         """Should split text into chunks (if method exists)."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist in pykokoro
@@ -221,7 +221,7 @@ class TestKokoroClass:
 
     def test_split_text_respects_chunk_size(self):
         """Chunks should respect approximate chunk size."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist in pykokoro
@@ -237,7 +237,7 @@ class TestKokoroClass:
 
     def test_split_text_preserves_sentences(self):
         """Split should preserve sentence boundaries."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist in pykokoro
@@ -257,7 +257,7 @@ class TestVoiceDatabaseMethods:
 
     def test_get_voice_from_database_returns_none_without_db(self):
         """Should return None when no database is loaded."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         result = kokoro.get_voice_from_database("any_voice")
@@ -265,7 +265,7 @@ class TestVoiceDatabaseMethods:
 
     def test_list_database_voices_empty_without_db(self):
         """Should return empty list when no database is loaded."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         result = kokoro.list_database_voices()
@@ -273,7 +273,7 @@ class TestVoiceDatabaseMethods:
 
     def test_close_method(self):
         """Close method should not raise."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Should not raise even without database
@@ -285,7 +285,7 @@ class TestSplitPhonemes:
 
     def test_short_phonemes_no_split(self):
         """Short phonemes should not be split."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -300,7 +300,7 @@ class TestSplitPhonemes:
 
     def test_split_at_sentence_boundaries(self):
         """Should split at sentence-ending punctuation (. ! ?)."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -320,7 +320,7 @@ class TestSplitPhonemes:
 
     def test_split_preserves_punctuation(self):
         """Punctuation should be preserved in batches."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -337,7 +337,7 @@ class TestSplitPhonemes:
 
     def test_split_long_phonemes_exceeding_limit(self):
         """Phonemes exceeding MAX_PHONEME_LENGTH should be split."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -363,7 +363,7 @@ class TestSplitPhonemes:
 
     def test_split_respects_max_phoneme_length(self):
         """Each batch should respect MAX_PHONEME_LENGTH."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -386,7 +386,7 @@ class TestSplitPhonemes:
 
     def test_split_with_german_phonemes(self):
         """Should handle German phonemes with punctuation."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -410,7 +410,7 @@ class TestSplitPhonemes:
 
     def test_split_with_only_periods(self):
         """Should split at periods correctly."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -428,7 +428,7 @@ class TestSplitPhonemes:
 
     def test_split_with_only_exclamations(self):
         """Should split at exclamation marks correctly."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -445,7 +445,7 @@ class TestSplitPhonemes:
 
     def test_split_with_only_questions(self):
         """Should split at question marks correctly."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -462,7 +462,7 @@ class TestSplitPhonemes:
 
     def test_split_mixed_punctuation(self):
         """Should handle mixed sentence-ending punctuation."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -479,7 +479,7 @@ class TestSplitPhonemes:
 
     def test_split_empty_string(self):
         """Should handle empty phoneme string."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -494,7 +494,7 @@ class TestSplitPhonemes:
 
     def test_split_whitespace_only(self):
         """Should handle whitespace-only phoneme string."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -509,7 +509,7 @@ class TestSplitPhonemes:
 
     def test_split_no_punctuation_very_long(self):
         """Should split very long phonemes even without punctuation."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -529,7 +529,7 @@ class TestSplitPhonemes:
 
     def test_split_preserves_content_integrity(self):
         """All phoneme content should be preserved after splitting."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal
@@ -551,7 +551,7 @@ class TestSplitPhonemes:
 
     def test_split_realistic_german_text(self):
         """Test with realistic German phoneme output from kokorog2p."""
-        from pykokoro import Kokoro
+        from pykokoro.onnx_backend import Kokoro
 
         kokoro = Kokoro()
         # Skip if method doesn't exist or is internal

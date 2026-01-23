@@ -8,11 +8,14 @@ from typing import Optional, cast
 
 import click
 import numpy as np
-from pykokoro import Kokoro, VoiceBlend
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import (
     DEFAULT_MODEL_QUALITY,
+    LANG_CODE_TO_ONNX,
     MODEL_QUALITY_FILES,
+    Kokoro,
     ModelQuality,
+    VoiceBlend,
     are_models_downloaded,
     are_voices_downloaded,
     download_all_voices,
@@ -26,6 +29,9 @@ from pykokoro.onnx_backend import (
     is_model_downloaded,
 )
 from pykokoro.onnx_backend import VOICE_NAMES_V1_0 as VOICE_NAMES
+from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
+from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
+from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
 from rich.progress import (
     BarColumn,
     Progress,
@@ -282,12 +288,25 @@ def demo(  # noqa: C901
         console.print(f"[dim]Speed: {speed}x[/dim]")
         console.print(f"[dim]GPU: {'enabled' if gpu else 'disabled'}[/dim]")
 
-        # Initialize TTS engine
+        # Initialize TTS pipeline
         try:
             kokoro = Kokoro(
                 model_path=model_path,
                 voices_path=voices_path,
                 use_gpu=gpu,
+            )
+            generation = GenerationConfig(speed=speed, lang="en-us")
+            pipeline_config = PipelineConfig(
+                voice=DEFAULT_CONFIG.get("default_voice", "af_heart"),
+                generation=generation,
+                model_path=model_path,
+                voices_path=voices_path,
+            )
+            pipeline = KokoroPipeline(
+                pipeline_config,
+                phoneme_processing=OnnxPhonemeProcessorAdapter(kokoro),
+                audio_generation=OnnxAudioGenerationAdapter(kokoro),
+                audio_postprocessing=OnnxAudioPostprocessingAdapter(kokoro),
             )
         except Exception as e:
             console.print(f"[red]Error initializing TTS engine:[/red] {e}")
@@ -323,9 +342,11 @@ def demo(  # noqa: C901
                         )
 
                     # Generate audio with blended voice
-                    samples, sr = kokoro.create(
-                        demo_text, voice=voice_blend, speed=speed
-                    )
+                    blend_lang = VOICE_PREFIX_TO_LANG.get(voice_names[0][:2], "a")
+                    onnx_lang = LANG_CODE_TO_ONNX.get(blend_lang, "en-us")
+                    result = pipeline.run(demo_text, voice=voice_blend, lang=onnx_lang)
+                    samples = result.audio
+                    sr = result.sample_rate
 
                     # Handle playback
                     if play_audio:
@@ -408,12 +429,25 @@ def demo(  # noqa: C901
     console.print(f"[dim]Speed: {speed}x[/dim]")
     console.print(f"[dim]GPU: {'enabled' if gpu else 'disabled'}[/dim]")
 
-    # Initialize TTS engine
+    # Initialize TTS pipeline
     try:
         kokoro = Kokoro(
             model_path=model_path,
             voices_path=voices_path,
             use_gpu=gpu,
+        )
+        generation = GenerationConfig(speed=speed, lang="en-us")
+        pipeline_config = PipelineConfig(
+            voice=DEFAULT_CONFIG.get("default_voice", "af_heart"),
+            generation=generation,
+            model_path=model_path,
+            voices_path=voices_path,
+        )
+        pipeline = KokoroPipeline(
+            pipeline_config,
+            phoneme_processing=OnnxPhonemeProcessorAdapter(kokoro),
+            audio_generation=OnnxAudioGenerationAdapter(kokoro),
+            audio_postprocessing=OnnxAudioPostprocessingAdapter(kokoro),
         )
     except Exception as e:
         console.print(f"[red]Error initializing TTS engine:[/red] {e}")
@@ -449,7 +483,10 @@ def demo(  # noqa: C901
                 demo_text = DEMO_TEXT.get(lang_code, DEMO_TEXT["a"]).format(voice=voice)
 
             try:
-                samples, sr = kokoro.create(demo_text, voice=voice, speed=speed)
+                onnx_lang = LANG_CODE_TO_ONNX.get(lang_code, "en-us")
+                result = pipeline.run(demo_text, voice=voice, lang=onnx_lang)
+                samples = result.audio
+                sr = result.sample_rate
 
                 if separate and output is not None:
                     # Save individual file

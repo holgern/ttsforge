@@ -14,11 +14,19 @@ from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import soundfile as sf
-from pykokoro import Kokoro, PhonemeSegment, VoiceBlend
-from pykokoro.onnx_backend import are_models_downloaded, download_all_models
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+from pykokoro.onnx_backend import (
+    Kokoro,
+    VoiceBlend,
+    are_models_downloaded,
+    download_all_models,
+)
+from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
+from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
+from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
 
 from .constants import SAMPLE_RATE, SUPPORTED_OUTPUT_FORMATS
-from .phonemes import PhonemeBook, PhonemeChapter
+from .phonemes import PhonemeBook, PhonemeChapter, PhonemeSegment
 from .utils import (
     create_process,
     ensure_ffmpeg,
@@ -329,7 +337,8 @@ class PhonemeConverter:
         self.log_callback = log_callback
         self._cancelled = False
         self._kokoro: Optional[Kokoro] = None
-        self._voice_style: Optional[Union[str, np.ndarray]] = None
+        self._pipeline: Optional[KokoroPipeline] = None
+        self._voice_style: Optional[Union[str, np.ndarray, VoiceBlend]] = None
 
     def log(self, message: str, level: str = "info") -> None:
         """Log a message."""
@@ -342,7 +351,7 @@ class PhonemeConverter:
 
     def _init_pipeline(self) -> None:
         """Initialize the TTS pipeline using ONNX backend."""
-        if self._kokoro is not None:
+        if self._pipeline is not None:
             return
 
         self.log("Initializing ONNX TTS pipeline...")
@@ -368,7 +377,7 @@ class PhonemeConverter:
         # Resolve voice (handle blending)
         if self.options.voice_blend:
             blend = VoiceBlend.parse(self.options.voice_blend)
-            self._voice_style = self._kokoro.create_blended_voice(blend)
+            self._voice_style = blend
             voice_names = ", ".join(f"{v}:{int(w * 100)}%" for v, w in blend.voices)
             self.log(f"Using blended voice: {voice_names}")
         else:
@@ -384,6 +393,64 @@ class PhonemeConverter:
             else:
                 self._voice_style = self.options.voice
                 self.log(f"Using voice: {self.options.voice}")
+
+        if self.options.lang:
+            from .conversion import get_onnx_lang_code
+
+            default_lang = get_onnx_lang_code(self.options.lang)
+        else:
+            default_lang = self.book.lang or "en-us"
+        generation_config = self._build_generation_config(
+            default_lang, manual_pauses=False
+        )
+        pipeline_config = PipelineConfig(
+            voice=self._voice_style
+            if self._voice_style is not None
+            else self.options.voice,
+            generation=generation_config,
+            model_path=self.options.model_path,
+            voices_path=self.options.voices_path,
+        )
+        self._pipeline = KokoroPipeline(
+            pipeline_config,
+            phoneme_processing=OnnxPhonemeProcessorAdapter(self._kokoro),
+            audio_generation=OnnxAudioGenerationAdapter(self._kokoro),
+            audio_postprocessing=OnnxAudioPostprocessingAdapter(self._kokoro),
+        )
+
+    def _build_generation_config(
+        self, lang_code: str, manual_pauses: bool
+    ) -> GenerationConfig:
+        """Build GenerationConfig for a pipeline run."""
+        return GenerationConfig(
+            speed=self.options.speed,
+            lang=lang_code,
+            pause_mode="manual" if manual_pauses else "tts",
+            pause_clause=self.options.pause_clause,
+            pause_sentence=self.options.pause_sentence,
+            pause_paragraph=self.options.pause_paragraph,
+            pause_variance=self.options.pause_variance,
+        )
+
+    def _phoneme_segments_to_ssmd(self, segments: list[PhonemeSegment]) -> str:
+        """Build SSMD with phoneme overrides from segments."""
+        parts: list[str] = []
+        for idx, segment in enumerate(segments):
+            text = segment.text.strip()
+            if not text:
+                continue
+            phonemes = segment.phonemes.strip()
+            if phonemes:
+                parts.append(f"[{text}](ph: {phonemes})")
+            else:
+                parts.append(text)
+            if idx >= len(segments) - 1:
+                continue
+            next_segment = segments[idx + 1]
+            strength = "p" if next_segment.paragraph != segment.paragraph else "s"
+            parts.append(f"...{strength}")
+            parts.append("\n" if strength == "p" else " ")
+        return "".join(parts).strip()
 
     def _generate_silence(self, duration: float) -> np.ndarray:
         """Generate silence audio of given duration."""
@@ -605,7 +672,7 @@ class PhonemeConverter:
                     announcement_text = f"{chapter.title}"
                 else:
                     announcement_text = f"Chapter {chapter.chapter_index + 1}"
-                assert self._kokoro is not None
+                assert self._pipeline is not None
 
                 # Get language code for announcement
                 # Use lang override if provided, otherwise detect from first segment
@@ -618,12 +685,11 @@ class PhonemeConverter:
                 else:
                     lang_code = "en-us"  # Default fallback
 
-                title_samples, _ = self._kokoro.create(
-                    announcement_text,
-                    voice=self._voice_style or self.options.voice,
-                    speed=self.options.speed,
-                    lang=lang_code,
+                generation = self._build_generation_config(
+                    lang_code, manual_pauses=False
                 )
+                result = self._pipeline.run(announcement_text, generation=generation)
+                title_samples = result.audio
                 out_file.write(title_samples)
                 duration += len(title_samples) / SAMPLE_RATE
 
@@ -635,46 +701,24 @@ class PhonemeConverter:
                     out_file.write(pause_audio)
                     duration += pause_duration
 
-            # Build list of segments with pause metadata
-            segments_with_pauses = []
+            if not self._cancelled and chapter.segments:
+                # Single pipeline call for entire chapter
+                assert self._pipeline is not None
+                if self.options.lang:
+                    from .conversion import get_onnx_lang_code
 
-            for seg_idx, segment in enumerate(chapter.segments):
-                if self._cancelled:
-                    break
+                    lang_code = get_onnx_lang_code(self.options.lang)
+                elif chapter.segments:
+                    lang_code = chapter.segments[0].lang
+                else:
+                    lang_code = "en-us"
 
-                # Determine pause after this segment
-                pause_after = 0.0
-                if seg_idx < total_segments - 1:
-                    next_segment = chapter.segments[seg_idx + 1]
-                    if next_segment.paragraph != segment.paragraph:
-                        # Paragraph change - use longer pause
-                        pause_after = self.options.pause_paragraph
-                    else:
-                        # Same paragraph - use shorter sentence pause
-                        pause_after = self.options.pause_sentence
-
-                # Create new PhonemeSegment preserving all fields
-                seg_with_pause = PhonemeSegment(
-                    text=segment.text,
-                    phonemes=segment.phonemes,
-                    tokens=segment.tokens,
-                    lang=segment.lang,
-                    paragraph=segment.paragraph,
-                    sentence=segment.sentence if hasattr(segment, "sentence") else None,
-                    pause_after=pause_after,
+                ssmd_text = self._phoneme_segments_to_ssmd(chapter.segments)
+                generation = self._build_generation_config(
+                    lang_code, manual_pauses=self.options.trim_silence
                 )
-                segments_with_pauses.append(seg_with_pause)
-
-            if not self._cancelled and segments_with_pauses:
-                # Single API call for entire chapter
-                assert self._kokoro is not None
-                samples, sample_rate = self._kokoro.create_from_segments(
-                    segments_with_pauses,
-                    voice=self._voice_style or self.options.voice,
-                    speed=self.options.speed,
-                    pause_variance=self.options.pause_variance,
-                    trim_silence=self.options.trim_silence,
-                )
+                result = self._pipeline.run(ssmd_text, generation=generation)
+                samples = result.audio
 
                 out_file.write(samples)
                 duration += len(samples) / SAMPLE_RATE
@@ -1176,49 +1220,24 @@ class PhonemeConverter:
 
                 chapter_start = current_time
 
-                # Build list of segments with pause metadata
-                segments_with_pauses = []
                 total_chapter_segments = len(chapter.segments)
+                if not self._cancelled and chapter.segments:
+                    assert self._pipeline is not None
+                    if self.options.lang:
+                        from .conversion import get_onnx_lang_code
 
-                for seg_idx, segment in enumerate(chapter.segments):
-                    if self._cancelled:
-                        break
+                        lang_code = get_onnx_lang_code(self.options.lang)
+                    elif chapter.segments:
+                        lang_code = chapter.segments[0].lang
+                    else:
+                        lang_code = "en-us"
 
-                    # Determine pause after this segment
-                    pause_after = 0.0
-                    if seg_idx < total_chapter_segments - 1:
-                        next_segment = chapter.segments[seg_idx + 1]
-                        if next_segment.paragraph != segment.paragraph:
-                            # Paragraph change - use longer pause
-                            pause_after = self.options.pause_paragraph
-                        else:
-                            # Same paragraph - use shorter sentence pause
-                            pause_after = self.options.pause_sentence
-
-                    # Create new PhonemeSegment preserving all fields
-                    seg_with_pause = PhonemeSegment(
-                        text=segment.text,
-                        phonemes=segment.phonemes,
-                        tokens=segment.tokens,
-                        lang=segment.lang,
-                        paragraph=segment.paragraph,
-                        sentence=segment.sentence
-                        if hasattr(segment, "sentence")
-                        else None,
-                        pause_after=pause_after,
+                    ssmd_text = self._phoneme_segments_to_ssmd(chapter.segments)
+                    generation = self._build_generation_config(
+                        lang_code, manual_pauses=self.options.trim_silence
                     )
-                    segments_with_pauses.append(seg_with_pause)
-
-                if not self._cancelled and segments_with_pauses:
-                    # Single API call for entire chapter
-                    assert self._kokoro is not None
-                    samples, sample_rate = self._kokoro.create_from_segments(
-                        segments_with_pauses,
-                        voice=self._voice_style or self.options.voice,
-                        speed=self.options.speed,
-                        pause_variance=self.options.pause_variance,
-                        trim_silence=self.options.trim_silence,
-                    )
+                    result = self._pipeline.run(ssmd_text, generation=generation)
+                    samples = result.audio
 
                     self._write_audio_chunk(samples, out_file, ffmpeg_proc)
                     current_time += len(samples) / SAMPLE_RATE

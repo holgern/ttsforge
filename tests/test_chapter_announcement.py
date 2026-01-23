@@ -6,11 +6,10 @@ from unittest.mock import MagicMock, patch
 
 import numpy as np
 import pytest
-from pykokoro import PhonemeSegment
 
 from ttsforge.conversion import Chapter, ConversionOptions
 from ttsforge.phoneme_conversion import PhonemeConversionOptions, PhonemeConverter
-from ttsforge.phonemes import PhonemeBook
+from ttsforge.phonemes import PhonemeBook, PhonemeSegment
 
 
 class TestChapterAnnouncementConversion:
@@ -131,6 +130,7 @@ class TestChapterAnnouncementPhonemeConversion:
         assert options.chapter_pause_after_title == 2.0
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
+    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
     @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
@@ -139,16 +139,18 @@ class TestChapterAnnouncementPhonemeConversion:
         mock_prevent_end,
         mock_prevent_start,
         mock_kokoro_class,
+        mock_pipeline_class,
         mock_models_downloaded,
         sample_phoneme_book,
     ):
-        """Test that phoneme converter calls create() for announcements."""
+        """Test that phoneme converter calls pipeline for announcements."""
         mock_models_downloaded.return_value = True
         mock_kokoro = MagicMock()
-        fake_audio = np.zeros(24000, dtype="float32")
-        mock_kokoro.create.return_value = (fake_audio, 24000)
-        mock_kokoro.create_from_segments.return_value = (fake_audio, 24000)
         mock_kokoro_class.return_value = mock_kokoro
+        fake_audio = np.zeros(24000, dtype="float32")
+        mock_pipeline = MagicMock()
+        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
+        mock_pipeline_class.return_value = mock_pipeline
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.wav"
@@ -159,14 +161,13 @@ class TestChapterAnnouncementPhonemeConversion:
 
             converter.convert(output_path)
 
-            # Should call create() for announcements (2 chapters)
-            assert mock_kokoro.create.call_count == 2
-            # Verify first announcement - now just uses the title
-            first_call = mock_kokoro.create.call_args_list[0]
-            announcement_text = first_call[0][0]
-            assert announcement_text == "Chapter One"
+            # Should call pipeline for announcements (2 chapters)
+            texts = [call.args[0] for call in mock_pipeline.run.call_args_list]
+            assert "Chapter One" in texts
+            assert "Chapter Two" in texts
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
+    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
     @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
@@ -175,15 +176,18 @@ class TestChapterAnnouncementPhonemeConversion:
         mock_prevent_end,
         mock_prevent_start,
         mock_kokoro_class,
+        mock_pipeline_class,
         mock_models_downloaded,
         sample_phoneme_book,
     ):
         """Test phoneme converter doesn't announce when disabled."""
         mock_models_downloaded.return_value = True
         mock_kokoro = MagicMock()
-        fake_audio = np.zeros(24000, dtype="float32")
-        mock_kokoro.create_from_segments.return_value = (fake_audio, 24000)
         mock_kokoro_class.return_value = mock_kokoro
+        fake_audio = np.zeros(24000, dtype="float32")
+        mock_pipeline = MagicMock()
+        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
+        mock_pipeline_class.return_value = mock_pipeline
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.wav"
@@ -194,14 +198,12 @@ class TestChapterAnnouncementPhonemeConversion:
 
             converter.convert(output_path)
 
-            # Should NOT call create() for announcements
-            # (Only create_from_segments for actual content)
-            assert (
-                not hasattr(mock_kokoro.create, "call_count")
-                or mock_kokoro.create.call_count == 0
-            )
+            texts = [call.args[0] for call in mock_pipeline.run.call_args_list]
+            assert "Chapter One" not in texts
+            assert "Chapter Two" not in texts
 
     @patch("ttsforge.phoneme_conversion.are_models_downloaded")
+    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
     @patch("ttsforge.phoneme_conversion.Kokoro")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
@@ -210,14 +212,17 @@ class TestChapterAnnouncementPhonemeConversion:
         mock_prevent_end,
         mock_prevent_start,
         mock_kokoro_class,
+        mock_pipeline_class,
         mock_models_downloaded,
     ):
         """Test that empty chapters (no segments) are not announced."""
         mock_models_downloaded.return_value = True
         mock_kokoro = MagicMock()
-        fake_audio = np.zeros(24000, dtype="float32")
-        mock_kokoro.create.return_value = (fake_audio, 24000)
         mock_kokoro_class.return_value = mock_kokoro
+        fake_audio = np.zeros(24000, dtype="float32")
+        mock_pipeline = MagicMock()
+        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
+        mock_pipeline_class.return_value = mock_pipeline
 
         # Create book with empty chapter
         book = PhonemeBook(title="Test")
@@ -233,7 +238,7 @@ class TestChapterAnnouncementPhonemeConversion:
             converter.convert(output_path)
 
             # Should NOT announce empty chapters
-            assert mock_kokoro.create.call_count == 0
+            assert mock_pipeline.run.call_count == 0
 
 
 class TestChapterAnnouncementConfig:

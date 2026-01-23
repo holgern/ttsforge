@@ -7,7 +7,7 @@ VOICES = VOICE_NAMES
 
 # Audio constants from pykokoro
 try:
-    from pykokoro import SAMPLE_RATE
+    from pykokoro.constants import SAMPLE_RATE
 except ImportError:
     SAMPLE_RATE = 24000  # Fallback value
 

@@ -26,10 +26,9 @@ dependencies = [
     "chardet",
     "charset-normalizer",
     "platformdirs>=3.0.0",
-    "phrasplit",
     "sounddevice>=0.4.6",
     # TTS engine (includes onnxruntime and kokorog2p)
-    "pykokoro>=0.2.0",
+    "pykokoro>=0.5.0",
 ]
 classifiers=[
     'Intended Audience :: End Users/Desktop',

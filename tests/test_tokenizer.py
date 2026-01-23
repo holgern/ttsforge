@@ -1,13 +1,13 @@
 """Tests for pykokoro.tokenizer module (via ttsforge imports)."""
 
 import pytest
-from pykokoro import Tokenizer
+from pykokoro.constants import SAMPLE_RATE
 from pykokoro.tokenizer import (
     MAX_PHONEME_LENGTH,
-    SAMPLE_RATE,
     SUPPORTED_LANGUAGES,
     EspeakConfig,
     PhonemeResult,
+    Tokenizer,
     TokenizerConfig,
     create_tokenizer,
 )

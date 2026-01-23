@@ -4,12 +4,13 @@ import tempfile
 from pathlib import Path
 
 import pytest
-from pykokoro import PhonemeSegment, Tokenizer
+from pykokoro.tokenizer import Tokenizer
 
 from ttsforge.phonemes import (
     FORMAT_VERSION,
     PhonemeBook,
     PhonemeChapter,
+    PhonemeSegment,
     create_phoneme_book_from_chapters,
     phonemize_text_list,
 )

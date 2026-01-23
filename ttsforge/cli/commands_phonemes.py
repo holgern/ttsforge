@@ -161,7 +161,7 @@ def phonemes_export(
 
         ttsforge phonemes export book.epub --split-mode clause
     """
-    from pykokoro import Tokenizer
+    from pykokoro.tokenizer import Tokenizer
 
     from ..input_reader import InputReader
     from ..phonemes import PhonemeBook
@@ -801,8 +801,8 @@ def phonemes_preview(
 
         ttsforge phonemes preview "Hello" --play --voice "af_nicole:50,am_michael:50"
     """
-    from pykokoro import Tokenizer
     from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
+    from pykokoro.tokenizer import Tokenizer
 
     # Map language code - support both short codes and ISO codes
     if language in LANG_CODE_TO_ONNX:

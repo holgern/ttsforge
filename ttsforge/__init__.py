@@ -4,14 +4,9 @@ ttsforge - Generate audiobooks from EPUB files with TTS.
 A CLI tool for converting EPUB books to audiobooks using Kokoro ONNX TTS.
 """
 
-from pykokoro import (
-    Kokoro,
-    PhonemeSegment,
-    Tokenizer,
-    VoiceBlend,
-    trim,
-)
+from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import (
+    VoiceBlend,
     are_models_downloaded,
     download_all_models,
     download_model,
@@ -21,6 +16,7 @@ from pykokoro.tokenizer import (
     EspeakConfig,
     MAX_PHONEME_LENGTH,
     SUPPORTED_LANGUAGES,
+    Tokenizer,
 )
 
 from .constants import (
@@ -32,7 +28,7 @@ from .constants import (
 
 # Import from pykokoro
 try:
-    from pykokoro import SAMPLE_RATE
+    from pykokoro.constants import SAMPLE_RATE
     from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
 except ImportError:
     # Fallback values if pykokoro not installed
@@ -60,6 +56,7 @@ from .phonemes import (
     FORMAT_VERSION,
     PhonemeBook,
     PhonemeChapter,
+    PhonemeSegment,
     create_phoneme_book_from_chapters,
     phonemize_text_list,
 )
@@ -72,7 +69,7 @@ from .utils import (
 # Language code mapping for backward compatibility
 def get_onnx_lang_code(ttsforge_lang: str) -> str:
     """Convert ttsforge language code to kokoro language code."""
-    return LANG_CODE_TO_ONNX.get(ttsforge_lang, "en-us")
+    return LANG_CODE_TO_ONNX.get(ttsforge_lang, ttsforge_lang or "en-us")
 
 
 __all__ = [
@@ -87,8 +84,10 @@ __all__ = [
     "ConversionProgress",
     "ConversionResult",
     "TTSConverter",
-    # ONNX Backend (from pykokoro)
-    "Kokoro",
+    # Pipeline (from pykokoro)
+    "GenerationConfig",
+    "KokoroPipeline",
+    "PipelineConfig",
     "VoiceBlend",
     "are_models_downloaded",
     "download_all_models",
@@ -108,8 +107,6 @@ __all__ = [
     "PhonemeSegment",
     "create_phoneme_book_from_chapters",
     "phonemize_text_list",
-    # Trim (from pykokoro)
-    "trim",
     # Utils
     "load_config",
     "save_config",

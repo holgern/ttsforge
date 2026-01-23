@@ -4,8 +4,7 @@ import json
 import tempfile
 from pathlib import Path
 
-from pykokoro import Tokenizer
-from pykokoro.tokenizer import TokenizerConfig
+from pykokoro.tokenizer import Tokenizer, TokenizerConfig
 
 
 class TestPhonemeDictionary:

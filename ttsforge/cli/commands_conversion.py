@@ -1317,8 +1317,11 @@ def read(  # noqa: C901
     import sys
     import time
 
-    from pykokoro import Kokoro
-    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
+    from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
+    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX, Kokoro
+    from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
+    from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
+    from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
 
     from ..audio_player import (
         PlaybackPosition,
@@ -1592,13 +1595,26 @@ def read(  # noqa: C901
     )
     console.print()
 
-    # Initialize TTS model
+    # Initialize TTS pipeline
     console.print("[dim]Loading TTS model...[/dim]")
     try:
         kokoro = Kokoro(
             model_path=model_path,
             voices_path=voices_path,
             use_gpu=effective_use_gpu,
+        )
+        generation = GenerationConfig(speed=effective_speed, lang=espeak_lang)
+        pipeline_config = PipelineConfig(
+            voice=effective_voice,
+            generation=generation,
+            model_path=model_path,
+            voices_path=voices_path,
+        )
+        pipeline = KokoroPipeline(
+            pipeline_config,
+            phoneme_processing=OnnxPhonemeProcessorAdapter(kokoro),
+            audio_generation=OnnxAudioGenerationAdapter(kokoro),
+            audio_postprocessing=OnnxAudioPostprocessingAdapter(kokoro),
         )
     except Exception as e:
         console.print(f"[red]Error initializing TTS:[/red] {e}")
@@ -1628,12 +1644,8 @@ def read(  # noqa: C901
 
         def generate_audio(text_segment: str) -> tuple:
             """Generate audio for a text segment."""
-            return kokoro.create(
-                text_segment,
-                voice=effective_voice,
-                speed=effective_speed,
-                lang=espeak_lang,
-            )
+            result = pipeline.run(text_segment)
+            return result.audio, result.sample_rate
 
         # Collect all segments across content items with their metadata
         all_segments: list[

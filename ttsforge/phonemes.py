@@ -12,10 +12,55 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Callable
 
-from pykokoro import PhonemeSegment
-
 if TYPE_CHECKING:
-    from pykokoro import Tokenizer
+    from pykokoro.tokenizer import Tokenizer
+
+
+@dataclass
+class PhonemeSegment:
+    """A segment of text with its phoneme representation."""
+
+    text: str
+    phonemes: str
+    tokens: list[int]
+    lang: str = "en-us"
+    paragraph: int = 0
+    sentence: int | None = None
+    pause_after: float = 0.0
+
+    def to_dict(self) -> dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        data: dict[str, Any] = {
+            "text": self.text,
+            "phonemes": self.phonemes,
+            "tokens": self.tokens,
+            "lang": self.lang,
+        }
+        if self.paragraph:
+            data["paragraph"] = self.paragraph
+        if self.sentence is not None:
+            data["sentence"] = self.sentence
+        if self.pause_after:
+            data["pause_after"] = self.pause_after
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any]) -> PhonemeSegment:
+        """Create from dictionary."""
+        return cls(
+            text=data["text"],
+            phonemes=data["phonemes"],
+            tokens=list(data.get("tokens", [])),
+            lang=data.get("lang", "en-us"),
+            paragraph=data.get("paragraph", 0),
+            sentence=data.get("sentence"),
+            pause_after=data.get("pause_after", 0.0),
+        )
+
+    def format_readable(self) -> str:
+        """Format as human-readable string: text [phonemes]."""
+        return f"{self.text} [{self.phonemes}]"
+
 
 # Version of the phoneme export format
 FORMAT_VERSION = "1.0"

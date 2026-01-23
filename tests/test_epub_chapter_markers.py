@@ -110,7 +110,7 @@ class TestPhonemeChapterMarkerRemoval:
 
     def test_add_text_removes_chapter_markers(self):
         """Test that add_text() filters out chapter markers."""
-        from pykokoro import Tokenizer
+        from pykokoro.tokenizer import Tokenizer
 
         from ttsforge.phonemes import PhonemeChapter
 
@@ -132,7 +132,7 @@ class TestPhonemeChapterMarkerRemoval:
 
     def test_add_text_without_markers_unchanged(self):
         """Test that text without markers is processed normally."""
-        from pykokoro import Tokenizer
+        from pykokoro.tokenizer import Tokenizer
 
         from ttsforge.phonemes import PhonemeChapter
 
