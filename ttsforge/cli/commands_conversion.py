@@ -198,7 +198,10 @@ from .helpers import DEFAULT_SAMPLE_TEXT, console, parse_voice_parameter
     "--detect-emphasis/--no-detect-emphasis",
     "detect_emphasis",
     default=False,
-    help="Detect emphasis (italic/bold) from HTML tags in EPUB files (default: disabled).",
+    help=(
+        "Detect emphasis (italic/bold) from HTML tags in EPUB files "
+        "(default: disabled)."
+    ),
 )
 @click.option(
     "--fresh",

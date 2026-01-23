@@ -494,13 +494,15 @@ class TestMixedLanguageSupport:
     def test_mixed_language_cache_key_generation(self):
         """Test that cache keys are generated correctly."""
         pytest.skip(
-            "Internal API method _get_mixed_language_cache_key no longer exists in pykokoro"
+            "Internal API method _get_mixed_language_cache_key "
+            "no longer exists in pykokoro"
         )
 
     def test_mixed_language_cache_invalidation(self):
         """Test manual cache invalidation."""
         pytest.skip(
-            "Internal API methods _get_mixed_language_cache_key and invalidate_mixed_language_cache no longer exist in pykokoro"
+            "Internal API methods _get_mixed_language_cache_key and "
+            "invalidate_mixed_language_cache no longer exist in pykokoro"
         )
 
     def test_mixed_language_fallback_on_import_error(self):
@@ -559,7 +561,8 @@ class TestMixedLanguageSupport:
     def test_mixed_language_different_confidence_thresholds(self):
         """Test that different confidence thresholds create different caches."""
         pytest.skip(
-            "Internal API method _get_mixed_language_cache_key no longer exists in pykokoro"
+            "Internal API method _get_mixed_language_cache_key "
+            "no longer exists in pykokoro"
         )
 
     def test_mixed_language_primary_not_in_allowed_error(self):

@@ -936,7 +936,7 @@ class TTSConverter:
             )
             result = self._pipeline.run(ssmd_content, generation=generation)
             samples = result.audio
-            sample_rate = result.sample_rate
+            _ = result.sample_rate
 
             out_file.write(samples)
             duration += len(samples) / SAMPLE_RATE

@@ -129,7 +129,7 @@ class TestPhonemeDictionary:
             # Apply dictionary to get SSMD notation
             ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
 
-            # Verify SSMD notation is applied (using backslash-escaped format with equals sign)
+            # Verify SSMD notation is applied (backslash-escaped format)
             assert r"[Misaki]\{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
             assert r"[Kubernetes]\{ph=" in ssmd_text or "[Kubernetes](ph:" in ssmd_text
         finally:
