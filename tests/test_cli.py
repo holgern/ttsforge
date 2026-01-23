@@ -7,7 +7,8 @@ from unittest.mock import patch
 import pytest
 from click.testing import CliRunner
 
-from ttsforge.cli import DEFAULT_SAMPLE_TEXT, main
+from ttsforge import DEFAULT_SAMPLE_TEXT
+from ttsforge.cli import main
 
 
 @pytest.fixture

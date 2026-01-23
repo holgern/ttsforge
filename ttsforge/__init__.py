@@ -64,6 +64,7 @@ from .utils import (
     load_config,
     save_config,
 )
+from .cli.helpers import DEFAULT_SAMPLE_TEXT
 
 
 # Language code mapping for backward compatibility
@@ -110,6 +111,8 @@ __all__ = [
     # Utils
     "load_config",
     "save_config",
+    # herlpers
+    "DEFAULT_SAMPLE_TEXT",
 ]
 
 try:

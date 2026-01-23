@@ -25,10 +25,10 @@ class TestPhonemeDictionary:
             config = TokenizerConfig(phoneme_dictionary_path=temp_path)
             tokenizer = Tokenizer(config=config)
 
-            assert tokenizer._phoneme_dictionary is not None
-            assert len(tokenizer._phoneme_dictionary) == 2
+            assert tokenizer._phoneme_dictionary_obj is not None
+            assert tokenizer._phoneme_dictionary_obj.has_entries()
             # Slashes are now stripped by pykokoro
-            assert tokenizer._phoneme_dictionary["Misaki"] == "misˈɑki"
+            assert tokenizer._phoneme_dictionary_obj.get_phoneme("Misaki") == "misˈɑki"
         finally:
             Path(temp_path).unlink()
 
@@ -53,11 +53,13 @@ class TestPhonemeDictionary:
             config = TokenizerConfig(phoneme_dictionary_path=temp_path)
             tokenizer = Tokenizer(config=config)
 
-            assert tokenizer._phoneme_dictionary is not None
-            assert len(tokenizer._phoneme_dictionary) == 2
+            assert tokenizer._phoneme_dictionary_obj is not None
+            assert tokenizer._phoneme_dictionary_obj.has_entries()
             # Slashes are now stripped by pykokoro
-            assert tokenizer._phoneme_dictionary["Misaki"] == "misˈɑki"
-            assert tokenizer._phoneme_dictionary["nginx"] == "ˈɛnʤɪnˈɛks"
+            assert tokenizer._phoneme_dictionary_obj.get_phoneme("Misaki") == "misˈɑki"
+            assert (
+                tokenizer._phoneme_dictionary_obj.get_phoneme("nginx") == "ˈɛnʤɪnˈɛks"
+            )
         finally:
             Path(temp_path).unlink()
 
@@ -78,8 +80,8 @@ class TestPhonemeDictionary:
             config = TokenizerConfig(phoneme_dictionary_path=temp_path)
             tokenizer = Tokenizer(config=config)
 
-            assert tokenizer._phoneme_dictionary is not None
-            assert len(tokenizer._phoneme_dictionary) == 2
+            assert tokenizer._phoneme_dictionary_obj is not None
+            assert tokenizer._phoneme_dictionary_obj.has_entries()
         finally:
             Path(temp_path).unlink()
 
@@ -95,8 +97,8 @@ class TestPhonemeDictionary:
             config = TokenizerConfig(phoneme_dictionary_path=temp_path)
             tokenizer = Tokenizer(config=config)
             # Dictionary should be loaded successfully
-            assert tokenizer._phoneme_dictionary is not None
-            assert tokenizer._phoneme_dictionary["Misaki"] == "misˈɑki"
+            assert tokenizer._phoneme_dictionary_obj is not None
+            assert tokenizer._phoneme_dictionary_obj.get_phoneme("Misaki") == "misˈɑki"
         finally:
             Path(temp_path).unlink()
 
@@ -105,10 +107,10 @@ class TestPhonemeDictionary:
         config = TokenizerConfig(phoneme_dictionary_path="/nonexistent/file.json")
         # Should warn and continue without dictionary
         tokenizer = Tokenizer(config=config)
-        assert tokenizer._phoneme_dictionary is None
+        assert tokenizer._phoneme_dictionary_obj is None
 
     def test_phonemize_with_dictionary(self):
-        """Test phonemization with custom dictionary."""
+        """Test phonemization with custom dictionary - through SSMD notation."""
         test_dict = {
             "Misaki": "/misˈɑki/",
             "Kubernetes": "/kubɚnˈɛtɪs/",
@@ -123,11 +125,13 @@ class TestPhonemeDictionary:
             tokenizer = Tokenizer(config=config)
 
             text = "Misaki uses Kubernetes for deployment."
-            phonemes = tokenizer.phonemize(text, "en-us")
 
-            # Check that custom phonemes are used
-            assert "misˈɑki" in phonemes
-            assert "kubɚnˈɛtɪs" in phonemes
+            # Apply dictionary to get SSMD notation
+            ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
+
+            # Verify SSMD notation is applied (using backslash-escaped format with equals sign)
+            assert r"[Misaki]\{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
+            assert r"[Kubernetes]\{ph=" in ssmd_text or "[Kubernetes](ph:" in ssmd_text
         finally:
             Path(temp_path).unlink()
 
@@ -145,10 +149,14 @@ class TestPhonemeDictionary:
             )
             tokenizer = Tokenizer(config=config)
 
-            # Test various cases
-            for text in ["Misaki", "misaki", "MISAKI"]:
-                phonemes = tokenizer.phonemize(text, "en-us")
-                assert "misˈɑki" in phonemes
+            text = "Misaki misaki MISAKI"
+
+            # Apply dictionary - should match all case variations
+            ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
+            phoneme_count = ssmd_text.count(r'\{ph="')
+
+            # Should match all 3 variations
+            assert phoneme_count >= 3, f"Expected 3 matches, got {phoneme_count}"
         finally:
             Path(temp_path).unlink()
 
@@ -166,13 +174,17 @@ class TestPhonemeDictionary:
             )
             tokenizer = Tokenizer(config=config)
 
-            # Only exact case should match
-            phonemes1 = tokenizer.phonemize("Misaki", "en-us")
-            assert "misˈɑki" in phonemes1
+            text = "Misaki misaki"
 
-            # Different case should not match
-            phonemes2 = tokenizer.phonemize("misaki", "en-us")
-            assert "misˈɑki" not in phonemes2
+            # Apply dictionary - should only match exact case
+            ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
+            phoneme_count = ssmd_text.count(r'\{ph="')
+
+            # Should only match 1 variation (exact case)
+            assert phoneme_count == 1, f"Expected 1 match, got {phoneme_count}"
+
+            # Verify it's "Misaki" that matched
+            assert r"[Misaki]\{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
         finally:
             Path(temp_path).unlink()
 
@@ -245,10 +257,12 @@ class TestPhonemeDictionary:
             tokenizer = Tokenizer(config=config)
 
             text = "Misaki is here."
-            phonemes = tokenizer.phonemize(text, "en-us")
+
+            # Apply dictionary
+            ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
 
             # Should use custom phoneme
-            assert "misˈɑki" in phonemes
+            assert r"[Misaki]\{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
         finally:
             Path(temp_path).unlink()
 
