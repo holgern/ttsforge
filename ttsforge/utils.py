@@ -1,6 +1,7 @@
 """Utility functions for ttsforge - config, GPU detection, encoding, etc."""
 
 import json
+import logging
 import platform
 import subprocess
 import sys
@@ -14,6 +15,10 @@ from platformdirs import user_cache_dir, user_config_dir
 from .constants import DEFAULT_CONFIG, PROGRAM_NAME
 
 warnings.filterwarnings("ignore")
+
+_LEGACY_GPU_KEY_WARNED = False
+_PHONEME_DICT_WARNED_PATHS: set[str] = set()
+_LOGGER = logging.getLogger(__name__)
 
 # Default encoding for subprocess
 DEFAULT_ENCODING = sys.getfilesystemencoding()
@@ -54,16 +59,108 @@ def get_user_cache_path(folder: Optional[str] = None) -> Path:
 
 def load_config() -> dict[str, Any]:
     """Load configuration from file, returning defaults if not found."""
+    global _LEGACY_GPU_KEY_WARNED
     try:
         config_path = get_user_config_path()
         if config_path.exists():
             with open(config_path, encoding="utf-8") as f:
                 user_config = json.load(f)
+                if (
+                    isinstance(user_config, dict)
+                    and "default_use_gpu" in user_config
+                    and "use_gpu" not in user_config
+                ):
+                    user_config["use_gpu"] = user_config["default_use_gpu"]
+                    if not _LEGACY_GPU_KEY_WARNED:
+                        _LEGACY_GPU_KEY_WARNED = True
+                        print(
+                            "Warning: config key 'default_use_gpu' is deprecated; "
+                            "use 'use_gpu' instead.",
+                            file=sys.stderr,
+                        )
                 # Merge with defaults to ensure all keys exist
                 return {**DEFAULT_CONFIG, **user_config}
     except Exception:
         pass
     return DEFAULT_CONFIG.copy()
+
+
+def resolve_conversion_defaults(
+    config: dict[str, Any], overrides: dict[str, Any]
+) -> dict[str, Any]:
+    """Resolve conversion defaults with CLI > config > DEFAULT_CONFIG."""
+    return {
+        "voice": overrides.get("voice")
+        or config.get("default_voice", DEFAULT_CONFIG["default_voice"]),
+        "language": overrides.get("language")
+        or config.get("default_language", DEFAULT_CONFIG["default_language"]),
+        "speed": overrides.get("speed")
+        if overrides.get("speed") is not None
+        else config.get("default_speed", DEFAULT_CONFIG["default_speed"]),
+        "split_mode": overrides.get("split_mode")
+        or config.get("default_split_mode", DEFAULT_CONFIG["default_split_mode"]),
+        "use_gpu": overrides.get("use_gpu")
+        if overrides.get("use_gpu") is not None
+        else config.get("use_gpu", DEFAULT_CONFIG["use_gpu"]),
+        "lang": overrides.get("lang")
+        if overrides.get("lang") is not None
+        else config.get("phonemization_lang", DEFAULT_CONFIG["phonemization_lang"]),
+    }
+
+
+def load_phoneme_dictionary(
+    path: str | Path,
+    *,
+    case_sensitive: bool = False,
+    log_callback: Callable[[str], None] | None = None,
+) -> dict[str, str] | None:
+    """Load a phoneme dictionary from JSON, returning None on failure."""
+    path_obj = Path(path)
+
+    def warn_once(message: str) -> None:
+        key = str(path_obj)
+        if key in _PHONEME_DICT_WARNED_PATHS:
+            return
+        _PHONEME_DICT_WARNED_PATHS.add(key)
+        if log_callback:
+            log_callback(message)
+        else:
+            _LOGGER.warning(message)
+
+    try:
+        with open(path_obj, encoding="utf-8") as f:
+            phoneme_data = json.load(f)
+
+        if not isinstance(phoneme_data, dict):
+            warn_once(
+                f"Phoneme dictionary at {path_obj} must be a JSON object, skipping."
+            )
+            return None
+
+        if "entries" in phoneme_data:
+            entries = phoneme_data.get("entries", {})
+            if not isinstance(entries, dict):
+                warn_once("Phoneme dictionary 'entries' must be an object, skipping.")
+                return None
+            phoneme_dict = {
+                word: entry["phoneme"] if isinstance(entry, dict) else entry
+                for word, entry in entries.items()
+            }
+        else:
+            phoneme_dict = phoneme_data
+
+        if not case_sensitive:
+            normalized: dict[str, str] = {}
+            for word, phoneme in phoneme_dict.items():
+                key = word.lower()
+                if key not in normalized:
+                    normalized[key] = phoneme
+            phoneme_dict = normalized
+
+        return phoneme_dict
+    except Exception as exc:
+        warn_once(f"Failed to load phoneme dictionary from {path_obj}: {exc}")
+        return None
 
 
 def save_config(config: dict[str, Any]) -> bool:

@@ -5,6 +5,7 @@ import tempfile
 from pathlib import Path
 from unittest.mock import patch
 
+from ttsforge.constants import DEFAULT_CONFIG
 from ttsforge.utils import (
     DEFAULT_ENCODING,
     detect_encoding,
@@ -18,6 +19,7 @@ from ttsforge.utils import (
     get_user_config_path,
     load_config,
     reset_config,
+    resolve_conversion_defaults,
     sanitize_filename,
     save_config,
 )
@@ -214,6 +216,61 @@ class TestConfigFunctions:
                 config = reset_config()
                 assert "custom_key" not in config
                 assert "default_voice" in config
+
+
+class TestResolveConversionDefaults:
+    """Tests for resolve_conversion_defaults helper."""
+
+    def test_respects_config_defaults(self):
+        """Defaults should fall back to config values."""
+        config = {
+            **DEFAULT_CONFIG,
+            "default_voice": "af_custom",
+            "default_language": "b",
+            "default_speed": 1.25,
+            "default_split_mode": "paragraph",
+            "use_gpu": True,
+            "phonemization_lang": "de",
+        }
+
+        resolved = resolve_conversion_defaults(config, {})
+
+        assert resolved["voice"] == "af_custom"
+        assert resolved["language"] == "b"
+        assert resolved["speed"] == 1.25
+        assert resolved["split_mode"] == "paragraph"
+        assert resolved["use_gpu"] is True
+        assert resolved["lang"] == "de"
+
+    def test_overrides_win(self):
+        """Overrides should take precedence over config values."""
+        config = {**DEFAULT_CONFIG, "use_gpu": False}
+        overrides = {
+            "voice": "am_custom",
+            "language": "e",
+            "speed": 1.5,
+            "split_mode": "sentence",
+            "use_gpu": True,
+            "lang": "fr",
+        }
+
+        resolved = resolve_conversion_defaults(config, overrides)
+
+        assert resolved["voice"] == "am_custom"
+        assert resolved["language"] == "e"
+        assert resolved["speed"] == 1.5
+        assert resolved["split_mode"] == "sentence"
+        assert resolved["use_gpu"] is True
+        assert resolved["lang"] == "fr"
+
+    def test_override_false_gpu(self):
+        """Explicit GPU disable should override config."""
+        config = {**DEFAULT_CONFIG, "use_gpu": True}
+        overrides = {"use_gpu": False}
+
+        resolved = resolve_conversion_defaults(config, overrides)
+
+        assert resolved["use_gpu"] is False
 
 
 class TestDetectEncoding:

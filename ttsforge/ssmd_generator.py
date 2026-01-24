@@ -99,30 +99,52 @@ def _inject_phoneme_substitutions(
     Returns:
         Text with phoneme substitutions injected
     """
-    result = text
+    if not phoneme_dict:
+        return text
 
-    # Sort by length (longest first) to handle multi-word entries
-    for word in sorted(phoneme_dict.keys(), key=len, reverse=True):
-        phoneme = phoneme_dict[word]
+    link_pattern = re.compile(r"\[[^\]]+\]\([^\)]+\)")
 
-        # Build regex pattern with word boundaries
-        if case_sensitive:
-            pattern = rf"\b({re.escape(word)})\b"
-        else:
-            pattern = rf"\b({re.escape(word)})\b"
+    words = [word for word in phoneme_dict.keys() if word]
+    if not words:
+        return text
 
-        # Replacement with SSMD phoneme syntax
-        # Preserve the original case of the matched word
-        def replacement(match, phoneme=phoneme):  # Bind loop variable
-            matched_word = match.group(1)
-            # Remove slashes if present in phoneme dictionary
-            clean_phoneme = phoneme.strip("/")
-            return f"[{matched_word}](ph: /{clean_phoneme}/)"
+    words = sorted(words, key=len, reverse=True)
+    alternation = "|".join(re.escape(word) for word in words)
+    boundary_pattern = rf"(?<!\w)({alternation})(?!\w)"
+    flags = 0 if case_sensitive else re.IGNORECASE
+    compiled = re.compile(boundary_pattern, flags=flags)
 
-        flags = 0 if case_sensitive else re.IGNORECASE
-        result = re.sub(pattern, replacement, result, flags=flags)
+    if case_sensitive:
+        lookup = phoneme_dict
+    else:
+        lookup = {}
+        for word, phoneme in phoneme_dict.items():
+            key = word.lower()
+            if key not in lookup:
+                lookup[key] = phoneme
 
-    return result
+    def replace(match: re.Match[str]) -> str:
+        matched_word = match.group(1)
+        key = matched_word if case_sensitive else matched_word.lower()
+        phoneme = lookup.get(key)
+        if not phoneme:
+            return matched_word
+        clean_phoneme = phoneme.strip("/")
+        return f"[{matched_word}](ph: /{clean_phoneme}/)"
+
+    segments: list[str] = []
+    last_index = 0
+    for match in link_pattern.finditer(text):
+        if match.start() > last_index:
+            segment = text[last_index : match.start()]
+            segments.append(compiled.sub(replace, segment))
+        segments.append(match.group(0))
+        last_index = match.end()
+
+    if last_index < len(text):
+        segments.append(compiled.sub(replace, text[last_index:]))
+
+    return "".join(segments)
 
 
 def _add_language_markers(text: str, mixed_language_config: dict | None = None) -> str:

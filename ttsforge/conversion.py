@@ -42,6 +42,7 @@ from .utils import (
     ensure_ffmpeg,
     format_duration,
     format_filename_template,
+    load_phoneme_dictionary,
     prevent_sleep_end,
     prevent_sleep_start,
     sanitize_filename,
@@ -858,25 +859,11 @@ class TTSConverter:
             # Prepare phoneme dictionary if available
             phoneme_dict = None
             if self.options.phoneme_dictionary_path:
-                try:
-                    import json
-
-                    with open(
-                        self.options.phoneme_dictionary_path, encoding="utf-8"
-                    ) as f:
-                        phoneme_data = json.load(f)
-                        # Handle both simple dict and metadata format
-                        if "entries" in phoneme_data:
-                            phoneme_dict = {
-                                word: entry["phoneme"]
-                                if isinstance(entry, dict)
-                                else entry
-                                for word, entry in phoneme_data["entries"].items()
-                            }
-                        else:
-                            phoneme_dict = phoneme_data
-                except Exception as e:
-                    self.log(f"Failed to load phoneme dictionary: {e}", "warning")
+                phoneme_dict = load_phoneme_dictionary(
+                    self.options.phoneme_dictionary_path,
+                    case_sensitive=self.options.phoneme_dict_case_sensitive,
+                    log_callback=lambda message: self.log(message, "warning"),
+                )
 
             # Prepare mixed-language config
             mixed_language_config = None
@@ -981,21 +968,11 @@ class TTSConverter:
         # Prepare phoneme dictionary if available
         phoneme_dict = None
         if self.options.phoneme_dictionary_path:
-            try:
-                import json
-
-                with open(self.options.phoneme_dictionary_path, encoding="utf-8") as f:
-                    phoneme_data = json.load(f)
-                    # Handle both simple dict and metadata format
-                    if "entries" in phoneme_data:
-                        phoneme_dict = {
-                            word: entry["phoneme"] if isinstance(entry, dict) else entry
-                            for word, entry in phoneme_data["entries"].items()
-                        }
-                    else:
-                        phoneme_dict = phoneme_data
-            except Exception as e:
-                self.log(f"Failed to load phoneme dictionary: {e}", "warning")
+            phoneme_dict = load_phoneme_dictionary(
+                self.options.phoneme_dictionary_path,
+                case_sensitive=self.options.phoneme_dict_case_sensitive,
+                log_callback=lambda message: self.log(message, "warning"),
+            )
 
         # Prepare mixed-language config
         mixed_language_config = None

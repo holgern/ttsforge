@@ -47,6 +47,7 @@ from ..utils import (
     format_filename_template,
     format_size,
     load_config,
+    resolve_conversion_defaults,
 )
 from .helpers import DEFAULT_SAMPLE_TEXT, console, parse_voice_parameter
 
@@ -931,6 +932,17 @@ def sample(
 
     # Load config for defaults
     user_config = load_config()
+    resolved_defaults = resolve_conversion_defaults(
+        user_config,
+        {
+            "voice": voice,
+            "language": language,
+            "speed": speed,
+            "split_mode": split_mode,
+            "use_gpu": use_gpu,
+            "lang": lang,
+        },
+    )
 
     # Parse mixed_language_allowed from comma-separated string
     parsed_mixed_language_allowed = None
@@ -940,19 +952,19 @@ def sample(
         ]
 
     # Auto-detect if voice is a blend
-    voice_value = voice or user_config.get("voice") or "af_bella"
+    voice_value = resolved_defaults["voice"]
     parsed_voice, parsed_voice_blend = parse_voice_parameter(voice_value)
 
     # Build conversion options (use ConversionOptions defaults if not specified)
     options = ConversionOptions(
         voice=parsed_voice or "af_bella",
         voice_blend=parsed_voice_blend,
-        language=language or user_config.get("language") or "a",
-        speed=speed or user_config.get("speed", 1.0),
+        language=resolved_defaults["language"],
+        speed=resolved_defaults["speed"],
         output_format=output_format,
-        use_gpu=use_gpu if use_gpu is not None else user_config.get("use_gpu", True),
-        split_mode=split_mode or user_config.get("split_mode", "auto"),
-        lang=lang or user_config.get("phonemization_lang"),
+        use_gpu=resolved_defaults["use_gpu"],
+        split_mode=resolved_defaults["split_mode"],
+        lang=resolved_defaults["lang"],
         use_mixed_language=(
             use_mixed_language or user_config.get("use_mixed_language", False)
         ),
@@ -1339,19 +1351,28 @@ def read(  # noqa: C901
 
     # Load config for defaults
     config = load_config()
-    effective_voice = voice or config.get("default_voice", "af_heart")
-    effective_language = language or config.get("default_language", "a")
-    effective_speed = speed if speed is not None else config.get("default_speed", 1.0)
-    effective_use_gpu = (
-        use_gpu if use_gpu is not None else config.get("default_use_gpu", False)
+    resolved_defaults = resolve_conversion_defaults(
+        config,
+        {
+            "voice": voice,
+            "language": language,
+            "speed": speed,
+            "split_mode": split_mode,
+            "use_gpu": use_gpu,
+            "lang": None,
+        },
     )
+    effective_voice = resolved_defaults["voice"]
+    effective_language = resolved_defaults["language"]
+    effective_speed = resolved_defaults["speed"]
+    effective_use_gpu = resolved_defaults["use_gpu"]
     # Content mode: chapters or pages
     effective_content_mode = content_mode or config.get(
         "default_content_mode", "chapters"
     )
     effective_page_size = page_size or config.get("default_page_size", 2000)
     # Use default_split_mode from config, map "auto" to "sentence" for streaming
-    config_split_mode = split_mode or config.get("default_split_mode", "sentence")
+    config_split_mode = resolved_defaults["split_mode"]
     # Map auto/clause/line to sentence for the read command
     if config_split_mode in ("auto", "clause", "line"):
         effective_split_mode = "sentence"
