@@ -64,6 +64,7 @@ class Chapter:
     content: str
     index: int = 0
     html_content: Optional[str] = None  # Optional HTML for emphasis detection
+    is_ssmd: bool = False
 
     @property
     def char_count(self) -> int:
@@ -526,6 +527,25 @@ class TTSConverter:
         """Load SSMD from disk or generate and save it."""
         ssmd_content: Optional[str] = None
         ssmd_hash = ""
+
+        if chapter.is_ssmd:
+            if ssmd_file.exists():
+                try:
+                    ssmd_content, ssmd_hash = load_ssmd_file(ssmd_file)
+                    self.log(f"Loaded SSMD from {ssmd_file.name}")
+                except SSMDGenerationError as e:
+                    self.log(f"Failed to load SSMD: {e}, using input", "warning")
+                    ssmd_content = None
+
+            if ssmd_content is None:
+                ssmd_content = chapter.text
+                ssmd_hash = save_ssmd_file(ssmd_content, ssmd_file)
+                self.log(f"Saved SSMD to {ssmd_file.name}")
+
+            warnings = validate_ssmd(ssmd_content)
+            for warning in warnings:
+                self.log(f"SSMD warning: {warning}", "warning")
+            return ssmd_content, ssmd_hash
 
         if ssmd_file.exists():
             try:

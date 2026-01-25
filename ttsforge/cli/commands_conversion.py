@@ -641,6 +641,7 @@ def convert(  # noqa: C901
                 content=ch.text,
                 index=ch.index,
                 html_content=html_content,
+                is_ssmd=ch.is_ssmd,
             )
         )
 
@@ -1521,7 +1522,7 @@ def read(  # noqa: C901
                 ]
                 content_label = "chapter"
 
-        elif input_file.suffix.lower() in (".txt", ".text", "*.ssmd"):
+        elif input_file.suffix.lower() in (".txt", ".text", ".ssmd"):
             # Plain text file - use InputReader's chapters
             text_chapters = reader.get_chapters()
 

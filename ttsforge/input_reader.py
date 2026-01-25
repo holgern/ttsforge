@@ -10,6 +10,8 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 
+from .utils import detect_encoding
+
 
 @dataclass
 class Metadata:
@@ -34,6 +36,7 @@ class Chapter:
     title: str
     text: str
     index: int = 0
+    is_ssmd: bool = False
 
     @property
     def char_count(self) -> int:
@@ -69,18 +72,20 @@ class InputReader:
         """Detect the file type based on extension.
 
         Returns:
-            File type: 'epub', 'txt', or 'pdf'
+            File type: 'epub', 'txt', 'ssmd', or 'pdf'
         """
         suffix = self.file_path.suffix.lower()
         if suffix == ".epub":
             return "epub"
-        elif suffix in [".txt", ".text", ".ssmd"]:
+        elif suffix == ".ssmd":
+            return "ssmd"
+        elif suffix in [".txt", ".text"]:
             return "txt"
         elif suffix == ".pdf":
             return "pdf"
         else:
             raise ValueError(
-                f"Unsupported file type: {suffix}. Supported types: .epub, .txt, .pdf"
+                f"Unsupported file type: {suffix}. Supported types: .epub, .txt, .ssmd, .pdf"
             )
 
     def get_metadata(self) -> Metadata:
@@ -96,6 +101,8 @@ class InputReader:
             self._metadata = self._get_epub_metadata()
         elif self.file_type == "txt":
             self._metadata = self._get_gutenberg_metadata()
+        elif self.file_type == "ssmd":
+            self._metadata = self._get_ssmd_metadata()
         elif self.file_type == "pdf":
             self._metadata = self._get_pdf_metadata()
 
@@ -114,6 +121,8 @@ class InputReader:
             self._chapters = self._get_epub_chapters()
         elif self.file_type == "txt":
             self._chapters = self._get_gutenberg_chapters()
+        elif self.file_type == "ssmd":
+            self._chapters = self._get_ssmd_chapters()
         elif self.file_type == "pdf":
             self._chapters = self._get_pdf_chapters()
 
@@ -216,7 +225,8 @@ class InputReader:
 
         Parses the header of a Gutenberg text file to extract metadata.
         """
-        with open(self.file_path, encoding="utf-8", errors="ignore") as f:
+        encoding = detect_encoding(self.file_path)
+        with open(self.file_path, encoding=encoding, errors="replace") as f:
             # Read first 1000 lines for metadata (Gutenberg header is typically short)
             header_lines = []
             for i, line in enumerate(f):
@@ -265,7 +275,8 @@ class InputReader:
         - "ONE", "TWO", etc. (capitalized chapter titles)
         - "PART I", etc.
         """
-        with open(self.file_path, encoding="utf-8", errors="ignore") as f:
+        encoding = detect_encoding(self.file_path)
+        with open(self.file_path, encoding=encoding, errors="replace") as f:
             full_text = f.read()
 
         # Find the start and end markers
@@ -350,6 +361,24 @@ class InputReader:
             metadata = self.get_metadata()
             title = metadata.title or self.file_path.stem
             return [Chapter(title=title, text=content, index=0)]
+
+    def _get_ssmd_metadata(self) -> Metadata:
+        """Extract metadata from an SSMD file."""
+        return Metadata(title=self.file_path.stem, authors=[], language=None)
+
+    def _get_ssmd_chapters(self) -> list[Chapter]:
+        """Read an SSMD file as a single chapter."""
+        encoding = detect_encoding(self.file_path)
+        with open(self.file_path, encoding=encoding, errors="replace") as f:
+            content = f.read()
+        return [
+            Chapter(
+                title=self.file_path.stem,
+                text=content,
+                index=0,
+                is_ssmd=True,
+            )
+        ]
 
     # PDF methods (placeholder for future implementation)
     def _get_pdf_metadata(self) -> Metadata:
