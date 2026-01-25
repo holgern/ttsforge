@@ -15,15 +15,7 @@ from typing import Any, Callable, Optional, Union
 import numpy as np
 import soundfile as sf
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-from pykokoro.onnx_backend import (
-    Kokoro,
-    VoiceBlend,
-    are_models_downloaded,
-    download_all_models,
-)
-from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
-from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
-from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
+from pykokoro.onnx_backend import VoiceBlend, are_models_downloaded, download_all_models
 
 from .constants import SAMPLE_RATE, SUPPORTED_OUTPUT_FORMATS
 from .phonemes import PhonemeBook, PhonemeChapter, PhonemeSegment
@@ -336,7 +328,6 @@ class PhonemeConverter:
         self.progress_callback = progress_callback
         self.log_callback = log_callback
         self._cancelled = False
-        self._kokoro: Optional[Kokoro] = None
         self._pipeline: Optional[KokoroPipeline] = None
         self._voice_style: Optional[Union[str, np.ndarray, VoiceBlend]] = None
 
@@ -362,18 +353,6 @@ class PhonemeConverter:
             download_all_models()
             self.log("Model download complete.")
 
-        # Initialize ONNX backend
-        self._kokoro = Kokoro(
-            model_path=self.options.model_path,
-            voices_path=self.options.voices_path,
-            use_gpu=self.options.use_gpu,
-        )
-
-        # Load voice database if specified
-        if self.options.voice_database and self.options.voice_database.exists():
-            self._kokoro.load_voice_database(self.options.voice_database)
-            self.log(f"Loaded voice database: {self.options.voice_database}")
-
         # Resolve voice (handle blending)
         if self.options.voice_blend:
             blend = VoiceBlend.parse(self.options.voice_blend)
@@ -381,18 +360,15 @@ class PhonemeConverter:
             voice_names = ", ".join(f"{v}:{int(w * 100)}%" for v, w in blend.voices)
             self.log(f"Using blended voice: {voice_names}")
         else:
-            # Check if voice is in database first
-            if self.options.voice_database:
-                db_voice = self._kokoro.get_voice_from_database(self.options.voice)
-                if db_voice is not None:
-                    self._voice_style = db_voice
-                    self.log(f"Using voice from database: {self.options.voice}")
-                else:
-                    self._voice_style = self.options.voice
-                    self.log(f"Using voice: {self.options.voice}")
-            else:
-                self._voice_style = self.options.voice
-                self.log(f"Using voice: {self.options.voice}")
+            self._voice_style = self.options.voice
+            self.log(f"Using voice: {self.options.voice}")
+
+        if self.options.voice_database:
+            self.log(
+                "voice_database is not supported with the standard pipeline; "
+                "using builtin voices",
+                "warning",
+            )
 
         if self.options.lang:
             from .conversion import get_onnx_lang_code
@@ -411,20 +387,16 @@ class PhonemeConverter:
             model_path=self.options.model_path,
             voices_path=self.options.voices_path,
         )
-        self._pipeline = KokoroPipeline(
-            pipeline_config,
-            phoneme_processing=OnnxPhonemeProcessorAdapter(self._kokoro),
-            audio_generation=OnnxAudioGenerationAdapter(self._kokoro),
-            audio_postprocessing=OnnxAudioPostprocessingAdapter(self._kokoro),
-        )
+        self._pipeline = KokoroPipeline(pipeline_config)
 
     def _build_generation_config(
-        self, lang_code: str, manual_pauses: bool
+        self, lang_code: str, manual_pauses: bool, is_phonemes: bool = False
     ) -> GenerationConfig:
         """Build GenerationConfig for a pipeline run."""
         return GenerationConfig(
             speed=self.options.speed,
             lang=lang_code,
+            is_phonemes=is_phonemes,
             pause_mode="manual" if manual_pauses else "tts",
             pause_clause=self.options.pause_clause,
             pause_sentence=self.options.pause_sentence,
@@ -433,17 +405,13 @@ class PhonemeConverter:
         )
 
     def _phoneme_segments_to_ssmd(self, segments: list[PhonemeSegment]) -> str:
-        """Build SSMD with phoneme overrides from segments."""
+        """Build SSMD text from phoneme segments."""
         parts: list[str] = []
         for idx, segment in enumerate(segments):
-            text = segment.text.strip()
-            if not text:
-                continue
             phonemes = segment.phonemes.strip()
-            if phonemes:
-                parts.append(f"[{text}](ph: {phonemes})")
-            else:
-                parts.append(text)
+            if not phonemes:
+                continue
+            parts.append(phonemes)
             if idx >= len(segments) - 1:
                 continue
             next_segment = segments[idx + 1]
@@ -715,7 +683,9 @@ class PhonemeConverter:
 
                 ssmd_text = self._phoneme_segments_to_ssmd(chapter.segments)
                 generation = self._build_generation_config(
-                    lang_code, manual_pauses=self.options.trim_silence
+                    lang_code,
+                    manual_pauses=self.options.trim_silence,
+                    is_phonemes=True,
                 )
                 result = self._pipeline.run(ssmd_text, generation=generation)
                 samples = result.audio
@@ -1234,7 +1204,9 @@ class PhonemeConverter:
 
                     ssmd_text = self._phoneme_segments_to_ssmd(chapter.segments)
                     generation = self._build_generation_config(
-                        lang_code, manual_pauses=self.options.trim_silence
+                        lang_code,
+                        manual_pauses=self.options.trim_silence,
+                        is_phonemes=True,
                     )
                     result = self._pipeline.run(ssmd_text, generation=generation)
                     samples = result.audio
