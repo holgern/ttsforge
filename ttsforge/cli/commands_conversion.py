@@ -1379,6 +1379,9 @@ def read(  # noqa: C901
     else:
         effective_split_mode = config_split_mode
     # Pause settings
+    effective_pause_clause = (
+        pause_clause if pause_clause is not None else config.get("pause_clause", 0.25)
+    )
     effective_pause_sentence = (
         pause_sentence
         if pause_sentence is not None
@@ -1393,6 +1396,9 @@ def read(  # noqa: C901
         pause_variance
         if pause_variance is not None
         else config.get("pause_variance", 0.05)
+    )
+    effective_trim_silence = (
+        trim_silence if trim_silence is not None else config.get("trim_silence", True)
     )
 
     # Get language code for TTS
@@ -1627,7 +1633,15 @@ def read(  # noqa: C901
             voices_path=voices_path,
             use_gpu=effective_use_gpu,
         )
-        generation = GenerationConfig(speed=effective_speed, lang=espeak_lang)
+        generation = GenerationConfig(
+            speed=effective_speed,
+            lang=espeak_lang,
+            pause_mode="manual" if effective_trim_silence else "tts",
+            pause_clause=effective_pause_clause,
+            pause_sentence=effective_pause_sentence,
+            pause_paragraph=effective_pause_paragraph,
+            pause_variance=effective_pause_variance,
+        )
         pipeline_config = PipelineConfig(
             voice=effective_voice,
             generation=generation,
