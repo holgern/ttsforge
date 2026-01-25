@@ -74,7 +74,7 @@ class InputReader:
         suffix = self.file_path.suffix.lower()
         if suffix == ".epub":
             return "epub"
-        elif suffix in [".txt", ".text"]:
+        elif suffix in [".txt", ".text", ".ssmd"]:
             return "txt"
         elif suffix == ".pdf":
             return "pdf"

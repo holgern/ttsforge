@@ -1515,7 +1515,7 @@ def read(  # noqa: C901
                 ]
                 content_label = "chapter"
 
-        elif input_file.suffix.lower() in (".txt", ".text"):
+        elif input_file.suffix.lower() in (".txt", ".text", "*.ssmd"):
             # Plain text file - use InputReader's chapters
             text_chapters = reader.get_chapters()
 
@@ -1668,6 +1668,7 @@ def read(  # noqa: C901
 
         def generate_audio(text_segment: str) -> tuple:
             """Generate audio for a text segment."""
+            print(text_segment)
             result = pipeline.run(text_segment)
             return result.audio, result.sample_rate
 

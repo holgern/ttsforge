@@ -4,11 +4,10 @@ import hashlib
 import json
 import os
 import re
-import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable, Optional, Union
+from typing import Any, Callable, Optional, Union
 
 import numpy as np
 import soundfile as sf
@@ -47,9 +46,6 @@ from .utils import (
     prevent_sleep_start,
     sanitize_filename,
 )
-
-if TYPE_CHECKING:
-    from phrasplit import Segment
 
 
 # Helper function for language code conversion
@@ -483,99 +479,6 @@ class TTSConverter:
             audio_postprocessing=OnnxAudioPostprocessingAdapter(self._kokoro),
         )
 
-    def _get_spacy_model(self) -> str:
-        """Get the appropriate spaCy model for the current language."""
-        lang = self.options.language
-        # Map ttsforge language codes to spaCy models
-        lang_to_spacy = {
-            "a": "en_core_web_sm",  # American English
-            "b": "en_core_web_sm",  # British English
-            "e": "es_core_news_sm",  # Spanish
-            "f": "fr_core_news_sm",  # French
-            "i": "it_core_news_sm",  # Italian
-            "p": "pt_core_news_sm",  # Portuguese
-            "z": "zh_core_web_sm",  # Chinese
-            "j": "ja_core_news_sm",  # Japanese
-            "k": "ko_core_news_sm",  # Korean
-            "h": "de_core_news_sm",  # German (Hindi not well supported)
-        }
-        return lang_to_spacy.get(lang, "en_core_web_sm")
-
-    def _split_text_with_phrasplit(
-        self, text: str, mode: Optional[str] = None
-    ) -> list["Segment"]:
-        """
-        Split text using phrasplit's split_text function.
-
-        Uses the unified split_text function which returns Segment namedtuples
-        containing text, paragraph index, and sentence index. This allows for
-        different pause lengths between paragraphs vs. sentences.
-
-        Args:
-            text: Text to split
-
-        Returns:
-            List of Segment namedtuples with text, paragraph, and sentence info
-        """
-        mode = mode or self.options.split_mode
-
-        if mode == "line":
-            # Simple line splitting - create pseudo-segments
-            # Each line is its own paragraph
-            from phrasplit import Segment
-
-            segments = []
-            for i, line in enumerate(text.split("\n")):
-                if line.strip():
-                    segments.append(Segment(text=line.strip(), paragraph=i, sentence=0))
-            return segments
-
-        if mode in ["paragraph", "sentence", "clause"]:
-            try:
-                from phrasplit import split_text
-
-                spacy_model = self._get_spacy_model()
-                return split_text(
-                    text,
-                    mode=mode,
-                    language_model=spacy_model,
-                    apply_corrections=True,
-                    split_on_colon=True,
-                )
-            except ImportError:
-                self.log(
-                    "phrasplit not installed, falling back to line mode", "warning"
-                )
-                from phrasplit import Segment
-
-                segments = []
-                for i, line in enumerate(text.split("\n")):
-                    if line.strip():
-                        segments.append(
-                            Segment(text=line.strip(), paragraph=i, sentence=0)
-                        )
-                return segments
-            except OSError as e:
-                self.log(
-                    f"spaCy model error: {e}, falling back to line mode", "warning"
-                )
-                from phrasplit import Segment
-
-                segments = []
-                for i, line in enumerate(text.split("\n")):
-                    if line.strip():
-                        segments.append(
-                            Segment(text=line.strip(), paragraph=i, sentence=0)
-                        )
-                return segments
-
-        # "auto" mode - return empty to use pattern-based splitting
-        return []
-
-    def _use_phrasplit_mode(self) -> bool:
-        """Check if we should use phrasplit for text splitting."""
-        return self.options.split_mode in ["paragraph", "sentence", "clause", "line"]
-
     def _build_generation_config(
         self, lang_code: str, manual_pauses: bool
     ) -> GenerationConfig:
@@ -590,144 +493,63 @@ class TTSConverter:
             pause_variance=self.options.pause_variance,
         )
 
-    def _segments_to_ssmd(self, segments: list["Segment"], mode: str) -> str:
-        """Build SSMD with pauses from pre-split segments."""
-        parts: list[str] = []
-        for idx, segment in enumerate(segments):
-            text = segment.text.strip()
-            if not text:
-                continue
-            parts.append(text)
-            if idx >= len(segments) - 1:
-                continue
-            next_segment = segments[idx + 1]
-            if next_segment.paragraph != segment.paragraph:
-                strength = "p"
-            elif mode == "clause":
-                strength = "c"
-            elif mode == "line" or mode == "paragraph":
-                strength = "p"
-            else:
-                strength = "s"
-            parts.append(f"...{strength}")
-            if strength == "p":
-                parts.append("\n")
-            else:
-                parts.append(" ")
-        return "".join(parts).strip()
-
-    def _generate_silence(self, duration: float) -> Any:
-        """Generate silence audio of given duration."""
-        samples = int(duration * SAMPLE_RATE)
-        return self._np.zeros(samples, dtype="float32")
-
-    def _write_audio_chunk(
+    def _build_ssmd_content(
         self,
-        audio: Any,
-        out_file: Optional[Any],
-        ffmpeg_proc: Optional[subprocess.Popen[bytes]],
-    ) -> None:
-        """Write audio chunk to file or ffmpeg process."""
-        if out_file is not None:
-            out_file.write(audio)
-        elif ffmpeg_proc is not None and ffmpeg_proc.stdin is not None:
-            if hasattr(audio, "numpy"):
-                audio_bytes = audio.numpy().astype("float32").tobytes()
-            else:
-                audio_bytes = audio.astype("float32").tobytes()
-            ffmpeg_proc.stdin.write(audio_bytes)
-
-    def _setup_output(
-        self, output_path: Path
-    ) -> tuple[Optional[Any], Optional[subprocess.Popen[bytes]]]:
-        """Set up output file or ffmpeg process based on format."""
-        fmt = self.options.output_format
-
-        if fmt in ["wav", "mp3", "flac"]:
-            out_file = sf.SoundFile(
-                str(output_path),
-                "w",
-                samplerate=SAMPLE_RATE,
-                channels=1,
-                format=fmt,
+        chapter: Chapter,
+        phoneme_dict: Optional[dict[str, str]],
+        mixed_language_config: Optional[dict[str, Any]],
+        html_content: Optional[str],
+    ) -> str:
+        """Generate SSMD content for a chapter, falling back to plain text."""
+        try:
+            return chapter_to_ssmd(
+                chapter_title=chapter.title,
+                chapter_text=chapter.text,
+                phoneme_dict=phoneme_dict,
+                phoneme_dict_case_sensitive=self.options.phoneme_dict_case_sensitive,
+                mixed_language_config=mixed_language_config,
+                html_content=html_content,
+                include_title=self.options.announce_chapters,
             )
-            return out_file, None
+        except SSMDGenerationError as e:
+            self.log(f"SSMD generation failed: {e}, using plain text", "error")
+            return chapter.text
 
-        # Formats requiring ffmpeg
-        ensure_ffmpeg()
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
-
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-thread_queue_size",
-            "32768",
-            "-f",
-            "f32le",
-            "-ar",
-            str(SAMPLE_RATE),
-            "-ac",
-            "1",
-            "-i",
-            "pipe:0",
-        ]
-
-        if fmt == "m4b":
-            # Add cover image if provided
-            if self.options.cover_image and self.options.cover_image.exists():
-                cmd.extend(
-                    [
-                        "-i",
-                        str(self.options.cover_image),
-                        "-map",
-                        "0:a",
-                        "-map",
-                        "1",
-                        "-c:v",
-                        "copy",
-                        "-disposition:v",
-                        "attached_pic",
-                    ]
-                )
-            cmd.extend(
-                [
-                    "-c:a",
-                    "aac",
-                    "-q:a",
-                    "2",
-                    "-movflags",
-                    "+faststart+use_metadata_tags",
-                ]
-            )
-            # Add metadata
-            if self.options.title:
-                cmd.extend(["-metadata", f"title={self.options.title}"])
-            if self.options.author:
-                cmd.extend(["-metadata", f"artist={self.options.author}"])
-        elif fmt == "opus":
-            cmd.extend(["-c:a", "libopus", "-b:a", "24000"])
-
-        cmd.append(str(output_path))
-
-        ffmpeg_proc = create_process(
-            cmd, stdin=subprocess.PIPE, text=False, suppress_output=True
-        )
-        return None, ffmpeg_proc  # type: ignore[return-value]
-
-    def _finalize_output(
+    def _load_or_generate_ssmd(
         self,
-        out_file: Optional[Any],
-        ffmpeg_proc: Optional[subprocess.Popen[bytes]],
-    ) -> None:
-        """Finalize and close output file/process."""
-        if out_file is not None:
-            out_file.close()
-        elif ffmpeg_proc is not None:
-            if ffmpeg_proc.stdin is not None:
-                ffmpeg_proc.stdin.close()
-            ffmpeg_proc.wait()
+        chapter: Chapter,
+        ssmd_file: Path,
+        phoneme_dict: Optional[dict[str, str]],
+        mixed_language_config: Optional[dict[str, Any]],
+        html_content: Optional[str],
+    ) -> tuple[str, str]:
+        """Load SSMD from disk or generate and save it."""
+        ssmd_content: Optional[str] = None
+        ssmd_hash = ""
+
+        if ssmd_file.exists():
+            try:
+                ssmd_content, ssmd_hash = load_ssmd_file(ssmd_file)
+                self.log(f"Loaded SSMD from {ssmd_file.name}")
+                warnings = validate_ssmd(ssmd_content)
+                for warning in warnings:
+                    self.log(f"SSMD warning: {warning}", "warning")
+            except SSMDGenerationError as e:
+                self.log(f"Failed to load SSMD: {e}, regenerating...", "warning")
+                ssmd_content = None
+
+        if ssmd_content is None:
+            self.log(f"Generating SSMD for chapter: {chapter.title}")
+            ssmd_content = self._build_ssmd_content(
+                chapter,
+                phoneme_dict=phoneme_dict,
+                mixed_language_config=mixed_language_config,
+                html_content=html_content,
+            )
+            ssmd_hash = save_ssmd_file(ssmd_content, ssmd_file)
+            self.log(f"Saved SSMD to {ssmd_file.name}")
+
+        return ssmd_content, ssmd_hash
 
     def _add_chapters_to_m4b(
         self,
@@ -797,114 +619,18 @@ class TTSConverter:
         os.replace(tmp_path, output_path)
         chapters_file.unlink()
 
-    def _convert_single_chapter_to_wav(
+    def _render_chapter_wav(
         self,
         chapter: Chapter,
         output_file: Path,
-        ssmd_file: Optional[Path] = None,
-        html_content: Optional[str] = None,
-        progress: Optional[ConversionProgress] = None,
-        start_time: Optional[float] = None,
-        total_chars: int = 0,
-        chars_before: int = 0,
-    ) -> tuple[float, int, str]:
-        """
-        Convert a single chapter to a WAV file using SSMD intermediate format.
-
-        Args:
-            chapter: Chapter to convert
-            output_file: Output WAV file path
-            ssmd_file: Optional path to SSMD file (if None, will be generated)
-            html_content: Optional HTML content for emphasis detection
-            progress: Optional progress object to update
-            start_time: Conversion start time for ETA calculation
-            total_chars: Total characters in conversion
-            chars_before: Characters processed before this chapter
-
-        Returns:
-            Tuple of (duration in seconds, characters processed, SSMD hash)
-        """
-        chars_processed = 0
-
-        # Get language code for ONNX
-        # Use lang override if provided, otherwise use language from options
+        ssmd_content: str,
+    ) -> float:
+        """Render SSMD content to a chapter WAV file."""
         effective_lang = (
             self.options.lang if self.options.lang else self.options.language
         )
         lang_code = get_onnx_lang_code(effective_lang)
 
-        # Generate or load SSMD content
-        ssmd_content = None
-        ssmd_hash = None
-
-        if ssmd_file and ssmd_file.exists():
-            # Load existing SSMD file
-            try:
-                ssmd_content, ssmd_hash = load_ssmd_file(ssmd_file)
-                self.log(f"Loaded SSMD from {ssmd_file.name}")
-
-                # Validate SSMD content
-                warnings = validate_ssmd(ssmd_content)
-                if warnings:
-                    for warning in warnings:
-                        self.log(f"SSMD warning: {warning}", "warning")
-            except SSMDGenerationError as e:
-                self.log(f"Failed to load SSMD: {e}, regenerating...", "warning")
-                ssmd_content = None
-
-        if ssmd_content is None:
-            # Generate SSMD from chapter
-            self.log(f"Generating SSMD for chapter: {chapter.title}")
-
-            # Prepare phoneme dictionary if available
-            phoneme_dict = None
-            if self.options.phoneme_dictionary_path:
-                phoneme_dict = load_phoneme_dictionary(
-                    self.options.phoneme_dictionary_path,
-                    case_sensitive=self.options.phoneme_dict_case_sensitive,
-                    log_callback=lambda message: self.log(message, "warning"),
-                )
-
-            # Prepare mixed-language config
-            mixed_language_config = None
-            if self.options.use_mixed_language:
-                mixed_language_config = {
-                    "use_mixed_language": True,
-                    "primary": self.options.mixed_language_primary,
-                    "allowed": self.options.mixed_language_allowed,
-                    "confidence": self.options.mixed_language_confidence,
-                }
-
-            try:
-                ssmd_content = chapter_to_ssmd(
-                    chapter_title=chapter.title,
-                    chapter_text=chapter.text,
-                    phoneme_dict=phoneme_dict,
-                    phoneme_dict_case_sensitive=self.options.phoneme_dict_case_sensitive,
-                    mixed_language_config=mixed_language_config,
-                    html_content=html_content,
-                    include_title=self.options.announce_chapters,
-                )
-
-                # Save SSMD file if path provided
-                if ssmd_file:
-                    ssmd_hash = save_ssmd_file(ssmd_content, ssmd_file)
-                    self.log(f"Saved SSMD to {ssmd_file.name}")
-                else:
-                    # Generate hash even if not saving
-                    import hashlib
-
-                    ssmd_hash = hashlib.md5(ssmd_content.encode("utf-8")).hexdigest()[
-                        :12
-                    ]
-
-            except SSMDGenerationError as e:
-                # Fall back to plain text if SSMD generation fails
-                self.log(f"SSMD generation failed: {e}, using plain text", "error")
-                ssmd_content = chapter.text
-                ssmd_hash = ""
-
-        # Open WAV file for writing
         with sf.SoundFile(
             str(output_file),
             "w",
@@ -912,101 +638,15 @@ class TTSConverter:
             channels=1,
             format="wav",
         ) as out_file:
-            duration = 0.0
-
-            # Convert SSMD to audio using the pipeline
             assert self._pipeline is not None
-            assert ssmd_content is not None
-
             generation = self._build_generation_config(
                 lang_code, manual_pauses=self.options.trim_silence
             )
             result = self._pipeline.run(ssmd_content, generation=generation)
             samples = result.audio
-            _ = result.sample_rate
-
             out_file.write(samples)
-            duration += len(samples) / SAMPLE_RATE
 
-            # Update progress once for entire chapter
-            chars_processed = len(chapter.text)
-            if progress and self.progress_callback:
-                progress.chars_processed = chars_before + chars_processed
-                progress.current_text = (
-                    f"Completed chapter: {chapter.title or 'Untitled'}"
-                )
-                if start_time and total_chars > 0:
-                    elapsed = time.time() - start_time
-                    if chars_processed > 0 and elapsed > 0.5:
-                        avg_time = elapsed / chars_processed
-                        remaining = total_chars - progress.chars_processed
-                        progress.estimated_remaining = avg_time * remaining
-                    progress.elapsed_time = elapsed
-                self.progress_callback(progress)
-
-        return duration, chars_processed, ssmd_hash or ""
-
-    def _generate_ssmd_only(
-        self,
-        chapter: Chapter,
-        ssmd_file: Path,
-        html_content: Optional[str] = None,
-    ) -> str:
-        """
-        Generate only SSMD file for a chapter without creating audio.
-
-        Args:
-            chapter: Chapter to convert
-            ssmd_file: Path to save SSMD file
-            html_content: Optional HTML content for emphasis detection
-
-        Returns:
-            SSMD hash string
-        """
-        self.log(f"Generating SSMD for chapter: {chapter.title}")
-
-        # Prepare phoneme dictionary if available
-        phoneme_dict = None
-        if self.options.phoneme_dictionary_path:
-            phoneme_dict = load_phoneme_dictionary(
-                self.options.phoneme_dictionary_path,
-                case_sensitive=self.options.phoneme_dict_case_sensitive,
-                log_callback=lambda message: self.log(message, "warning"),
-            )
-
-        # Prepare mixed-language config
-        mixed_language_config = None
-        if self.options.use_mixed_language:
-            mixed_language_config = {
-                "use_mixed_language": True,
-                "primary": self.options.mixed_language_primary,
-                "allowed": self.options.mixed_language_allowed,
-                "confidence": self.options.mixed_language_confidence,
-            }
-
-        try:
-            ssmd_content = chapter_to_ssmd(
-                chapter_title=chapter.title,
-                chapter_text=chapter.text,
-                phoneme_dict=phoneme_dict,
-                phoneme_dict_case_sensitive=self.options.phoneme_dict_case_sensitive,
-                mixed_language_config=mixed_language_config,
-                html_content=html_content,
-                include_title=self.options.announce_chapters,
-            )
-
-            # Save SSMD file
-            ssmd_hash = save_ssmd_file(ssmd_content, ssmd_file)
-            self.log(f"Saved SSMD to {ssmd_file.name}")
-
-            return ssmd_hash
-
-        except SSMDGenerationError as e:
-            # Fall back to plain text if SSMD generation fails
-            self.log(f"SSMD generation failed: {e}, using plain text", "error")
-            ssmd_content = chapter.text
-            ssmd_hash = save_ssmd_file(ssmd_content, ssmd_file)
-            return ssmd_hash
+        return len(samples) / SAMPLE_RATE
 
     def _merge_chapter_files(
         self,
@@ -1292,6 +932,23 @@ class TTSConverter:
             # Initialize pipeline
             self._init_pipeline()
 
+            phoneme_dict = None
+            if self.options.phoneme_dictionary_path:
+                phoneme_dict = load_phoneme_dictionary(
+                    self.options.phoneme_dictionary_path,
+                    case_sensitive=self.options.phoneme_dict_case_sensitive,
+                    log_callback=lambda message: self.log(message, "warning"),
+                )
+
+            mixed_language_config = None
+            if self.options.use_mixed_language:
+                mixed_language_config = {
+                    "use_mixed_language": True,
+                    "primary": self.options.mixed_language_primary,
+                    "allowed": self.options.mixed_language_allowed,
+                    "confidence": self.options.mixed_language_confidence,
+                }
+
             total_chars = sum(ch.char_count for ch in chapters)
             # Account for already completed chapters
             chars_already_done = sum(
@@ -1395,53 +1052,34 @@ class TTSConverter:
                 # Generate SSMD filename (same as WAV but with .ssmd extension)
                 ssmd_filename = chapter_filename.replace(".wav", ".ssmd")
                 ssmd_file = work_dir / ssmd_filename
+                html_content = (
+                    chapter.html_content if self.options.detect_emphasis else None
+                )
+                ssmd_content, ssmd_hash = self._load_or_generate_ssmd(
+                    chapter,
+                    ssmd_file,
+                    phoneme_dict=phoneme_dict,
+                    mixed_language_config=mixed_language_config,
+                    html_content=html_content,
+                )
 
                 # If generate_ssmd_only mode, just generate SSMD and skip audio
                 if self.options.generate_ssmd_only:
-                    # Generate SSMD only (skip if file already exists)
-                    if ssmd_file.exists():
-                        ch_num = chapter_idx + 1
-                        self.log(f"SSMD already exists for chapter {ch_num}, skipping")
-                        try:
-                            _, ssmd_hash = load_ssmd_file(ssmd_file)
-                        except SSMDGenerationError:
-                            ssmd_hash = ""
-                    else:
-                        # Generate SSMD
-                        ssmd_hash = self._generate_ssmd_only(
-                            chapter,
-                            ssmd_file,
-                            html_content=chapter.html_content
-                            if self.options.detect_emphasis
-                            else None,
-                        )
-
-                    # Update state
                     chapter_state.completed = True
                     chapter_state.ssmd_file = ssmd_filename
                     chapter_state.ssmd_hash = ssmd_hash
                     state.save(state_file)
 
-                    # Update progress
                     chars_processed += chapter.char_count
                     progress.chars_processed = chars_processed
                     if self.progress_callback:
                         self.progress_callback(progress)
+                    continue
 
-                    continue  # Skip audio generation
-
-                # Convert chapter to WAV using SSMD intermediate format
-                duration, _, ssmd_hash = self._convert_single_chapter_to_wav(
+                duration = self._render_chapter_wav(
                     chapter,
                     chapter_file,
-                    ssmd_file=ssmd_file,
-                    html_content=chapter.html_content
-                    if self.options.detect_emphasis
-                    else None,
-                    progress=progress,
-                    start_time=start_time,
-                    total_chars=total_chars,
-                    chars_before=chars_processed,
+                    ssmd_content,
                 )
 
                 if self._cancelled:
@@ -1466,6 +1104,9 @@ class TTSConverter:
                 # Update progress
                 chars_processed += chapter.char_count
                 progress.chars_processed = chars_processed
+                progress.current_text = (
+                    f"Completed chapter: {chapter.title or 'Untitled'}"
+                )
                 elapsed = time.time() - start_time
                 if chars_processed > chars_already_done and elapsed > 0.5:
                     chars_in_session = chars_processed - chars_already_done
@@ -1524,170 +1165,29 @@ class TTSConverter:
         chapters: list[Chapter],
         output_path: Path,
     ) -> ConversionResult:
-        """
-        Convert a list of chapters to audio.
+        """Convert a list of chapters to audio using the SSMD pipeline."""
+        result = self.convert_chapters_resumable(
+            chapters=chapters,
+            output_path=output_path,
+            resume=self.options.resume,
+        )
+        self._cleanup_chapter_dir(result)
+        return result
 
-        Args:
-            chapters: List of Chapter objects
-            output_path: Output file path
+    def _cleanup_chapter_dir(self, result: ConversionResult) -> None:
+        if self.options.generate_ssmd_only:
+            return
+        if (
+            result.success
+            and result.chapters_dir
+            and not self.options.keep_chapter_files
+        ):
+            import shutil
 
-        Returns:
-            ConversionResult with success status and paths
-        """
-        if not chapters:
-            return ConversionResult(
-                success=False, error_message="No chapters to convert"
-            )
-
-        if self.options.output_format not in SUPPORTED_OUTPUT_FORMATS:
-            return ConversionResult(
-                success=False,
-                error_message=f"Unsupported format: {self.options.output_format}",
-            )
-
-        self._cancelled = False
-        prevent_sleep_start()
-
-        try:
-            self._init_pipeline()
-
-            total_chars = sum(ch.char_count for ch in chapters)
-            chars_processed = 0
-            start_time = time.time()
-            current_time = 0.0
-            chapter_times: list[dict[str, Any]] = []
-
-            # Set up output
-            out_file, ffmpeg_proc = self._setup_output(output_path)
-
-            # Determine splitting strategy
-            use_segmented_ssmd = (
-                self.options.trim_silence or self.options.split_mode != "auto"
-            )
-            segment_mode = (
-                self.options.split_mode
-                if self.options.split_mode != "auto"
-                else "sentence"
-            )
-
-            progress = ConversionProgress(
-                total_chapters=len(chapters),
-                total_chars=total_chars,
-            )
-
-            for chapter_idx, chapter in enumerate(chapters):
-                if self._cancelled:
-                    self._finalize_output(out_file, ffmpeg_proc)
-                    return ConversionResult(success=False, error_message="Cancelled")
-
-                chapter_start = current_time
-                chapter_times.append(
-                    {
-                        "title": chapter.title,
-                        "start": chapter_start,
-                        "end": 0.0,
-                    }
-                )
-
-                progress.current_chapter = chapter_idx + 1
-                progress.chapter_name = chapter.title
-
-                self.log(f"Chapter {chapter_idx + 1}/{len(chapters)}: {chapter.title}")
-
-                # Get language code for ONNX
-                # Use lang override if provided, otherwise use language from options
-                effective_lang = (
-                    self.options.lang if self.options.lang else self.options.language
-                )
-                lang_code = get_onnx_lang_code(effective_lang)
-
-                # Generate TTS for this chapter
-                segments: list[Segment] = []
-                if use_segmented_ssmd:
-                    segments = self._split_text_with_phrasplit(
-                        chapter.content, mode=segment_mode
-                    )
-                    segments = [s for s in segments if s.text.strip()]
-                    ssmd_text = self._segments_to_ssmd(segments, segment_mode)
-                    if not ssmd_text:
-                        ssmd_text = chapter.content
-
-                    generation = self._build_generation_config(
-                        lang_code, manual_pauses=self.options.trim_silence
-                    )
-                    assert self._pipeline is not None
-                    result = self._pipeline.run(ssmd_text, generation=generation)
-                    samples = result.audio
-                else:
-                    generation = self._build_generation_config(
-                        lang_code, manual_pauses=False
-                    )
-                    assert self._pipeline is not None
-                    result = self._pipeline.run(chapter.content, generation=generation)
-                    samples = result.audio
-
-                if not self._cancelled:
-                    self._write_audio_chunk(samples, out_file, ffmpeg_proc)
-                    chunk_duration = len(samples) / SAMPLE_RATE
-                    current_time += chunk_duration
-
-                    if use_segmented_ssmd:
-                        segment_chars = (
-                            sum(len(seg.text) for seg in segments)
-                            if segments
-                            else len(chapter.content)
-                        )
-                        chars_processed += segment_chars
-                        progress.chars_processed = chars_processed
-                        progress.current_text = (
-                            f"Completed chapter with {len(segments)} segments"
-                        )
-                    else:
-                        chars_processed += len(chapter.content)
-                        progress.chars_processed = chars_processed
-                        progress.current_text = (
-                            f"Completed chapter: {chapter.title or 'Untitled'}"
-                        )
-
-                    elapsed = time.time() - start_time
-                    if chars_processed > 0 and elapsed > 0.5:
-                        avg_time = elapsed / chars_processed
-                        remaining = total_chars - chars_processed
-                        progress.estimated_remaining = avg_time * remaining
-                    progress.elapsed_time = elapsed
-
-                    if self.progress_callback:
-                        self.progress_callback(progress)
-
-                # Add silence between chapters (except after last)
-                if chapter_idx < len(chapters) - 1:
-                    silence = self._generate_silence(
-                        self.options.silence_between_chapters
-                    )
-                    self._write_audio_chunk(silence, out_file, ffmpeg_proc)
-                    current_time += self.options.silence_between_chapters
-
-                chapter_times[-1]["end"] = current_time
-
-            # Finalize
-            self.log("Finalizing audio...")
-            self._finalize_output(out_file, ffmpeg_proc)
-
-            # Add chapters to m4b
-            self._add_chapters_to_m4b(output_path, chapter_times)
-
-            return ConversionResult(
-                success=True,
-                output_path=output_path,
-            )
-
-        except Exception as e:
-            import traceback
-
-            error_msg = f"{str(e)}\n\nTraceback:\n{traceback.format_exc()}"
-            return ConversionResult(success=False, error_message=error_msg)
-        finally:
-            prevent_sleep_end()
+            try:
+                shutil.rmtree(result.chapters_dir)
+            except Exception:
+                pass
 
     def convert_text(self, text: str, output_path: Path) -> ConversionResult:
         """
@@ -1773,26 +1273,14 @@ class TTSConverter:
             except Exception:
                 pass
 
-        # Use resumable conversion if enabled
-        if self.options.resume:
-            result = self.convert_chapters_resumable(
-                chapters, output_path, source_file=epub_path, resume=True
-            )
-            # Clean up chapter files unless keep_chapter_files is set
-            if (
-                result.success
-                and result.chapters_dir
-                and not self.options.keep_chapter_files
-            ):
-                import shutil
-
-                try:
-                    shutil.rmtree(result.chapters_dir)
-                except Exception:
-                    pass
-            return result
-
-        return self.convert_chapters(chapters, output_path)
+        result = self.convert_chapters_resumable(
+            chapters,
+            output_path,
+            source_file=epub_path,
+            resume=self.options.resume,
+        )
+        self._cleanup_chapter_dir(result)
+        return result
 
 
 def parse_text_chapters(text: str) -> list[Chapter]:
