@@ -195,6 +195,43 @@ def _add_structural_breaks(text: str) -> str:
     return result
 
 
+def _strip_redundant_title(chapter_title: str, chapter_text: str) -> str:
+    """Remove a duplicated chapter title from the start of the text."""
+    title = chapter_title.strip()
+    if not title:
+        return chapter_text
+
+    lines = chapter_text.splitlines()
+    first_idx = None
+    for idx, line in enumerate(lines):
+        if line.strip():
+            first_idx = idx
+            break
+
+    if first_idx is None:
+        return chapter_text
+
+    first_line = lines[first_idx]
+    title_pattern = re.compile(
+        rf"^\s*{re.escape(title)}(?:\b|[\s:;\-\u2013\u2014])",
+        re.IGNORECASE,
+    )
+    if not title_pattern.search(first_line):
+        return chapter_text
+
+    trimmed_line = title_pattern.sub("", first_line, count=1).lstrip(
+        " \t:;\-\u2013\u2014"
+    )
+    if trimmed_line:
+        lines[first_idx] = trimmed_line
+        return "\n".join(lines[first_idx:]).lstrip()
+
+    remaining = lines[first_idx + 1 :]
+    while remaining and not remaining[0].strip():
+        remaining = remaining[1:]
+    return "\n".join(remaining).lstrip()
+
+
 def chapter_to_ssmd(
     chapter_title: str,
     chapter_text: str,
@@ -223,6 +260,8 @@ def chapter_to_ssmd(
     """
     try:
         result = chapter_text
+        if include_title and chapter_title:
+            result = _strip_redundant_title(chapter_title, result)
 
         # Step 1: Detect emphasis from HTML if available
         emphasis_map = {}
