@@ -225,3 +225,5 @@ demo_*.py
 # Test data files
 test_*.txt
 punctuation_phonemes.json
+TASKS.md
+context_ttsforge.md
