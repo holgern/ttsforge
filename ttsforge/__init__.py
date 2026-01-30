@@ -15,9 +15,9 @@ from pykokoro.onnx_backend import (
 from pykokoro.tokenizer import (
     EspeakConfig,
     MAX_PHONEME_LENGTH,
-    SUPPORTED_LANGUAGES,
     Tokenizer,
 )
+from pykokoro.constants import SUPPORTED_LANGUAGES
 
 from .constants import (
     DEFAULT_CONFIG,

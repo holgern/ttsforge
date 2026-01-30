@@ -177,7 +177,7 @@ def generate_phoneme_suggestions(
     for name, count in names.items():
         try:
             # Generate phoneme using kokorog2p
-            phoneme = phonemize(name, language)
+            phoneme = phonemize(name, language=language).phonemes
 
             # Wrap in / / format for dictionary
             phoneme_formatted = f"/{phoneme}/"

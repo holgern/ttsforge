@@ -349,13 +349,14 @@ class TestPhonemeChapterWithTokenizer:
     def test_add_text(self, tokenizer):
         """Test adding text with tokenizer."""
         chapter = PhonemeChapter(title="Chapter 1")
-        segments = chapter.add_text("hello world", tokenizer)
+        segments = chapter.add_text("Hello world!", tokenizer)
 
         assert len(segments) == 1
         segment = segments[0]
-        assert segment.text == "hello world"
+        assert segment.text == "Hello world!"
         assert len(segment.phonemes) > 0
         assert len(segment.tokens) > 0
+        assert "!" in segment.phonemes
         assert segment.lang == "en-us"
 
     def test_add_text_with_lang(self, tokenizer):

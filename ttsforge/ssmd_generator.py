@@ -351,36 +351,3 @@ def load_ssmd_file(ssmd_path: Path) -> tuple[str, str]:
         ) from e
 
 
-def validate_ssmd(ssmd_content: str) -> list[str]:
-    """Validate SSMD content and return list of warnings.
-
-    Args:
-        ssmd_content: SSMD content to validate
-
-    Returns:
-        List of warning messages (empty if valid)
-    """
-    warnings = []
-
-    # Check for common syntax errors
-    # Unmatched emphasis markers
-    if ssmd_content.count("*") % 2 != 0:
-        warnings.append("Unmatched emphasis markers (*) detected")
-
-    # Malformed phoneme syntax
-    phoneme_pattern = r"\[([^\]]+)\]\(ph:\s*([^\)]+)\)"
-    for match in re.finditer(phoneme_pattern, ssmd_content):
-        phoneme = match.group(2).strip()
-        if not phoneme.startswith("/") or not phoneme.endswith("/"):
-            warnings.append(
-                f"Phoneme '{phoneme}' should be wrapped in forward slashes (/phoneme/)"
-            )
-
-    # Malformed language markers
-    lang_pattern = r"\[([^\]]+)\]\(([a-z]{2}(?:-[a-z]{2})?)\)"
-    for match in re.finditer(lang_pattern, ssmd_content):
-        lang_code = match.group(2)
-        if len(lang_code) > 5:  # Basic validation
-            warnings.append(f"Suspicious language code: {lang_code}")
-
-    return warnings

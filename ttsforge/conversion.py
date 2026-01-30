@@ -34,7 +34,6 @@ from .ssmd_generator import (
     chapter_to_ssmd,
     load_ssmd_file,
     save_ssmd_file,
-    validate_ssmd,
 )
 from .utils import (
     create_process,
@@ -542,18 +541,12 @@ class TTSConverter:
                 ssmd_hash = save_ssmd_file(ssmd_content, ssmd_file)
                 self.log(f"Saved SSMD to {ssmd_file.name}")
 
-            warnings = validate_ssmd(ssmd_content)
-            for warning in warnings:
-                self.log(f"SSMD warning: {warning}", "warning")
             return ssmd_content, ssmd_hash
 
         if ssmd_file.exists():
             try:
                 ssmd_content, ssmd_hash = load_ssmd_file(ssmd_file)
                 self.log(f"Loaded SSMD from {ssmd_file.name}")
-                warnings = validate_ssmd(ssmd_content)
-                for warning in warnings:
-                    self.log(f"SSMD warning: {warning}", "warning")
             except SSMDGenerationError as e:
                 self.log(f"Failed to load SSMD: {e}, regenerating...", "warning")
                 ssmd_content = None

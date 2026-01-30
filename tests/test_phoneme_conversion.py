@@ -246,8 +246,8 @@ class TestPhonemeConverter:
         )
         ch1.add_segment(
             PhonemeSegment(
-                text="How are you",
-                phonemes="haʊ ɑːr juː",
+                text="How are you?",
+                phonemes="haʊ ɑːr juː?",
                 tokens=[60, 61, 62, 63, 64, 65],
             )
         )
@@ -363,8 +363,8 @@ class TestPhonemeConverterConversion:
         ch2 = book.create_chapter("Chapter 2")
         ch2.add_segment(
             PhonemeSegment(
-                text="World",
-                phonemes="wɜːld",
+                text="World!",
+                phonemes="wɜːld!",
                 tokens=[100, 101],
             )
         )
