@@ -133,10 +133,10 @@ from .helpers import DEFAULT_SAMPLE_TEXT, console, parse_voice_parameter
     help="Random variance added to pauses in seconds (default: 0.05).",
 )
 @click.option(
-    "--trim-silence/--no-trim-silence",
-    "trim_silence",
+    "--pause-mode",
+    type=str,
     default=None,
-    help="Trim leading/trailing silence from audio (default: enabled).",
+    help="Pause mode: 'tts', 'manual', or 'auto' (default: auto).",
 )
 @click.option(
     "--announce-chapters/--no-announce-chapters",
@@ -283,7 +283,7 @@ def convert(  # noqa: C901
     pause_sentence: Optional[float],
     pause_paragraph: Optional[float],
     pause_variance: Optional[float],
-    trim_silence: Optional[bool],
+    pause_mode: Optional[str],
     announce_chapters: Optional[bool],
     chapter_pause: Optional[float],
     title: Optional[str],
@@ -537,10 +537,8 @@ def convert(  # noqa: C901
             if pause_variance is not None
             else config.get("pause_variance", 0.05)
         ),
-        trim_silence=(
-            trim_silence
-            if trim_silence is not None
-            else config.get("trim_silence", True)
+        pause_mode=(
+            pause_mode if pause_mode is not None else config.get("pause_mode", "auto")
         ),
         announce_chapters=(
             announce_chapters
@@ -1278,8 +1276,8 @@ def _show_conversion_summary(
     help="Random variance added to pauses in seconds.",
 )
 @click.option(
-    "--trim-silence/--no-trim-silence",
-    "trim_silence",
+    "--pause-mode",
+    type=str,
     default=None,
     help="Trim leading/trailing silence from audio.",
 )
@@ -1304,7 +1302,7 @@ def read(  # noqa: C901
     pause_sentence: Optional[float],
     pause_paragraph: Optional[float],
     pause_variance: Optional[float],
-    trim_silence: Optional[bool],
+    pause_mode: Optional[str],
 ) -> None:
     """Read an EPUB or text file aloud with streaming playback.
 
@@ -1398,8 +1396,8 @@ def read(  # noqa: C901
         if pause_variance is not None
         else config.get("pause_variance", 0.05)
     )
-    effective_trim_silence = (
-        trim_silence if trim_silence is not None else config.get("trim_silence", True)
+    effective_pause_mode = (
+        pause_mode if pause_mode is not None else config.get("pause_mode", True)
     )
 
     # Get language code for TTS
@@ -1637,7 +1635,7 @@ def read(  # noqa: C901
         generation = GenerationConfig(
             speed=effective_speed,
             lang=espeak_lang,
-            pause_mode="manual" if effective_trim_silence else "tts",
+            pause_mode=effective_pause_mode,
             pause_clause=effective_pause_clause,
             pause_sentence=effective_pause_sentence,
             pause_paragraph=effective_pause_paragraph,

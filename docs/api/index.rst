@@ -24,11 +24,11 @@ Core Modules
 TTS Backend
 ^^^^^^^^^^^
 
-**ttsforge.onnx_backend**
-   ONNX Runtime backend for Kokoro TTS model inference.
+**ttsforge.kokoro_runner**
+   Shared Kokoro ONNX runner used by conversion paths.
 
-**ttsforge.tokenizer**
-   Text-to-phoneme tokenization using espeak-ng.
+**ttsforge.kokoro_lang**
+   Language code helpers for Kokoro.
 
 **ttsforge.phonemes**
    Data structures for phoneme book representation.
@@ -42,6 +42,24 @@ Utilities
 **ttsforge.utils**
    Utility functions for file handling, configuration, and formatting.
 
+**ttsforge.audio_merge**
+   Audio concatenation and chapter marker handling.
+
+**ttsforge.chapter_selection**
+   Parsing helpers for chapter selection strings.
+
+**ttsforge.ssmd_generator**
+   SSMD generation and validation helpers.
+
+**ttsforge.input_reader**
+   EPUB/text/PDF input parsing helpers.
+
+**ttsforge.name_extractor**
+   Name extraction utilities for dictionary building.
+
+**ttsforge.vocab**
+   Vocabulary utilities and metadata.
+
 **ttsforge.trim**
    Audio trimming utilities for silence removal.
 
@@ -54,21 +72,33 @@ Basic Text-to-Speech
 
 .. code-block:: python
 
-   from ttsforge.onnx_backend import KokoroONNX
+   from ttsforge.kokoro_lang import get_onnx_lang_code
+   from ttsforge.kokoro_runner import KokoroRunOptions, KokoroRunner
 
-   # Initialize TTS engine
-   kokoro = KokoroONNX(use_gpu=False)
+   # Initialize runner
+   opts = KokoroRunOptions(
+       voice="af_heart",
+       speed=1.0,
+       use_gpu=False,
+       pause_clause=0.25,
+       pause_sentence=0.2,
+       pause_paragraph=0.75,
+       pause_variance=0.05,
+   )
+   runner = KokoroRunner(opts, log=print)
+   runner.ensure_ready()
 
    # Generate audio
-   audio, sample_rate = kokoro.create(
+   audio = runner.synthesize(
        "Hello, world!",
-       voice="af_heart",
-       speed=1.0
+       lang_code=get_onnx_lang_code("en-us"),
+       pause_mode="tts",
+       is_phonemes=False,
    )
 
    # Save to file
    import soundfile as sf
-   sf.write("output.wav", audio, sample_rate)
+   sf.write("output.wav", audio, 24000)
 
 Converting an EPUB
 ^^^^^^^^^^^^^^^^^^
@@ -106,10 +136,10 @@ Working with Phonemes
 
 .. code-block:: python
 
-   from ttsforge.tokenizer import Tokenizer
+   from pykokoro.tokenizer import Tokenizer
 
    # Initialize tokenizer
-   tokenizer = Tokenizer(vocab_version="v1.0")
+   tokenizer = Tokenizer()
 
    # Convert text to phonemes
    text = "Hello, world!"
@@ -168,17 +198,47 @@ Auto-generated API Documentation
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: ttsforge.onnx_backend
+.. automodule:: ttsforge.kokoro_runner
    :members:
    :undoc-members:
    :show-inheritance:
 
-.. automodule:: ttsforge.tokenizer
+.. automodule:: ttsforge.kokoro_lang
    :members:
    :undoc-members:
    :show-inheritance:
 
 .. automodule:: ttsforge.phonemes
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: ttsforge.audio_merge
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: ttsforge.chapter_selection
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: ttsforge.ssmd_generator
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: ttsforge.input_reader
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: ttsforge.name_extractor
+   :members:
+   :undoc-members:
+   :show-inheritance:
+
+.. automodule:: ttsforge.vocab
    :members:
    :undoc-members:
    :show-inheritance:

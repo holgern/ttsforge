@@ -372,7 +372,7 @@ def phonemes_export(
 )
 @click.option(
     "--pause-mode",
-    str=str,
+    type=str,
     default=None,
     help="auto, manual or tts (default: auto).",
 )

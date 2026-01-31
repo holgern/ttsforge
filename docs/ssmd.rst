@@ -175,11 +175,13 @@ Emphasis from the original EPUB HTML is automatically converted:
 - ``<strong>text</strong>`` → ``**text**``
 
 
-Structural Break Inference
-~~~~~~~~~~~~~~~~~~~~~~~~~~~
+Structural Break Preservation
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Paragraph and sentence boundaries are automatically detected from the text
-and converted to ``...p`` and ``...s`` markers.
+ttsforge preserves paragraph structure but does not insert explicit
+``...p`` or ``...s`` markers. Sentence detection is handled internally by
+pykokoro at synthesis time. Use manual break markers only when you need
+precise control over pauses.
 
 
 Use Cases
@@ -269,8 +271,9 @@ and logs a warning. The conversion continues without SSMD features.
 Validation
 ~~~~~~~~~~
 
-SSMD syntax is validated before TTS conversion. Invalid syntax will
-produce a clear error message indicating the problem.
+SSMD is not automatically validated during conversion. For manual checks,
+use the ``validate_ssmd`` helper from ``ttsforge.ssmd_generator`` to get
+warnings about unbalanced markers before you synthesize.
 
 
 Limitations
