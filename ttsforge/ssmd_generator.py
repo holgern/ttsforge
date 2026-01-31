@@ -44,6 +44,7 @@ class _EmphasisHTMLParser(HTMLParser):
         super().__init__(convert_charrefs=True)
         self._stack: list[str] = []
         self.segments: list[tuple[str, str]] = []
+        self._last_was_emphasis = False
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         tag_lower = tag.lower()
@@ -63,12 +64,14 @@ class _EmphasisHTMLParser(HTMLParser):
     def handle_data(self, data: str) -> None:
         marker = "**" if "**" in self._stack else ("*" if "*" in self._stack else None)
         if not marker:
+            self._last_was_emphasis = False
             return
-        if self.segments and self.segments[-1][1] == marker:
+        if self._last_was_emphasis and self.segments and self.segments[-1][1] == marker:
             prev_text, _ = self.segments[-1]
             self.segments[-1] = (prev_text + data, marker)
         else:
             self.segments.append((data, marker))
+        self._last_was_emphasis = True
 
 
 def _detect_emphasis_from_html(html_content: str) -> list[tuple[str, str]]:

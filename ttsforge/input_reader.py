@@ -7,7 +7,7 @@ extracting metadata, chapters, and content for TTS conversion.
 from __future__ import annotations
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from .utils import detect_encoding
@@ -18,15 +18,10 @@ class Metadata:
     """Book metadata."""
 
     title: str | None = None
-    authors: list[str] = None
+    authors: list[str] = field(default_factory=list)
     language: str | None = None
     publisher: str | None = None
     publication_year: int | None = None
-
-    def __post_init__(self):
-        """Initialize authors list if None."""
-        if self.authors is None:
-            self.authors = []
 
 
 @dataclass
@@ -109,6 +104,8 @@ class InputReader:
         elif self.file_type == "pdf":
             raise ValueError("PDF input is not supported yet.")
 
+        if self._metadata is None:
+            raise ValueError("Metadata could not be loaded")
         return self._metadata
 
     def get_chapters(self) -> list[Chapter]:
@@ -129,6 +126,8 @@ class InputReader:
         elif self.file_type == "pdf":
             raise ValueError("PDF input is not supported yet.")
 
+        if self._chapters is None:
+            raise ValueError("Chapters could not be loaded")
         return self._chapters
 
     def get_chapters_with_html(self) -> list[tuple[Chapter, str | None]]:
@@ -158,12 +157,22 @@ class InputReader:
         parser = EPUBParser(str(self.file_path))
         epub_metadata = parser.get_metadata()
 
+        raw_year: object = epub_metadata.publication_year
+        publication_year: int | None = None
+        if isinstance(raw_year, int):
+            publication_year = raw_year
+        elif isinstance(raw_year, str):
+            try:
+                publication_year = int(raw_year)
+            except ValueError:
+                publication_year = None
+
         return Metadata(
             title=epub_metadata.title,
             authors=list(epub_metadata.authors) if epub_metadata.authors else [],
             language=epub_metadata.language,
             publisher=epub_metadata.publisher,
-            publication_year=epub_metadata.publication_year,
+            publication_year=publication_year,
         )
 
     def _get_epub_chapters(self) -> list[Chapter]:
@@ -215,8 +224,8 @@ class InputReader:
             # Try to get HTML content
             # epub2text may have an html attribute or we need to extract it
             html_content = getattr(ch, "html", None)
-            if html_content is None and hasattr(ch, "content"):
-                html_content = ch.content
+            if html_content is None:
+                html_content = getattr(ch, "content", None)
 
             chapters_with_html.append((chapter, html_content))
 

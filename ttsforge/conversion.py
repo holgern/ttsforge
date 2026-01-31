@@ -3,11 +3,12 @@
 import hashlib
 import json
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional, cast
 
 import soundfile as sf
 
@@ -162,6 +163,14 @@ class ConversionState:
                 para_min = data.get("paragraph_pause_min", 0.5)
                 para_max = data.get("paragraph_pause_max", 1.0)
                 data["pause_paragraph"] = (para_min + para_max) / 2.0
+
+            for legacy_key in (
+                "segment_pause_min",
+                "segment_pause_max",
+                "paragraph_pause_min",
+                "paragraph_pause_max",
+            ):
+                data.pop(legacy_key, None)
 
             # Set defaults for new parameters
             if "pause_clause" not in data:
@@ -367,7 +376,7 @@ class TTSConverter:
         self.options = options
         self.progress_callback = progress_callback
         self.log_callback = log_callback
-        self._cancelled = False
+        self._cancelled = threading.Event()
         self._runner: KokoroRunner | None = None
         self._merger = AudioMerger(log=self.log)
 
@@ -378,7 +387,7 @@ class TTSConverter:
 
     def cancel(self) -> None:
         """Request cancellation of the conversion."""
-        self._cancelled = True
+        self._cancelled.set()
 
     def _init_runner(self) -> None:
         """Initialize the Kokoro runner."""
@@ -510,7 +519,9 @@ class TTSConverter:
             samples = self._runner.synthesize(
                 ssmd_content,
                 lang_code=lang_code,
-                pause_mode=self.options.pause_mode,
+                pause_mode=cast(
+                    Literal["tts", "manual", "auto"], self.options.pause_mode
+                ),
                 is_phonemes=False,
             )
             out_file.write(samples)
@@ -550,7 +561,7 @@ class TTSConverter:
                 error_message=f"Unsupported format: {self.options.output_format}",
             )
 
-        self._cancelled = False
+        self._cancelled.clear()
         prevent_sleep_start()
 
         try:
@@ -708,7 +719,7 @@ class TTSConverter:
 
             # Convert each chapter
             for chapter_idx, chapter in enumerate(chapters):
-                if self._cancelled:
+                if self._cancelled.is_set():
                     state.save(state_file)
                     return ConversionResult(
                         success=False,
@@ -823,7 +834,7 @@ class TTSConverter:
                     ssmd_content,
                 )
 
-                if self._cancelled:
+                if self._cancelled.is_set():
                     # Remove incomplete files
                     chapter_file.unlink(missing_ok=True)
                     ssmd_file.unlink(missing_ok=True)

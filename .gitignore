@@ -228,3 +228,4 @@ punctuation_phonemes.json
 context_ttsforge.md
 *.epub
 *.pdf
+.sample_chapters

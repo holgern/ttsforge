@@ -10,6 +10,7 @@ import logging
 import queue
 import threading
 import time
+from typing import Any
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -119,10 +120,10 @@ class StreamingAudioPlayer:
         self._buffer_position: int = 0
 
         # Control flags
-        self._stream = None
-        self._is_playing = False
-        self._is_paused = False
-        self._should_stop = False
+        self._stream: Any | None = None
+        self._is_playing: bool = False
+        self._is_paused: bool = False
+        self._should_stop = threading.Event()
         self._finished = threading.Event()
         self._all_audio_added = threading.Event()
 
@@ -143,7 +144,7 @@ class StreamingAudioPlayer:
     @property
     def should_stop(self) -> bool:
         """Whether playback should stop (e.g., user pressed Ctrl+C)."""
-        return self._should_stop
+        return self._should_stop.is_set()
 
     @property
     def chunks_played(self) -> int:
@@ -171,7 +172,7 @@ class StreamingAudioPlayer:
             # Log any stream errors (underflow, overflow)
             pass
 
-        if self._should_stop or self._is_paused:
+        if self._should_stop.is_set() or self._is_paused:
             # Fill with silence when stopped or paused
             outdata.fill(0)
             return
@@ -235,12 +236,12 @@ class StreamingAudioPlayer:
 
     def start(self) -> None:
         """Start the audio output stream."""
-        import sounddevice as sd  # type: ignore[import-untyped]
+        import sounddevice as sd
 
         if self._stream is not None:
             return
 
-        self._should_stop = False
+        self._should_stop.clear()
         self._finished.clear()
         self._all_audio_added.clear()
         self._is_playing = True
@@ -256,7 +257,7 @@ class StreamingAudioPlayer:
 
     def stop(self) -> None:
         """Stop playback and close the stream."""
-        self._should_stop = True
+        self._should_stop.set()
         self._is_playing = False
         self._current_buffer = None
         self._buffer_position = 0
@@ -300,9 +301,6 @@ class StreamingAudioPlayer:
         Args:
             audio: Audio samples as numpy array (float32)
         """
-        if self._should_stop:
-            return
-
         # Ensure float32 format
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
@@ -313,13 +311,12 @@ class StreamingAudioPlayer:
 
         audio_len = len(audio)
         with self._queue_not_full:
-            while (
-                not self._should_stop
-                and self._queued_samples + audio_len > self._max_buffer_samples
-            ):
+            while self._queued_samples + audio_len > self._max_buffer_samples:
+                if self._should_stop.is_set():
+                    return
                 self._queue_not_full.wait(timeout=0.1)
 
-            if self._should_stop:
+            if self._should_stop.is_set():
                 return
 
             self._queued_samples += audio_len
@@ -329,11 +326,14 @@ class StreamingAudioPlayer:
                 self._audio_queue.put(audio, timeout=0.1)
                 break
             except queue.Full:
-                if self._should_stop:
-                    with self._queue_not_full:
-                        self._queued_samples = max(0, self._queued_samples - audio_len)
-                        self._queue_not_full.notify_all()
-                    return
+                if self._should_stop.is_set():
+                    break
+
+        if self._should_stop.is_set():
+            with self._queue_not_full:
+                self._queued_samples = max(0, self._queued_samples - audio_len)
+                self._queue_not_full.notify_all()
+            return
 
     def finish_adding(self) -> None:
         """Signal that no more audio will be added."""
@@ -343,7 +343,7 @@ class StreamingAudioPlayer:
                 self._audio_queue.put(None, timeout=0.1)
                 break
             except queue.Full:
-                if self._should_stop:
+                if self._should_stop.is_set():
                     break
 
     def wait_until_done(self, timeout: float | None = None) -> bool:
@@ -360,7 +360,7 @@ class StreamingAudioPlayer:
 
     def request_stop(self) -> None:
         """Request playback to stop (used for Ctrl+C handling)."""
-        self._should_stop = True
+        self._should_stop.set()
         self._all_audio_added.set()
         self._finished.set()
         with self._queue_not_full:
@@ -455,7 +455,7 @@ def play_audio_blocking(
         audio: Audio samples as numpy array
         sample_rate: Sample rate (default: 24000)
     """
-    import sounddevice as sd  # type: ignore[import-untyped]
+    import sounddevice as sd
 
     sd.play(audio, sample_rate)
     sd.wait()

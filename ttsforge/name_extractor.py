@@ -11,6 +11,7 @@ from collections import Counter
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -18,7 +19,7 @@ DEFAULT_SPACY_MODEL = "en_core_web_sm"
 
 
 @functools.lru_cache(maxsize=1)
-def _get_nlp(model_name: str = DEFAULT_SPACY_MODEL):
+def _get_nlp(model_name: str = DEFAULT_SPACY_MODEL) -> Any:
     """Load and cache the spaCy pipeline."""
     try:
         import spacy
@@ -51,9 +52,9 @@ def _split_text_into_chunks(text: str, chunk_size: int = 100000) -> list[str]:
     if len(text) <= chunk_size:
         return [text]
 
-    chunks = []
+    chunks: list[str] = []
     paragraphs = text.split("\n\n")
-    current_chunk = []
+    current_chunk: list[str] = []
     current_size = 0
 
     for para in paragraphs:
@@ -162,7 +163,7 @@ def extract_names_from_text(
 
 def generate_phoneme_suggestions(
     names: dict[str, int], language: str = "en-us"
-) -> dict[str, dict[str, any]]:
+) -> dict[str, dict[str, Any]]:
     """Generate phoneme suggestions for a list of names.
 
     Args:
@@ -181,7 +182,7 @@ def generate_phoneme_suggestions(
     """
     from kokorog2p import phonemize
 
-    suggestions = {}
+    suggestions: dict[str, dict[str, Any]] = {}
 
     for name, count in names.items():
         try:
@@ -244,7 +245,7 @@ def save_phoneme_dictionary(
     logger.info(f"Saved phoneme dictionary to {output_path}")
 
 
-def load_simple_dictionary(file_path: Path) -> dict[str, dict]:
+def load_simple_dictionary(file_path: Path) -> dict[str, dict[str, Any]]:
     """Load a simple phoneme dictionary and convert to metadata format.
 
     Args:
@@ -258,10 +259,10 @@ def load_simple_dictionary(file_path: Path) -> dict[str, dict]:
 
     # If already in metadata format, return as-is
     if "_metadata" in data and "entries" in data:
-        return data["entries"]
+        return cast(dict[str, dict[str, Any]], data["entries"])
 
     # Convert simple format to metadata format
-    entries = {}
+    entries: dict[str, dict[str, Any]] = {}
     for name, phoneme in data.items():
         if isinstance(phoneme, str):
             entries[name] = {"phoneme": phoneme, "verified": False}
@@ -274,8 +275,8 @@ def load_simple_dictionary(file_path: Path) -> dict[str, dict]:
 
 
 def merge_dictionaries(
-    auto_generated: dict[str, dict], manual: dict[str, dict]
-) -> dict[str, dict]:
+    auto_generated: dict[str, dict[str, Any]], manual: dict[str, dict[str, Any]]
+) -> dict[str, dict[str, Any]]:
     """Merge auto-generated dictionary with manual corrections.
 
     Manual entries take precedence over auto-generated ones.

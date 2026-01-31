@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 import soundfile as sf
@@ -22,7 +22,10 @@ class MergeMeta:
 
 
 class AudioMerger:
-    def __init__(self, log: callable):
+    class LogCallback(Protocol):
+        def __call__(self, message: str, level: str = "info") -> None: ...
+
+    def __init__(self, log: LogCallback):
         self.log = log
 
     def add_chapters_to_m4b(

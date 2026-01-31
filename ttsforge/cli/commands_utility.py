@@ -1,18 +1,28 @@
 """Utility commands for ttsforge CLI."""
 
 import re
+import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import Any, Literal, cast
 
 import click
 import numpy as np
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import (
     DEFAULT_MODEL_QUALITY,
+    DEFAULT_MODEL_SOURCE,
+    DEFAULT_MODEL_VARIANT,
+    GITHUB_VOICES_FILENAME_V1_0,
+    GITHUB_VOICES_FILENAME_V1_1_DE,
+    GITHUB_VOICES_FILENAME_V1_1_ZH,
     LANG_CODE_TO_ONNX,
     MODEL_QUALITY_FILES,
+    VOICE_NAMES_BY_VARIANT,
+)
+from pykokoro.onnx_backend import VOICE_NAMES_V1_0 as VOICE_NAMES
+from pykokoro.onnx_backend import (
     Kokoro,
     ModelQuality,
     VoiceBlend,
@@ -21,14 +31,16 @@ from pykokoro.onnx_backend import (
     download_all_voices,
     download_config,
     download_model,
+    download_model_github,
+    download_voices_github,
     get_config_path,
     get_model_dir,
     get_model_path,
     get_voices_bin_path,
+    get_voices_dir,
     is_config_downloaded,
     is_model_downloaded,
 )
-from pykokoro.onnx_backend import VOICE_NAMES_V1_0 as VOICE_NAMES
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
 from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
@@ -321,7 +333,7 @@ def demo(  # noqa: C901
 
                     # Handle playback
                     if play_audio:
-                        import sounddevice as sd  # type: ignore[import-untyped]
+                        import sounddevice as sd
 
                         progress.console.print(f"  [dim]Playing {description}...[/dim]")
                         sd.play(samples, sr)
@@ -482,7 +494,7 @@ def demo(  # noqa: C901
 
         # Play audio if requested
         if play_audio:
-            import sounddevice as sd  # type: ignore[import-untyped]
+            import sounddevice as sd
 
             console.print("[dim]Playing audio...[/dim]")
             sd.play(combined, sample_rate)
@@ -506,6 +518,54 @@ def demo(  # noqa: C901
         )
 
 
+def _resolve_model_source_and_variant(cfg: dict) -> tuple[ModelSource, ModelVariant]:
+    """Resolve model_source/model_variant with safe defaults."""
+    source = str(cfg.get("model_source", DEFAULT_MODEL_SOURCE))
+    variant = str(cfg.get("model_variant", DEFAULT_MODEL_VARIANT))
+
+    # Keep this permissive; Kokoro/pykokoro will validate deeper.
+    if source not in ("huggingface", "github"):
+        source = DEFAULT_MODEL_SOURCE
+    if variant not in ("v1.0", "v1.1-zh", "v1.1-de"):
+        variant = DEFAULT_MODEL_VARIANT
+
+    # v1.1-de is typically GitHub-only in your backend.
+    if variant == "v1.1-de" and source == "huggingface":
+        console.print(
+            "[yellow]Note:[/yellow] model_variant 'v1.1-de' is not available via "
+            "Hugging Face in this backend. Switching model_source to 'github' "
+            "for the download."
+        )
+        source = "github"
+
+    return cast(ModelSource, source), cast(ModelVariant, variant)
+
+
+def _get_cache_voices_path(model_source: str, model_variant: str) -> Path:
+    """Return the *actual* voices archive path used by the backend."""
+    voices_dir = Path(get_voices_dir(source=model_source, variant=model_variant))
+    if model_source == "huggingface":
+        return voices_dir / "voices.bin.npz"
+
+    # github: filename depends on variant
+    if model_variant == "v1.0":
+        return voices_dir / GITHUB_VOICES_FILENAME_V1_0
+    if model_variant == "v1.1-zh":
+        return voices_dir / GITHUB_VOICES_FILENAME_V1_1_ZH
+    if model_variant == "v1.1-de":
+        return voices_dir / GITHUB_VOICES_FILENAME_V1_1_DE
+    return voices_dir / GITHUB_VOICES_FILENAME_V1_0
+
+
+def _exists_nonempty(path: Path) -> bool:
+    return path.exists() and path.is_file() and path.stat().st_size > 0
+
+
+def _copy_to_target(src: Path, dst: Path) -> None:
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(src, dst)
+
+
 @click.command()
 @click.option("--force", is_flag=True, help="Force re-download even if files exist.")
 @click.option(
@@ -515,7 +575,8 @@ def demo(  # noqa: C901
     default=None,
     help="Model quality/quantization level. Default: from config or fp32.",
 )
-def download(force: bool, quality: str | None) -> None:
+@click.pass_context
+def download(ctx: click.Context, force: bool, quality: str | None) -> None:
     """Download ONNX model and voice files required for TTS.
 
     Downloads from Hugging Face (onnx-community/Kokoro-82M-v1.0-ONNX).
@@ -530,40 +591,61 @@ def download(force: bool, quality: str | None) -> None:
       uint8    - Unsigned 8-bit (177 MB)
       uint8f16 - Unsigned 8-bit with fp16 (114 MB)
     """
+    cfg = load_config()
+
     # Get quality from config if not specified
     if quality is None:
-        cfg = load_config()
         quality = cfg.get("model_quality", DEFAULT_MODEL_QUALITY)
 
     # Cast to ModelQuality - safe because click.Choice validates input
     # and config uses a valid default
     model_quality = cast(ModelQuality, quality)
 
-    model_dir = get_model_dir()
-    console.print(f"[bold]Model directory:[/bold] {model_dir}")
+    model_source, model_variant = _resolve_model_source_and_variant(cfg)
+
+    # Paths where pykokoro actually stores files (cache)
+    cache_model_dir = get_model_dir(source=model_source, variant=model_variant)
+    cache_model_path = get_model_path(
+        quality=model_quality, source=model_source, variant=model_variant
+    )
+    cache_config_path = get_config_path(variant=model_variant)
+    cache_voices_path = _get_cache_voices_path(model_source, model_variant)
+
+    # Optional CLI overrides (set by your root click group)
+    model_path_override: Path | None = None
+    voices_path_override: Path | None = None
+    if ctx.obj:
+        model_path_override = ctx.obj.get("model_path")
+        voices_path_override = ctx.obj.get("voices_path")
+
+    target_model_path = model_path_override or cache_model_path
+    target_voices_path = voices_path_override or cache_voices_path
+
+    console.print(f"[bold]Model source:[/bold] {model_source}")
+    console.print(f"[bold]Model variant:[/bold] {model_variant}")
     console.print(f"[bold]Model quality:[/bold] {model_quality}")
+    console.print(f"[bold]Cache model dir:[/bold] {cache_model_dir}")
+    console.print(f"[bold]Model path:[/bold] {target_model_path}")
+    console.print(f"[bold]Voices path:[/bold] {target_voices_path}")
+    console.print(f"[bold]Config path:[/bold] {cache_config_path}")
 
     # Check if already downloaded
-    if are_models_downloaded(model_quality) and not force:
-        console.print("[green]All model files are already downloaded.[/green]")
-        model_path = get_model_path(model_quality)
-        voices_path = get_voices_bin_path()
-        config_path = get_config_path()
-
-        if model_path.exists():
-            console.print(
-                f"  {model_path.name}: {format_size(model_path.stat().st_size)}"
-            )
-        if voices_path.exists():
-            console.print(
-                f"  voices.bin.npz: {format_size(voices_path.stat().st_size)}"
-            )
-        if config_path.exists():
-            console.print(f"  config.json: {format_size(config_path.stat().st_size)}")
+    already_downloaded = (
+        _exists_nonempty(cache_config_path)
+        and _exists_nonempty(target_model_path)
+        and _exists_nonempty(target_voices_path)
+    )
+    if already_downloaded and not force:
+        console.print("[green]All required files are already present.[/green]")
+        console.print(f"  config.json: {format_size(cache_config_path.stat().st_size)}")
+        console.print(
+            f"  {target_model_path.name}: {format_size(target_model_path.stat().st_size)}"
+        )
+        console.print(
+            f"  {target_voices_path.name}: {format_size(target_voices_path.stat().st_size)}"
+        )
         return
-
-    console.print("Downloading ONNX model files from Hugging Face...")
-
+    console.print("Downloading model assets...")
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -571,79 +653,95 @@ def download(force: bool, quality: str | None) -> None:
         TaskProgressColumn(),
         console=console,
     ) as progress:
-        # Download config.json
-        if not is_config_downloaded() or force:
-            config_task = progress.add_task("Downloading config.json...", total=100)
-
-            def config_progress(current: int, total: int) -> None:
-                if total > 0:
-                    progress.update(config_task, completed=(current / total) * 100)
-
+        # ---- config.json (no byte-level callback in new backend)
+        if not is_config_downloaded(variant=model_variant) or force:
+            config_task = progress.add_task("Downloading config.json...", total=1)
             try:
-                download_config(progress_callback=config_progress, force=force)
-                progress.update(config_task, completed=100)
-                config_path = get_config_path()
-                size = format_size(config_path.stat().st_size)
-                console.print(f"  [green]config.json: {size}[/green]")
+                download_config(variant=model_variant, force=force)
+                progress.advance(config_task)
+                size = format_size(cache_config_path.stat().st_size)
+                console.print(f"  [green]config.json[/green]: {size}")
             except Exception as e:
                 console.print(f"  [red]config.json: Failed - {e}[/red]")
                 sys.exit(1)
         else:
             console.print("  [dim]config.json: already downloaded[/dim]")
 
-        # Download model
-        model_path = get_model_path(model_quality)
-        model_filename = model_path.name
-        if not is_model_downloaded(model_quality) or force:
-            model_task = progress.add_task(
-                f"Downloading {model_filename}...", total=100
-            )
-
-            def model_progress(current: int, total: int) -> None:
-                if total > 0:
-                    progress.update(model_task, completed=(current / total) * 100)
-
+        # ---- model (HF/GitHub)
+        model_task = progress.add_task(f"Downloading {cache_model_path.name}...", total=1)
+        if not _exists_nonempty(cache_model_path) or force:
             try:
-                download_model(
-                    model_quality,
-                    progress_callback=model_progress,
-                    force=force,
-                )
-                progress.update(model_task, completed=100)
-                model_path = get_model_path(model_quality)
-                size = format_size(model_path.stat().st_size)
-                console.print(f"  [green]{model_filename}: {size}[/green]")
+                if model_source == "github":
+                    download_model_github(
+                        variant=model_variant, quality=model_quality, force=force
+                    )
+                else:
+                    download_model(
+                        variant=model_variant, quality=model_quality, force=force
+                    )
+                progress.advance(model_task)
+                size = format_size(cache_model_path.stat().st_size)
+                console.print(f"  [green]{cache_model_path.name}[/green]:{size}")
             except Exception as e:
-                console.print(f"  [red]{model_filename}: Failed - {e}[/red]")
+                console.print(f"  [red]{cache_model_path.name}: Failed - {e}[/red]")
                 sys.exit(1)
         else:
-            console.print(f"  [dim]{model_filename}: already downloaded[/dim]")
+            progress.advance(model_task)
+            console.print(f"  [dim]{cache_model_path.name}: already  downloaded[/dim]")
 
-        # Download voices
-        if not are_voices_downloaded() or force:
+        # ---- voices
+        if model_source == "huggingface":
+            voice_names = VOICE_NAMES_BY_VARIANT.get(model_variant, VOICE_NAMES)
+            total_voices = len(voice_names)
             voices_task = progress.add_task(
-                f"Downloading voices (0/{len(VOICE_NAMES)})...", total=100
+                f"Downloading voices (0/{total_voices})...", total=total_voices
             )
-
             def voices_progress(voice_name: str, current: int, total: int) -> None:
+                # backend calls (voice_name, idx, total) *before* each voice download
+                shown = min(current + 1, total)
                 progress.update(
                     voices_task,
-                    description=f"Downloading voices ({current}/{total})...",
-                    completed=(current / total) * 100,
+                    description=f"Downloading voices ({shown}/{total}) — {voice_name}",
+                    completed=current,
                 )
-
             try:
-                download_all_voices(progress_callback=voices_progress, force=force)
-                progress.update(voices_task, completed=100)
-                voices_path = get_voices_bin_path()
-                size = format_size(voices_path.stat().st_size)
-                console.print(f"  [green]voices.bin.npz: {size}[/green]")
+                download_all_voices(
+                    variant=model_variant,
+                    progress_callback=voices_progress,
+                    force=force,
+                )
+                progress.update(voices_task, completed=total_voices)
+                size = format_size(cache_voices_path.stat().st_size)
+                console.print(f"  [green]{cache_voices_path.name}[/green]: {size}")
             except Exception as e:
                 console.print(f"  [red]voices: Failed - {e}[/red]")
                 sys.exit(1)
         else:
-            console.print("  [dim]voices.bin.npz: already downloaded[/dim]")
+            voices_task = progress.add_task(f"Downloading {cache_voices_path.name}...", total=1)
+            if not _exists_nonempty(cache_voices_path) or force:
+                try:
+                    download_voices_github(variant=model_variant, force=force)
+                    progress.advance(voices_task)
+                    size = format_size(cache_voices_path.stat().st_size)
+                    console.print(f"  [green]{cache_voices_path.name}[/green]: {size}")
+                except Exception as e:
+                    console.print(f"  [red]{cache_voices_path.name}: Failed - {e}[/red]")
+                    sys.exit(1)
+            else:
+                progress.advance(voices_task)
+                console.print(f"  [dim]{cache_voices_path.name}: already downloaded[/dim]")
 
+    # Copy to override paths if provided (so Kokoro() sees the files where ttsforge points it)
+    try:
+        if model_path_override and cache_model_path != model_path_override:
+            _copy_to_target(cache_model_path, model_path_override)
+            console.print(f"[green]Copied model to:[/green] {model_path_override}")
+        if voices_path_override and cache_voices_path != voices_path_override:
+            _copy_to_target(cache_voices_path, voices_path_override)
+            console.print(f"[green]Copied voices to:[/green] {voices_path_override}")
+    except Exception as e:
+        console.print(f"[red]Error copying files to custom paths:[/red] {e}")
+        sys.exit(1)
     console.print("\n[green]All model files downloaded successfully![/green]")
 
 
@@ -677,6 +775,7 @@ def config(show: bool, reset: bool, set_option: tuple[tuple[str, str], ...]) -> 
 
             # Type conversion
             default_type = type(DEFAULT_CONFIG[key])
+            typed_value: Any
             try:
                 if default_type is bool:
                     typed_value = value.lower() in ("true", "1", "yes")
@@ -715,13 +814,23 @@ def config(show: bool, reset: bool, set_option: tuple[tuple[str, str], ...]) -> 
     console.print(table)
 
     # Show model status
-    if are_models_downloaded():
-        model_dir = get_model_dir()
-        console.print(f"\n[bold]ONNX Models:[/bold] Downloaded ({model_dir})")
+    cfg2 = load_config()
+    q = cast(ModelQuality, cfg2.get("model_quality", DEFAULT_MODEL_QUALITY))
+    src, var = _resolve_model_source_and_variant(cfg2)
+    cfg_path = get_config_path(variant=var)
+    mdl_path = get_model_path(quality=q, source=src, variant=var)
+    v_path = _get_cache_voices_path(src, var)
+
+    if _exists_nonempty(cfg_path) and _exists_nonempty(mdl_path) and _exists_nonempty(v_path):
+        console.print(
+            f"\n[bold]ONNX Models:[/bold] Downloaded ({get_model_dir(source=src, variant=var)})"
+        )
+        console.print(f"  config.json: {cfg_path}")
+        console.print(f"  model: {mdl_path}")
+        console.print(f"  voices: {v_path}")
     else:
         console.print("\n[bold]ONNX Models:[/bold] [yellow]Not downloaded[/yellow]")
         console.print("[dim]Run 'ttsforge download' to download models[/dim]")
-
 
 @click.command(name="extract-names")
 @click.argument(
@@ -1201,7 +1310,7 @@ def list_names(  # noqa: C901
 
                         if result.success:
                             # Play the audio
-                            import sounddevice as sd  # type: ignore[import-untyped]
+                            import sounddevice as sd
                             import soundfile as sf
 
                             audio_data, sample_rate = sf.read(str(temp_output))
@@ -1248,3 +1357,7 @@ def list_names(  # noqa: C901
             f"\n[dim]Tip:[/dim] Listen to samples with:\n"
             f"  [cyan]ttsforge list-names {phoneme_dict} --play[/cyan]"
         )
+
+
+ModelSource = Literal["huggingface", "github"]
+ModelVariant = Literal["v1.0", "v1.1-zh", "v1.1-de"]

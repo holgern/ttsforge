@@ -12,13 +12,18 @@ import re
 import sys
 import tempfile
 from pathlib import Path
+from types import FrameType
+from typing import Literal, Optional, TypedDict, cast
+from typing_extensions import NotRequired
 
 import click
+import numpy as np
 from rich.panel import Panel
 from rich.progress import (
     BarColumn,
     Progress,
     SpinnerColumn,
+    TaskID,
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
@@ -50,6 +55,13 @@ from ..utils import (
     resolve_conversion_defaults,
 )
 from .helpers import DEFAULT_SAMPLE_TEXT, console, parse_voice_parameter
+
+
+class ContentItem(TypedDict):
+    title: str
+    text: str
+    index: int
+    page_number: NotRequired[int]
 
 
 @click.command()
@@ -583,7 +595,7 @@ def convert(  # noqa: C901
         console=console,
     )
 
-    task_id = None
+    task_id: TaskID | None = None
     current_chapter_text = ""
 
     def progress_callback(prog: ConversionProgress) -> None:
@@ -648,7 +660,7 @@ def convert(  # noqa: C901
         )
 
     with progress:
-        task_id = progress.add_task("Converting...", total=total_chars)
+        task_id = cast(TaskID, progress.add_task("Converting...", total=total_chars))
 
         result = converter.convert_chapters_resumable(
             chapters=chapters_to_convert,
@@ -1029,7 +1041,7 @@ def sample(
         if result.success:
             # Handle playback if requested
             if play_audio:
-                import sounddevice as sd  # type: ignore[import-untyped]
+                import sounddevice as sd
                 import soundfile as sf
 
                 audio_data, sample_rate = sf.read(str(output))
@@ -1375,7 +1387,7 @@ def read(  # noqa: C901
         else config.get("pause_variance", 0.05)
     )
     effective_pause_mode = (
-        pause_mode if pause_mode is not None else config.get("pause_mode", True)
+        pause_mode if pause_mode is not None else config.get("pause_mode", "auto")
     )
 
     # Get language code for TTS
@@ -1394,6 +1406,7 @@ def read(  # noqa: C901
         )
 
     # Handle stdin input
+    content_data: list[ContentItem]
     if input_file is None or str(input_file) == "-":
         if sys.stdin.isatty():
             console.print(
@@ -1410,7 +1423,9 @@ def read(  # noqa: C901
             sys.exit(1)
 
         # Create a simple structure for stdin text
-        content_data = [{"title": "Text", "text": text_content, "index": 0}]
+        content_data = [
+            cast(ContentItem, {"title": "Text", "text": text_content, "index": 0})
+        ]
         file_identifier = "stdin"
         content_label = "section"  # Generic label for stdin
     else:
@@ -1462,12 +1477,15 @@ def read(  # noqa: C901
 
                 # Convert to our format
                 content_data = [
-                    {
-                        "title": f"Page {p.page_number}",
-                        "text": p.text,
-                        "index": i,
-                        "page_number": p.page_number,
-                    }
+                    cast(
+                        ContentItem,
+                        {
+                            "title": f"Page {p.page_number}",
+                            "text": p.text,
+                            "index": i,
+                            "page_number": p.page_number,
+                        },
+                    )
                     for i, p in enumerate(epub_pages)
                 ]
                 content_label = "page"
@@ -1483,17 +1501,20 @@ def read(  # noqa: C901
 
                 # Convert to our format - remove chapter markers
                 content_data = [
-                    {
-                        "title": ch.title or f"Chapter {i + 1}",
-                        "text": re.sub(
-                            r"^\s*<<CHAPTER:[^>]*>>\s*\n*",
-                            "",
-                            ch.text,
-                            count=1,
-                            flags=re.MULTILINE,
-                        ),
-                        "index": i,
-                    }
+                    cast(
+                        ContentItem,
+                        {
+                            "title": ch.title or f"Chapter {i + 1}",
+                            "text": re.sub(
+                                r"^\s*<<CHAPTER:[^>]*>>\s*\n*",
+                                "",
+                                ch.text,
+                                count=1,
+                                flags=re.MULTILINE,
+                            ),
+                            "index": i,
+                        },
+                    )
                     for i, ch in enumerate(epub_chapters)
                 ]
                 content_label = "chapter"
@@ -1509,7 +1530,14 @@ def read(  # noqa: C901
             # If it's a single chapter, use it as-is
             # If multiple chapters detected, use them
             content_data = [
-                {"title": ch.title or input_file.stem, "text": ch.text, "index": i}
+                cast(
+                    ContentItem,
+                    {
+                        "title": ch.title or input_file.stem,
+                        "text": ch.text,
+                        "index": i,
+                    },
+                )
                 for i, ch in enumerate(text_chapters)
             ]
             content_label = "chapter" if len(text_chapters) > 1 else "section"
@@ -1621,7 +1649,7 @@ def read(  # noqa: C901
         generation = GenerationConfig(
             speed=effective_speed,
             lang=espeak_lang,
-            pause_mode=effective_pause_mode,
+            pause_mode=cast(Literal["tts", "manual", "auto"], effective_pause_mode),
             pause_clause=effective_pause_clause,
             pause_sentence=effective_pause_sentence,
             pause_paragraph=effective_pause_paragraph,
@@ -1648,7 +1676,7 @@ def read(  # noqa: C901
     current_segment_idx = 0
     stop_requested = False
 
-    def signal_handler(signum, frame):
+    def signal_handler(signum: int, frame: FrameType | None) -> None:
         """Handle Ctrl+C gracefully."""
         nonlocal stop_requested
         console.print("\n[yellow]Stopping... (position saved)[/yellow]")
@@ -1665,7 +1693,7 @@ def read(  # noqa: C901
         # Create a thread pool for TTS generation (1 worker for lookahead)
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
 
-        def generate_audio(text_segment: str) -> tuple:
+        def generate_audio(text_segment: str) -> tuple[np.ndarray, int]:
             """Generate audio for a text segment."""
             print(text_segment)
             result = pipeline.run(text_segment)

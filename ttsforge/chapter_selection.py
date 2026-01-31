@@ -36,7 +36,9 @@ def parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
                 start_str, end_str = part.split("-", 1)
                 start_str = start_str.strip()
                 end_str = end_str.strip()
-                start = int(start_str) if start_str else 1
+                if not start_str:
+                    raise ValueError(f"Invalid range format: {part}")
+                start = int(start_str)
                 end = int(end_str) if end_str else total_chapters
             except ValueError as e:
                 raise ValueError(f"Invalid range format: {part}") from e

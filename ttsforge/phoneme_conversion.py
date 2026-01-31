@@ -6,11 +6,12 @@ bypassing text-to-phoneme conversion since phonemes/tokens are pre-computed.
 
 import json
 import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Literal, Optional, cast
 
 import numpy as np
 import soundfile as sf
@@ -262,7 +263,7 @@ class PhonemeConverter:
         self.options = options
         self.progress_callback = progress_callback
         self.log_callback = log_callback
-        self._cancelled = False
+        self._cancelled = threading.Event()
         self._runner: KokoroRunner | None = None
         self._merger = AudioMerger(log=self.log)
 
@@ -273,7 +274,7 @@ class PhonemeConverter:
 
     def cancel(self) -> None:
         """Request cancellation of the conversion."""
-        self._cancelled = True
+        self._cancelled.set()
 
     def _phoneme_segments_to_ssmd(self, segments: list[PhonemeSegment]) -> str:
         """Build SSMD text from phoneme segments."""
@@ -367,10 +368,13 @@ class PhonemeConverter:
 
         cmd.append(str(output_path))
 
-        ffmpeg_proc = create_process(
-            cmd, stdin=subprocess.PIPE, text=False, suppress_output=True
+        ffmpeg_proc = cast(
+            subprocess.Popen[bytes],
+            create_process(
+                cmd, stdin=subprocess.PIPE, text=False, suppress_output=True
+            ),
         )
-        return None, ffmpeg_proc  # type: ignore[return-value]
+        return None, ffmpeg_proc
 
     def _finalize_output(
         self,
@@ -458,13 +462,15 @@ class PhonemeConverter:
                     out_file.write(pause_audio)
                     duration += pause_duration
 
-            if not self._cancelled and chapter.segments:
+            if not self._cancelled.is_set() and chapter.segments:
                 # Single pipeline call for entire chapter
                 ssmd_text = self._phoneme_segments_to_ssmd(chapter.segments)
                 samples = self._runner.synthesize(
                     ssmd_text,
                     lang_code=lang_code,
-                    pause_mode=self.options.pause_mode,
+                    pause_mode=cast(
+                        Literal["tts", "manual", "auto"], self.options.pause_mode
+                    ),
                     is_phonemes=True,
                 )
 
@@ -538,7 +544,7 @@ class PhonemeConverter:
                 error_message=f"Unsupported format: {self.options.output_format}",
             )
 
-        self._cancelled = False
+        self._cancelled.clear()
         prevent_sleep_start()
 
         try:
@@ -664,7 +670,7 @@ class PhonemeConverter:
 
             # Convert each chapter
             for state_idx, chapter_state in enumerate(state.chapters):
-                if self._cancelled:
+                if self._cancelled.is_set():
                     state.save(state_file)
                     return PhonemeConversionResult(
                         success=False,
@@ -718,7 +724,7 @@ class PhonemeConverter:
                     segments_before=segments_processed,
                 )
 
-                if self._cancelled:
+                if self._cancelled.is_set():
                     # Remove incomplete file
                     chapter_file.unlink(missing_ok=True)
                     state.save(state_file)
@@ -826,7 +832,7 @@ class PhonemeConverter:
                 error_message=f"Unsupported format: {self.options.output_format}",
             )
 
-        self._cancelled = False
+        self._cancelled.clear()
         prevent_sleep_start()
 
         try:
@@ -861,7 +867,7 @@ class PhonemeConverter:
             out_file, ffmpeg_proc = self._setup_output(output_path)
 
             for chapter_idx, chapter in enumerate(selected_chapters):
-                if self._cancelled:
+                if self._cancelled.is_set():
                     break
 
                 progress.current_chapter = chapter_idx + 1
@@ -876,7 +882,7 @@ class PhonemeConverter:
                 chapter_start = current_time
 
                 total_chapter_segments = len(chapter.segments)
-                if not self._cancelled and chapter.segments:
+                if not self._cancelled.is_set() and chapter.segments:
                     assert self._runner is not None
                     lang_code = (
                         get_onnx_lang_code(self.options.lang)
@@ -887,7 +893,10 @@ class PhonemeConverter:
                     samples = self._runner.synthesize(
                         ssmd_text,
                         lang_code=lang_code,
-                        pause_mode=self.options.pause_mode,
+                        pause_mode=cast(
+                            Literal["tts", "manual", "auto"],
+                            self.options.pause_mode,
+                        ),
                         is_phonemes=True,
                     )
 
@@ -935,7 +944,7 @@ class PhonemeConverter:
             # Finalize output
             self._finalize_output(out_file, ffmpeg_proc)
 
-            if self._cancelled:
+            if self._cancelled.is_set():
                 # Clean up partial file
                 output_path.unlink(missing_ok=True)
                 return PhonemeConversionResult(success=False, error_message="Cancelled")

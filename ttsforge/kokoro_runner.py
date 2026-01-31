@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Literal, Protocol, cast
 
 import numpy as np
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
@@ -34,12 +34,15 @@ class KokoroRunOptions:
 
 
 class KokoroRunner:
-    def __init__(self, opts: KokoroRunOptions, log: callable):
+    class LogCallback(Protocol):
+        def __call__(self, message: str, level: str = "info") -> None: ...
+
+    def __init__(self, opts: KokoroRunOptions, log: LogCallback):
         self.opts = opts
         self.log = log
         self._kokoro: Kokoro | None = None
         self._pipeline: KokoroPipeline | None = None
-        self._voice_style: str | np.ndarray | VoiceBlend | None = None
+        self._voice_style: str | VoiceBlend | None = None
 
     def ensure_ready(self) -> None:
         if self._pipeline is not None:
@@ -56,6 +59,8 @@ class KokoroRunner:
             tokenizer_config=self.opts.tokenizer_config,
         )
 
+        assert self._kokoro is not None
+
         if self.opts.voice_database:
             try:
                 self._kokoro.load_voice_database(self.opts.voice_database)
@@ -68,7 +73,10 @@ class KokoroRunner:
         else:
             # if voice_database provides overrides, let Kokoro resolve it
             if self.opts.voice_database:
-                db_voice = self._kokoro.get_voice_from_database(self.opts.voice)  # type: ignore[union-attr]
+                db_voice = cast(
+                    str | VoiceBlend | None,
+                    self._kokoro.get_voice_from_database(self.opts.voice),
+                )
                 self._voice_style = (
                     db_voice if db_voice is not None else self.opts.voice
                 )
@@ -98,7 +106,7 @@ class KokoroRunner:
         text_or_ssmd: str,
         *,
         lang_code: str,
-        pause_mode: str,  # "tts" or "manual"
+        pause_mode: Literal["tts", "manual", "auto"],
         is_phonemes: bool = False,
     ) -> np.ndarray:
         self.ensure_ready()
@@ -113,4 +121,5 @@ class KokoroRunner:
             pause_paragraph=self.opts.pause_paragraph,
             pause_variance=self.opts.pause_variance,
         )
-        return self._pipeline.run(text_or_ssmd, generation=gen).audio
+        audio = self._pipeline.run(text_or_ssmd, generation=gen).audio
+        return cast(np.ndarray, audio)

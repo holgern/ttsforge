@@ -10,12 +10,14 @@ This module contains commands for working with phonemes and pre-tokenized conten
 import re
 import sys
 from pathlib import Path
+from typing import cast
 
 import click
 from rich.progress import (
     BarColumn,
     Progress,
     SpinnerColumn,
+    TaskID,
     TaskProgressColumn,
     TextColumn,
     TimeElapsedColumn,
@@ -632,7 +634,7 @@ def phonemes_convert(
 
     # Progress tracking with Rich
     progress_bar: Progress | None = None
-    task_id = None
+    task_id: TaskID | None = None
 
     def log_callback(message: str, level: str) -> None:
         """Handle log messages."""
@@ -675,10 +677,13 @@ def phonemes_convert(
         transient=False,
     ) as progress:
         progress_bar = progress
-        task_id = progress.add_task(
-            "[cyan]Converting...[/cyan]",
-            total=total_segments,
-            segment_info="",
+        task_id = cast(
+            TaskID,
+            progress.add_task(
+                "[cyan]Converting...[/cyan]",
+                total=total_segments,
+                segment_info="",
+            ),
         )
 
         # Choose conversion mode
@@ -835,7 +840,7 @@ def phonemes_preview(
 
                 if result.success:
                     # Play the audio
-                    import sounddevice as sd  # type: ignore[import-untyped]
+                    import sounddevice as sd
                     import soundfile as sf
 
                     audio_data, sample_rate = sf.read(str(temp_output))
