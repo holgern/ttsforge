@@ -10,7 +10,6 @@ This module contains commands for working with phonemes and pre-tokenized conten
 import re
 import sys
 from pathlib import Path
-from typing import cast
 
 import click
 from rich.progress import (
@@ -677,13 +676,10 @@ def phonemes_convert(
         transient=False,
     ) as progress:
         progress_bar = progress
-        task_id = cast(
-            TaskID,
-            progress.add_task(
-                "[cyan]Converting...[/cyan]",
-                total=total_segments,
-                segment_info="",
-            ),
+        task_id = progress.add_task(
+            "[cyan]Converting...[/cyan]",
+            total=total_segments,
+            segment_info="",
         )
 
         # Choose conversion mode

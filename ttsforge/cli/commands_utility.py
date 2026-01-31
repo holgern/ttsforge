@@ -5,7 +5,7 @@ import shutil
 import sys
 import tempfile
 from pathlib import Path
-from typing import Any, Literal, cast
+from typing import Any, Literal, TypeAlias, cast
 
 import click
 import numpy as np
@@ -20,14 +20,9 @@ from pykokoro.onnx_backend import (
     LANG_CODE_TO_ONNX,
     MODEL_QUALITY_FILES,
     VOICE_NAMES_BY_VARIANT,
-)
-from pykokoro.onnx_backend import VOICE_NAMES_V1_0 as VOICE_NAMES
-from pykokoro.onnx_backend import (
     Kokoro,
     ModelQuality,
     VoiceBlend,
-    are_models_downloaded,
-    are_voices_downloaded,
     download_all_voices,
     download_config,
     download_model,
@@ -36,11 +31,10 @@ from pykokoro.onnx_backend import (
     get_config_path,
     get_model_dir,
     get_model_path,
-    get_voices_bin_path,
     get_voices_dir,
     is_config_downloaded,
-    is_model_downloaded,
 )
+from pykokoro.onnx_backend import VOICE_NAMES_V1_0 as VOICE_NAMES
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
 from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
@@ -64,6 +58,9 @@ from ..constants import (
 )
 from ..utils import format_size, load_config, reset_config, save_config
 from .helpers import DEMO_TEXT, VOICE_BLEND_PRESETS, console, parse_voice_parameter
+
+ModelSource: TypeAlias = Literal["huggingface", "github"]
+ModelVariant: TypeAlias = Literal["v1.0", "v1.1-zh", "v1.1-de"]
 
 
 @click.command()
@@ -541,20 +538,23 @@ def _resolve_model_source_and_variant(cfg: dict) -> tuple[ModelSource, ModelVari
     return cast(ModelSource, source), cast(ModelVariant, variant)
 
 
-def _get_cache_voices_path(model_source: str, model_variant: str) -> Path:
+def _get_cache_voices_path(
+    model_source: ModelSource,
+    model_variant: ModelVariant,
+) -> Path:
     """Return the *actual* voices archive path used by the backend."""
-    voices_dir = Path(get_voices_dir(source=model_source, variant=model_variant))
+    voices_dir: Path = Path(
+        str(get_voices_dir(source=model_source, variant=model_variant))
+    )
     if model_source == "huggingface":
         return voices_dir / "voices.bin.npz"
 
     # github: filename depends on variant
     if model_variant == "v1.0":
-        return voices_dir / GITHUB_VOICES_FILENAME_V1_0
+        return voices_dir / str(GITHUB_VOICES_FILENAME_V1_0)
     if model_variant == "v1.1-zh":
-        return voices_dir / GITHUB_VOICES_FILENAME_V1_1_ZH
-    if model_variant == "v1.1-de":
-        return voices_dir / GITHUB_VOICES_FILENAME_V1_1_DE
-    return voices_dir / GITHUB_VOICES_FILENAME_V1_0
+        return voices_dir / str(GITHUB_VOICES_FILENAME_V1_1_ZH)
+    return voices_dir / str(GITHUB_VOICES_FILENAME_V1_1_DE)
 
 
 def _exists_nonempty(path: Path) -> bool:
@@ -638,12 +638,10 @@ def download(ctx: click.Context, force: bool, quality: str | None) -> None:
     if already_downloaded and not force:
         console.print("[green]All required files are already present.[/green]")
         console.print(f"  config.json: {format_size(cache_config_path.stat().st_size)}")
-        console.print(
-            f"  {target_model_path.name}: {format_size(target_model_path.stat().st_size)}"
-        )
-        console.print(
-            f"  {target_voices_path.name}: {format_size(target_voices_path.stat().st_size)}"
-        )
+        model_size = format_size(target_model_path.stat().st_size)
+        voices_size = format_size(target_voices_path.stat().st_size)
+        console.print(f"  {target_model_path.name}: {model_size}")
+        console.print(f"  {target_voices_path.name}: {voices_size}")
         return
     console.print("Downloading model assets...")
     with Progress(
@@ -668,7 +666,9 @@ def download(ctx: click.Context, force: bool, quality: str | None) -> None:
             console.print("  [dim]config.json: already downloaded[/dim]")
 
         # ---- model (HF/GitHub)
-        model_task = progress.add_task(f"Downloading {cache_model_path.name}...", total=1)
+        model_task = progress.add_task(
+            f"Downloading {cache_model_path.name}...", total=1
+        )
         if not _exists_nonempty(cache_model_path) or force:
             try:
                 if model_source == "github":
@@ -696,6 +696,7 @@ def download(ctx: click.Context, force: bool, quality: str | None) -> None:
             voices_task = progress.add_task(
                 f"Downloading voices (0/{total_voices})...", total=total_voices
             )
+
             def voices_progress(voice_name: str, current: int, total: int) -> None:
                 # backend calls (voice_name, idx, total) *before* each voice download
                 shown = min(current + 1, total)
@@ -704,6 +705,7 @@ def download(ctx: click.Context, force: bool, quality: str | None) -> None:
                     description=f"Downloading voices ({shown}/{total}) — {voice_name}",
                     completed=current,
                 )
+
             try:
                 download_all_voices(
                     variant=model_variant,
@@ -717,7 +719,9 @@ def download(ctx: click.Context, force: bool, quality: str | None) -> None:
                 console.print(f"  [red]voices: Failed - {e}[/red]")
                 sys.exit(1)
         else:
-            voices_task = progress.add_task(f"Downloading {cache_voices_path.name}...", total=1)
+            voices_task = progress.add_task(
+                f"Downloading {cache_voices_path.name}...", total=1
+            )
             if not _exists_nonempty(cache_voices_path) or force:
                 try:
                     download_voices_github(variant=model_variant, force=force)
@@ -725,13 +729,18 @@ def download(ctx: click.Context, force: bool, quality: str | None) -> None:
                     size = format_size(cache_voices_path.stat().st_size)
                     console.print(f"  [green]{cache_voices_path.name}[/green]: {size}")
                 except Exception as e:
-                    console.print(f"  [red]{cache_voices_path.name}: Failed - {e}[/red]")
+                    console.print(
+                        f"  [red]{cache_voices_path.name}: Failed - {e}[/red]"
+                    )
                     sys.exit(1)
             else:
                 progress.advance(voices_task)
-                console.print(f"  [dim]{cache_voices_path.name}: already downloaded[/dim]")
+                console.print(
+                    f"  [dim]{cache_voices_path.name}: already downloaded[/dim]"
+                )
 
-    # Copy to override paths if provided (so Kokoro() sees the files where ttsforge points it)
+    # Copy to override paths if provided
+    # so Kokoro() sees the files where ttsforge points it.
     try:
         if model_path_override and cache_model_path != model_path_override:
             _copy_to_target(cache_model_path, model_path_override)
@@ -821,16 +830,20 @@ def config(show: bool, reset: bool, set_option: tuple[tuple[str, str], ...]) -> 
     mdl_path = get_model_path(quality=q, source=src, variant=var)
     v_path = _get_cache_voices_path(src, var)
 
-    if _exists_nonempty(cfg_path) and _exists_nonempty(mdl_path) and _exists_nonempty(v_path):
-        console.print(
-            f"\n[bold]ONNX Models:[/bold] Downloaded ({get_model_dir(source=src, variant=var)})"
-        )
+    if (
+        _exists_nonempty(cfg_path)
+        and _exists_nonempty(mdl_path)
+        and _exists_nonempty(v_path)
+    ):
+        model_dir = get_model_dir(source=src, variant=var)
+        console.print(f"\n[bold]ONNX Models:[/bold] Downloaded ({model_dir})")
         console.print(f"  config.json: {cfg_path}")
         console.print(f"  model: {mdl_path}")
         console.print(f"  voices: {v_path}")
     else:
         console.print("\n[bold]ONNX Models:[/bold] [yellow]Not downloaded[/yellow]")
         console.print("[dim]Run 'ttsforge download' to download models[/dim]")
+
 
 @click.command(name="extract-names")
 @click.argument(
@@ -1357,7 +1370,3 @@ def list_names(  # noqa: C901
             f"\n[dim]Tip:[/dim] Listen to samples with:\n"
             f"  [cyan]ttsforge list-names {phoneme_dict} --play[/cyan]"
         )
-
-
-ModelSource = Literal["huggingface", "github"]
-ModelVariant = Literal["v1.0", "v1.1-zh", "v1.1-de"]

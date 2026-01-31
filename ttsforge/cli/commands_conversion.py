@@ -13,8 +13,7 @@ import sys
 import tempfile
 from pathlib import Path
 from types import FrameType
-from typing import Literal, Optional, TypedDict, cast
-from typing_extensions import NotRequired
+from typing import Literal, TypedDict, cast
 
 import click
 import numpy as np
@@ -31,6 +30,7 @@ from rich.progress import (
 )
 from rich.prompt import Confirm
 from rich.table import Table
+from typing_extensions import NotRequired
 
 from ..chapter_selection import parse_chapter_selection
 from ..constants import (
@@ -660,7 +660,7 @@ def convert(  # noqa: C901
         )
 
     with progress:
-        task_id = cast(TaskID, progress.add_task("Converting...", total=total_chars))
+        task_id = progress.add_task("Converting...", total=total_chars)
 
         result = converter.convert_chapters_resumable(
             chapters=chapters_to_convert,
