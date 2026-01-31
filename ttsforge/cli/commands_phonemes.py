@@ -371,10 +371,10 @@ def phonemes_export(
     help="Random variance added to pauses in seconds (default: 0.05).",
 )
 @click.option(
-    "--trim-silence/--no-trim-silence",
-    "trim_silence",
+    "--pause-mode",
+    str=str,
     default=None,
-    help="Trim leading/trailing silence from audio (default: enabled).",
+    help="auto, manual or tts (default: auto).",
 )
 @click.option(
     "--announce-chapters/--no-announce-chapters",
@@ -455,7 +455,7 @@ def phonemes_convert(
     pause_sentence: Optional[float],
     pause_paragraph: Optional[float],
     pause_variance: Optional[float],
-    trim_silence: Optional[bool],
+    pause_mode: Optional[str],
     announce_chapters: Optional[bool],
     chapter_pause: Optional[float],
     chapters: Optional[str],
@@ -627,10 +627,8 @@ def phonemes_convert(
             if pause_variance is not None
             else config.get("pause_variance", 0.05)
         ),
-        trim_silence=(
-            trim_silence
-            if trim_silence is not None
-            else config.get("trim_silence", True)
+        pause_mode=(
+            pause_mode if pause_mode is not None else config.get("pause_mode", "auto")
         ),
         announce_chapters=(
             announce_chapters

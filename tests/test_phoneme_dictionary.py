@@ -129,9 +129,9 @@ class TestPhonemeDictionary:
             # Apply dictionary to get SSMD notation
             ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
 
-            # Verify SSMD notation is applied (backslash-escaped format)
-            assert r"[Misaki]\{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
-            assert r"[Kubernetes]\{ph=" in ssmd_text or "[Kubernetes](ph:" in ssmd_text
+            # Verify SSMD notation is applied
+            assert "[Misaki]{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
+            assert "[Kubernetes]{ph=" in ssmd_text or "[Kubernetes](ph:" in ssmd_text
         finally:
             Path(temp_path).unlink()
 
@@ -153,7 +153,7 @@ class TestPhonemeDictionary:
 
             # Apply dictionary - should match all case variations
             ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
-            phoneme_count = ssmd_text.count(r'\{ph="')
+            phoneme_count = ssmd_text.count('{ph="')
 
             # Should match all 3 variations
             assert phoneme_count >= 3, f"Expected 3 matches, got {phoneme_count}"
@@ -178,13 +178,13 @@ class TestPhonemeDictionary:
 
             # Apply dictionary - should only match exact case
             ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
-            phoneme_count = ssmd_text.count(r'\{ph="')
+            phoneme_count = ssmd_text.count('{ph="')
 
             # Should only match 1 variation (exact case)
             assert phoneme_count == 1, f"Expected 1 match, got {phoneme_count}"
 
             # Verify it's "Misaki" that matched
-            assert r"[Misaki]\{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
+            assert "[Misaki]{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
         finally:
             Path(temp_path).unlink()
 
@@ -262,7 +262,7 @@ class TestPhonemeDictionary:
             ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
 
             # Should use custom phoneme
-            assert r"[Misaki]\{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
+            assert "[Misaki]{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
         finally:
             Path(temp_path).unlink()
 

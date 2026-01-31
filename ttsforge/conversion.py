@@ -2,26 +2,15 @@
 
 import hashlib
 import json
-import os
 import re
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
-import numpy as np
 import soundfile as sf
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-from pykokoro.onnx_backend import (
-    Kokoro,
-    VoiceBlend,
-    are_models_downloaded,
-    download_all_models,
-)
-from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
-from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
-from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
 
+from .audio_merge import AudioMerger, MergeMeta
 from .constants import (
     DEFAULT_VOICE_FOR_LANG,
     ISO_TO_LANG_CODE,
@@ -29,6 +18,8 @@ from .constants import (
     SUPPORTED_OUTPUT_FORMATS,
     VOICE_PREFIX_TO_LANG,
 )
+from .kokoro_lang import get_onnx_lang_code
+from .kokoro_runner import KokoroRunner, KokoroRunOptions
 from .ssmd_generator import (
     SSMDGenerationError,
     chapter_to_ssmd,
@@ -36,8 +27,6 @@ from .ssmd_generator import (
     save_ssmd_file,
 )
 from .utils import (
-    create_process,
-    ensure_ffmpeg,
     format_duration,
     format_filename_template,
     load_phoneme_dictionary,
@@ -45,14 +34,6 @@ from .utils import (
     prevent_sleep_start,
     sanitize_filename,
 )
-
-
-# Helper function for language code conversion
-def get_onnx_lang_code(ttsforge_lang: str) -> str:
-    """Convert ttsforge language code to kokoro language code."""
-    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
-
-    return LANG_CODE_TO_ONNX.get(ttsforge_lang, ttsforge_lang or "en-us")
 
 
 @dataclass
@@ -144,7 +125,7 @@ class ConversionState:
     pause_sentence: float = 0.2
     pause_paragraph: float = 0.75
     pause_variance: float = 0.05
-    trim_silence: bool = True
+    pause_mode: str = "auto"  # "tts", "manual", or "auto
     lang: Optional[str] = None  # Language override for phonemization
     chapters: list[ChapterState] = field(default_factory=list)
     started_at: str = ""
@@ -189,8 +170,8 @@ class ConversionState:
                 data["pause_paragraph"] = 0.75
             if "pause_variance" not in data:
                 data["pause_variance"] = 0.05
-            if "trim_silence" not in data:
-                data["trim_silence"] = True
+            if "pause_mode" not in data:
+                data["pause_mode"] = "auto"
             if "lang" not in data:
                 data["lang"] = None
 
@@ -217,7 +198,7 @@ class ConversionState:
             "pause_sentence": self.pause_sentence,
             "pause_paragraph": self.pause_paragraph,
             "pause_variance": self.pause_variance,
-            "trim_silence": self.trim_silence,
+            "pause_mode": self.pause_mode,
             "lang": self.lang,
             "chapters": [
                 {
@@ -302,7 +283,7 @@ class ConversionOptions:
     pause_sentence: float = 0.2  # For sentence boundaries
     pause_paragraph: float = 0.75  # For paragraph boundaries
     pause_variance: float = 0.05  # Standard deviation for natural variation
-    trim_silence: bool = True  # Enable automatic silence trimming
+    pause_mode: str = "auto"  # "tts", "manual", or "auto
     # Chapter announcement settings
     announce_chapters: bool = True  # Read chapter titles aloud before content
     chapter_pause_after_title: float = 2.0  # Pause after chapter title (seconds)
@@ -386,10 +367,8 @@ class TTSConverter:
         self.progress_callback = progress_callback
         self.log_callback = log_callback
         self._cancelled = False
-        self._kokoro: Optional[Kokoro] = None
-        self._pipeline: Optional[KokoroPipeline] = None
-        self._np = np
-        self._voice_style: Optional[Union[str, np.ndarray, VoiceBlend]] = None
+        self._runner: KokoroRunner | None = None
+        self._merger = AudioMerger(log=self.log)
 
     def log(self, message: str, level: str = "info") -> None:
         """Log a message."""
@@ -400,18 +379,12 @@ class TTSConverter:
         """Request cancellation of the conversion."""
         self._cancelled = True
 
-    def _init_pipeline(self) -> None:
-        """Initialize the TTS pipeline using ONNX backend."""
-        if self._pipeline is not None:
+    def _init_runner(self) -> None:
+        """Initialize the Kokoro runner."""
+        if self._runner is not None:
             return
 
         self.log("Initializing ONNX TTS pipeline...")
-
-        # Check if models are downloaded
-        if not are_models_downloaded():
-            self.log("Downloading ONNX model files...")
-            download_all_models()
-            self.log("Model download complete.")
 
         # Create TokenizerConfig from ConversionOptions (for mixed-language support)
         from pykokoro.tokenizer import TokenizerConfig
@@ -425,73 +398,22 @@ class TTSConverter:
             phoneme_dict_case_sensitive=self.options.phoneme_dict_case_sensitive,
         )
 
-        # Initialize ONNX backend
-        self._kokoro = Kokoro(
-            model_path=self.options.model_path,
-            voices_path=self.options.voices_path,
-            use_gpu=self.options.use_gpu,
-            tokenizer_config=tokenizer_config,
-        )
-
-        # Load voice database if specified
-        if self.options.voice_database and self.options.voice_database.exists():
-            self._kokoro.load_voice_database(self.options.voice_database)
-            self.log(f"Loaded voice database: {self.options.voice_database}")
-
-        # Resolve voice (handle blending)
-        if self.options.voice_blend:
-            blend = VoiceBlend.parse(self.options.voice_blend)
-            self._voice_style = blend
-            voice_names = ", ".join(f"{v}:{int(w * 100)}%" for v, w in blend.voices)
-            self.log(f"Using blended voice: {voice_names}")
-        else:
-            # Check if voice is in database first
-            if self.options.voice_database:
-                db_voice = self._kokoro.get_voice_from_database(self.options.voice)
-                if db_voice is not None:
-                    self._voice_style = db_voice
-                    self.log(f"Using voice from database: {self.options.voice}")
-                else:
-                    self._voice_style = self.options.voice
-                    self.log(f"Using voice: {self.options.voice}")
-            else:
-                self._voice_style = self.options.voice
-                self.log(f"Using voice: {self.options.voice}")
-
-        default_lang = self.options.lang if self.options.lang else self.options.language
-        default_lang_code = get_onnx_lang_code(default_lang)
-        generation_config = self._build_generation_config(
-            default_lang_code, manual_pauses=False
-        )
-        pipeline_config = PipelineConfig(
-            voice=self._voice_style
-            if self._voice_style is not None
-            else self.options.voice,
-            generation=generation_config,
-            model_path=self.options.model_path,
-            voices_path=self.options.voices_path,
-            tokenizer_config=tokenizer_config,
-        )
-        self._pipeline = KokoroPipeline(
-            pipeline_config,
-            phoneme_processing=OnnxPhonemeProcessorAdapter(self._kokoro),
-            audio_generation=OnnxAudioGenerationAdapter(self._kokoro),
-            audio_postprocessing=OnnxAudioPostprocessingAdapter(self._kokoro),
-        )
-
-    def _build_generation_config(
-        self, lang_code: str, manual_pauses: bool
-    ) -> GenerationConfig:
-        """Build GenerationConfig for a pipeline run."""
-        return GenerationConfig(
+        opts = KokoroRunOptions(
+            voice=self.options.voice,
             speed=self.options.speed,
-            lang=lang_code,
-            pause_mode="manual" if manual_pauses else "tts",
+            use_gpu=self.options.use_gpu,
             pause_clause=self.options.pause_clause,
             pause_sentence=self.options.pause_sentence,
             pause_paragraph=self.options.pause_paragraph,
             pause_variance=self.options.pause_variance,
+            model_path=self.options.model_path,
+            voices_path=self.options.voices_path,
+            voice_blend=self.options.voice_blend,
+            voice_database=self.options.voice_database,
+            tokenizer_config=tokenizer_config,
         )
+        self._runner = KokoroRunner(opts, log=self.log)
+        self._runner.ensure_ready()
 
     def _build_ssmd_content(
         self,
@@ -564,74 +486,6 @@ class TTSConverter:
 
         return ssmd_content, ssmd_hash
 
-    def _add_chapters_to_m4b(
-        self,
-        output_path: Path,
-        chapters: list[dict[str, Any]],
-    ) -> None:
-        """Add chapter markers to an m4b file."""
-        if self.options.output_format != "m4b" or len(chapters) <= 1:
-            return
-
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
-
-        # Create chapters metadata file
-        chapters_file = output_path.with_suffix(".chapters.txt")
-        with open(chapters_file, "w", encoding="utf-8") as f:
-            f.write(";FFMETADATA1\n")
-            for ch in chapters:
-                title = ch["title"].replace("=", "\\=")
-                f.write("[CHAPTER]\n")
-                f.write("TIMEBASE=1/1000\n")
-                f.write(f"START={int(ch['start'] * 1000)}\n")
-                f.write(f"END={int(ch['end'] * 1000)}\n")
-                f.write(f"title={title}\n\n")
-
-        # Mux chapters into the file
-        tmp_path = output_path.with_suffix(".tmp.m4b")
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(output_path),
-            "-i",
-            str(chapters_file),
-            "-map",
-            "0:a",
-            "-map_metadata",
-            "1",
-            "-map_chapters",
-            "1",
-            "-c:a",
-            "copy",
-        ]
-
-        # Re-add cover if exists
-        if self.options.cover_image and self.options.cover_image.exists():
-            cmd.extend(
-                [
-                    "-i",
-                    str(self.options.cover_image),
-                    "-map",
-                    "2",
-                    "-c:v",
-                    "copy",
-                    "-disposition:v",
-                    "attached_pic",
-                ]
-            )
-
-        cmd.append(str(tmp_path))
-
-        proc = create_process(cmd, suppress_output=True)
-        proc.wait()
-
-        # Replace original with chaptered version
-        os.replace(tmp_path, output_path)
-        chapters_file.unlink()
-
     def _render_chapter_wav(
         self,
         chapter: Chapter,
@@ -651,143 +505,16 @@ class TTSConverter:
             channels=1,
             format="wav",
         ) as out_file:
-            assert self._pipeline is not None
-            generation = self._build_generation_config(
-                lang_code, manual_pauses=self.options.trim_silence
+            assert self._runner is not None
+            samples = self._runner.synthesize(
+                ssmd_content,
+                lang_code=lang_code,
+                pause_mode=self.options.pause_mode,
+                is_phonemes=False,
             )
-            result = self._pipeline.run(ssmd_content, generation=generation)
-            samples = result.audio
             out_file.write(samples)
 
         return len(samples) / SAMPLE_RATE
-
-    def _merge_chapter_files(
-        self,
-        chapter_files: list[Path],
-        chapter_durations: list[float],
-        chapter_titles: list[str],
-        output_path: Path,
-    ) -> None:
-        """
-        Merge individual chapter WAV files into the final output format.
-
-        Args:
-            chapter_files: List of chapter WAV file paths
-            chapter_durations: Duration of each chapter in seconds
-            chapter_titles: Title of each chapter
-            output_path: Final output file path
-        """
-        ensure_ffmpeg()
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
-
-        fmt = self.options.output_format
-        silence_duration = self.options.silence_between_chapters
-
-        # Create a concat file for ffmpeg
-        concat_file = output_path.with_suffix(".concat.txt")
-        silence_file = output_path.parent / "_silence.wav"
-
-        # Generate silence file if needed
-        if silence_duration > 0 and len(chapter_files) > 1:
-            silence_samples = int(silence_duration * SAMPLE_RATE)
-            silence_audio = self._np.zeros(silence_samples, dtype="float32")
-            with sf.SoundFile(
-                str(silence_file),
-                "w",
-                samplerate=SAMPLE_RATE,
-                channels=1,
-                format="wav",
-            ) as f:
-                f.write(silence_audio)
-
-        # Write concat file
-        with open(concat_file, "w", encoding="utf-8") as f:
-            for i, chapter_file in enumerate(chapter_files):
-                f.write(f"file '{chapter_file.absolute()}'\n")
-                if i < len(chapter_files) - 1 and silence_duration > 0:
-                    f.write(f"file '{silence_file.absolute()}'\n")
-
-        # Build ffmpeg command
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(concat_file),
-        ]
-
-        if fmt == "m4b":
-            if self.options.cover_image and self.options.cover_image.exists():
-                cmd.extend(
-                    [
-                        "-i",
-                        str(self.options.cover_image),
-                        "-map",
-                        "0:a",
-                        "-map",
-                        "1",
-                        "-c:v",
-                        "copy",
-                        "-disposition:v",
-                        "attached_pic",
-                    ]
-                )
-            cmd.extend(
-                [
-                    "-c:a",
-                    "aac",
-                    "-q:a",
-                    "2",
-                    "-movflags",
-                    "+faststart+use_metadata_tags",
-                ]
-            )
-            if self.options.title:
-                cmd.extend(["-metadata", f"title={self.options.title}"])
-            if self.options.author:
-                cmd.extend(["-metadata", f"artist={self.options.author}"])
-        elif fmt == "opus":
-            cmd.extend(["-c:a", "libopus", "-b:a", "24000"])
-        elif fmt == "mp3":
-            cmd.extend(["-c:a", "libmp3lame", "-q:a", "2"])
-        elif fmt == "flac":
-            cmd.extend(["-c:a", "flac"])
-        elif fmt == "wav":
-            cmd.extend(["-c:a", "pcm_s16le"])
-
-        cmd.append(str(output_path))
-
-        proc = create_process(cmd, suppress_output=True)
-        proc.wait()
-
-        # Clean up concat and silence files
-        concat_file.unlink(missing_ok=True)
-        silence_file.unlink(missing_ok=True)
-
-        # Add chapter markers for m4b
-        if fmt == "m4b" and len(chapter_files) > 1:
-            chapter_times: list[dict[str, Any]] = []
-            current_time = 0.0
-            for i, (duration, title) in enumerate(
-                zip(chapter_durations, chapter_titles)
-            ):
-                chapter_times.append(
-                    {
-                        "title": title,
-                        "start": current_time,
-                        "end": current_time + duration,
-                    }
-                )
-                current_time += duration
-                if i < len(chapter_durations) - 1:
-                    current_time += silence_duration
-
-            self._add_chapters_to_m4b(output_path, chapter_times)
 
     def convert_chapters_resumable(  # noqa: C901 - Complex but necessary for resume logic
         self,
@@ -869,7 +596,7 @@ class TTSConverter:
                             or state.pause_sentence != self.options.pause_sentence
                             or state.pause_paragraph != self.options.pause_paragraph
                             or state.pause_variance != self.options.pause_variance
-                            or state.trim_silence != self.options.trim_silence
+                            or state.pause_mode != self.options.pause_mode
                             or state.lang != self.options.lang
                         )
 
@@ -885,7 +612,7 @@ class TTSConverter:
                                 f"sent={state.pause_sentence}s "
                                 f"para={state.pause_paragraph}s "
                                 f"var={state.pause_variance}s "
-                                f"trim={state.trim_silence}",
+                                f"pause_mode={state.pause_mode}",
                                 "info",
                             )
 
@@ -902,7 +629,7 @@ class TTSConverter:
                         self.options.pause_sentence = state.pause_sentence
                         self.options.pause_paragraph = state.pause_paragraph
                         self.options.pause_variance = state.pause_variance
-                        self.options.trim_silence = state.trim_silence
+                        self.options.pause_mode = state.pause_mode
                         self.options.lang = state.lang
 
             if state is None:
@@ -923,7 +650,7 @@ class TTSConverter:
                     pause_sentence=self.options.pause_sentence,
                     pause_paragraph=self.options.pause_paragraph,
                     pause_variance=self.options.pause_variance,
-                    trim_silence=self.options.trim_silence,
+                    pause_mode=self.options.pause_mode,
                     lang=self.options.lang,
                     chapters=[
                         ChapterState(
@@ -942,8 +669,8 @@ class TTSConverter:
                 total = len(chapters)
                 self.log(f"Resuming conversion: {completed}/{total} chapters completed")
 
-            # Initialize pipeline
-            self._init_pipeline()
+            # Initialize runner
+            self._init_runner()
 
             phoneme_dict = None
             if self.options.phoneme_dictionary_path:
@@ -1150,11 +877,19 @@ class TTSConverter:
             chapter_durations = [ch.duration for ch in state.chapters]
             chapter_titles = [ch.title for ch in state.chapters]
 
-            self._merge_chapter_files(
+            meta = MergeMeta(
+                fmt=self.options.output_format,
+                silence_between_chapters=self.options.silence_between_chapters,
+                title=self.options.title,
+                author=self.options.author,
+                cover_image=self.options.cover_image,
+            )
+            self._merger.merge_chapter_wavs(
                 chapter_files,
                 chapter_durations,
                 chapter_titles,
                 output_path,
+                meta,
             )
 
             self.log("Conversion complete!")

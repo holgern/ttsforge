@@ -85,7 +85,8 @@ class InputReader:
             return "pdf"
         else:
             raise ValueError(
-                f"Unsupported file type: {suffix}. Supported types: .epub, .txt, .ssmd, .pdf"
+                f"Unsupported file type: {suffix}. Supported types: "
+                ".epub, .txt, .ssmd, .pdf"
             )
 
     def get_metadata(self) -> Metadata:

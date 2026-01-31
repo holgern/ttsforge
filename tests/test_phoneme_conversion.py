@@ -371,29 +371,22 @@ class TestPhonemeConverterConversion:
 
         return book
 
-    @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
-    @patch("ttsforge.phoneme_conversion.Kokoro")
+    @patch("ttsforge.phoneme_conversion.KokoroRunner")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_convert_creates_output(
         self,
         mock_prevent_end,
         mock_prevent_start,
-        mock_kokoro_class,
-        mock_pipeline_class,
-        mock_models_downloaded,
+        mock_runner_class,
         sample_book,
     ):
         """Test that convert creates output file."""
         # Setup mocks
-        mock_models_downloaded.return_value = True
-        mock_kokoro = MagicMock()
-        mock_kokoro_class.return_value = mock_kokoro
         fake_audio = np.zeros(24000, dtype="float32")
-        mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
-        mock_pipeline_class.return_value = mock_pipeline
+        mock_runner = MagicMock()
+        mock_runner.synthesize.return_value = fake_audio
+        mock_runner_class.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.wav"
@@ -406,29 +399,22 @@ class TestPhonemeConverterConversion:
             assert result.output_path == output_path
             assert output_path.exists()
 
-    @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
-    @patch("ttsforge.phoneme_conversion.Kokoro")
+    @patch("ttsforge.phoneme_conversion.KokoroRunner")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_convert_streaming_creates_output(
         self,
         mock_prevent_end,
         mock_prevent_start,
-        mock_kokoro_class,
-        mock_pipeline_class,
-        mock_models_downloaded,
+        mock_runner_class,
         sample_book,
     ):
         """Test that convert_streaming creates output file."""
         # Setup mocks
-        mock_models_downloaded.return_value = True
-        mock_kokoro = MagicMock()
-        mock_kokoro_class.return_value = mock_kokoro
         fake_audio = np.zeros(24000, dtype="float32")
-        mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
-        mock_pipeline_class.return_value = mock_pipeline
+        mock_runner = MagicMock()
+        mock_runner.synthesize.return_value = fake_audio
+        mock_runner_class.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.wav"
@@ -466,28 +452,21 @@ class TestPhonemeConverterConversion:
             assert result.success is False
             assert "Unsupported format" in result.error_message
 
-    @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
-    @patch("ttsforge.phoneme_conversion.Kokoro")
+    @patch("ttsforge.phoneme_conversion.KokoroRunner")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_convert_with_chapter_selection(
         self,
         mock_prevent_end,
         mock_prevent_start,
-        mock_kokoro_class,
-        mock_pipeline_class,
-        mock_models_downloaded,
+        mock_runner_class,
         sample_book,
     ):
         """Test conversion with chapter selection."""
-        mock_models_downloaded.return_value = True
-        mock_kokoro = MagicMock()
-        mock_kokoro_class.return_value = mock_kokoro
         fake_audio = np.zeros(24000, dtype="float32")
-        mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
-        mock_pipeline_class.return_value = mock_pipeline
+        mock_runner = MagicMock()
+        mock_runner.synthesize.return_value = fake_audio
+        mock_runner_class.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.wav"
@@ -501,30 +480,23 @@ class TestPhonemeConverterConversion:
 
             assert result.success is True
             # One chapter selected: announcement + content
-            assert mock_pipeline.run.call_count == 2
+            assert mock_runner.synthesize.call_count == 2
 
-    @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
-    @patch("ttsforge.phoneme_conversion.Kokoro")
+    @patch("ttsforge.phoneme_conversion.KokoroRunner")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_progress_callback_called(
         self,
         mock_prevent_end,
         mock_prevent_start,
-        mock_kokoro_class,
-        mock_pipeline_class,
-        mock_models_downloaded,
+        mock_runner_class,
         sample_book,
     ):
         """Test that progress callback is called."""
-        mock_models_downloaded.return_value = True
-        mock_kokoro = MagicMock()
-        mock_kokoro_class.return_value = mock_kokoro
         fake_audio = np.zeros(24000, dtype="float32")
-        mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
-        mock_pipeline_class.return_value = mock_pipeline
+        mock_runner = MagicMock()
+        mock_runner.synthesize.return_value = fake_audio
+        mock_runner_class.return_value = mock_runner
 
         progress_updates = []
 

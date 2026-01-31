@@ -351,3 +351,32 @@ def load_ssmd_file(ssmd_path: Path) -> tuple[str, str]:
         ) from e
 
 
+def validate_ssmd(ssmd_content: str) -> list[str]:
+    """Validate SSMD content and return warnings.
+
+    This is intentionally lightweight: it checks for obviously unbalanced
+    brackets/parentheses and unmatched emphasis markers. It does not attempt
+    to fully parse SSMD.
+
+    Args:
+        ssmd_content: SSMD formatted text
+
+    Returns:
+        List of warning strings. Empty list means no issues found.
+    """
+    warnings: list[str] = []
+
+    if ssmd_content.count("[") != ssmd_content.count("]"):
+        warnings.append("Unbalanced '[' and ']' brackets")
+
+    if ssmd_content.count("(") != ssmd_content.count(")"):
+        warnings.append("Unbalanced '(' and ')' parentheses")
+
+    strong_count = ssmd_content.count("**")
+    if strong_count % 2 != 0:
+        warnings.append("Unbalanced strong emphasis markers '**'")
+
+    if ssmd_content.count("*") % 2 != 0:
+        warnings.append("Unbalanced emphasis markers '*'")
+
+    return warnings

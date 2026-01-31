@@ -36,16 +36,8 @@ class TestChapterAnnouncementConversion:
             ),
         ]
 
-    @patch("ttsforge.conversion.are_models_downloaded")
-    @patch("ttsforge.conversion.Kokoro")
-    @patch("ttsforge.conversion.prevent_sleep_start")
-    @patch("ttsforge.conversion.prevent_sleep_end")
     def test_announce_chapters_enabled_by_default(
         self,
-        mock_prevent_end,
-        mock_prevent_start,
-        mock_kokoro_class,
-        mock_models_downloaded,
     ):
         """Test that announce_chapters is enabled by default."""
         options = ConversionOptions()
@@ -56,16 +48,8 @@ class TestChapterAnnouncementConversion:
         options = ConversionOptions()
         assert options.chapter_pause_after_title == 2.0
 
-    @patch("ttsforge.conversion.are_models_downloaded")
-    @patch("ttsforge.conversion.Kokoro")
-    @patch("ttsforge.conversion.prevent_sleep_start")
-    @patch("ttsforge.conversion.prevent_sleep_end")
     def test_announce_chapters_can_be_disabled(
         self,
-        mock_prevent_end,
-        mock_prevent_start,
-        mock_kokoro_class,
-        mock_models_downloaded,
     ):
         """Test that announce_chapters can be disabled."""
         options = ConversionOptions(announce_chapters=False)
@@ -129,28 +113,21 @@ class TestChapterAnnouncementPhonemeConversion:
         options = PhonemeConversionOptions()
         assert options.chapter_pause_after_title == 2.0
 
-    @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
-    @patch("ttsforge.phoneme_conversion.Kokoro")
+    @patch("ttsforge.phoneme_conversion.KokoroRunner")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_phoneme_chapter_announcement_calls_create(
         self,
         mock_prevent_end,
         mock_prevent_start,
-        mock_kokoro_class,
-        mock_pipeline_class,
-        mock_models_downloaded,
+        mock_runner_class,
         sample_phoneme_book,
     ):
         """Test that phoneme converter calls pipeline for announcements."""
-        mock_models_downloaded.return_value = True
-        mock_kokoro = MagicMock()
-        mock_kokoro_class.return_value = mock_kokoro
         fake_audio = np.zeros(24000, dtype="float32")
-        mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
-        mock_pipeline_class.return_value = mock_pipeline
+        mock_runner = MagicMock()
+        mock_runner.synthesize.return_value = fake_audio
+        mock_runner_class.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.wav"
@@ -162,32 +139,25 @@ class TestChapterAnnouncementPhonemeConversion:
             converter.convert(output_path)
 
             # Should call pipeline for announcements (2 chapters)
-            texts = [call.args[0] for call in mock_pipeline.run.call_args_list]
+            texts = [call.args[0] for call in mock_runner.synthesize.call_args_list]
             assert "Chapter One" in texts
             assert "Chapter Two" in texts
 
-    @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
-    @patch("ttsforge.phoneme_conversion.Kokoro")
+    @patch("ttsforge.phoneme_conversion.KokoroRunner")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_phoneme_no_announcement_when_disabled(
         self,
         mock_prevent_end,
         mock_prevent_start,
-        mock_kokoro_class,
-        mock_pipeline_class,
-        mock_models_downloaded,
+        mock_runner_class,
         sample_phoneme_book,
     ):
         """Test phoneme converter doesn't announce when disabled."""
-        mock_models_downloaded.return_value = True
-        mock_kokoro = MagicMock()
-        mock_kokoro_class.return_value = mock_kokoro
         fake_audio = np.zeros(24000, dtype="float32")
-        mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
-        mock_pipeline_class.return_value = mock_pipeline
+        mock_runner = MagicMock()
+        mock_runner.synthesize.return_value = fake_audio
+        mock_runner_class.return_value = mock_runner
 
         with tempfile.TemporaryDirectory() as tmpdir:
             output_path = Path(tmpdir) / "test.wav"
@@ -198,31 +168,24 @@ class TestChapterAnnouncementPhonemeConversion:
 
             converter.convert(output_path)
 
-            texts = [call.args[0] for call in mock_pipeline.run.call_args_list]
+            texts = [call.args[0] for call in mock_runner.synthesize.call_args_list]
             assert "Chapter One" not in texts
             assert "Chapter Two" not in texts
 
-    @patch("ttsforge.phoneme_conversion.are_models_downloaded")
-    @patch("ttsforge.phoneme_conversion.KokoroPipeline")
-    @patch("ttsforge.phoneme_conversion.Kokoro")
+    @patch("ttsforge.phoneme_conversion.KokoroRunner")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_start")
     @patch("ttsforge.phoneme_conversion.prevent_sleep_end")
     def test_phoneme_empty_chapter_no_announcement(
         self,
         mock_prevent_end,
         mock_prevent_start,
-        mock_kokoro_class,
-        mock_pipeline_class,
-        mock_models_downloaded,
+        mock_runner_class,
     ):
         """Test that empty chapters (no segments) are not announced."""
-        mock_models_downloaded.return_value = True
-        mock_kokoro = MagicMock()
-        mock_kokoro_class.return_value = mock_kokoro
         fake_audio = np.zeros(24000, dtype="float32")
-        mock_pipeline = MagicMock()
-        mock_pipeline.run.return_value = MagicMock(audio=fake_audio, sample_rate=24000)
-        mock_pipeline_class.return_value = mock_pipeline
+        mock_runner = MagicMock()
+        mock_runner.synthesize.return_value = fake_audio
+        mock_runner_class.return_value = mock_runner
 
         # Create book with empty chapter
         book = PhonemeBook(title="Test")
@@ -238,7 +201,7 @@ class TestChapterAnnouncementPhonemeConversion:
             converter.convert(output_path)
 
             # Should NOT announce empty chapters
-            assert mock_pipeline.run.call_count == 0
+            assert mock_runner.synthesize.call_count == 0
 
 
 class TestChapterAnnouncementConfig:

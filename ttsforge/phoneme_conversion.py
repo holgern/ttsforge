@@ -5,19 +5,20 @@ bypassing text-to-phoneme conversion since phonemes/tokens are pre-computed.
 """
 
 import json
-import os
 import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Callable, Optional
 
 import numpy as np
 import soundfile as sf
-from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
-from pykokoro.onnx_backend import VoiceBlend, are_models_downloaded, download_all_models
 
+from .audio_merge import AudioMerger, MergeMeta
+from .chapter_selection import parse_chapter_selection
 from .constants import SAMPLE_RATE, SUPPORTED_OUTPUT_FORMATS
+from .kokoro_lang import get_onnx_lang_code
+from .kokoro_runner import KokoroRunner, KokoroRunOptions
 from .phonemes import PhonemeBook, PhonemeChapter, PhonemeSegment
 from .utils import (
     create_process,
@@ -28,73 +29,6 @@ from .utils import (
     prevent_sleep_start,
     sanitize_filename,
 )
-
-
-def parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
-    """Parse chapter selection string into list of 0-based chapter indices.
-
-    Supports formats like:
-    - "3" -> [2] (single chapter, 1-based to 0-based)
-    - "1-5" -> [0, 1, 2, 3, 4] (range, inclusive)
-    - "3,5,7" -> [2, 4, 6] (comma-separated)
-    - "1-3,7,9-10" -> [0, 1, 2, 6, 8, 9] (mixed)
-
-    Args:
-        selection: Chapter selection string (1-based indexing)
-        total_chapters: Total number of chapters available
-
-    Returns:
-        List of 0-based chapter indices
-
-    Raises:
-        ValueError: If selection format is invalid or chapters out of range
-    """
-    indices: set[int] = set()
-
-    for part in selection.split(","):
-        part = part.strip()
-        if not part:
-            continue
-
-        if "-" in part:
-            # Range: "1-5"
-            try:
-                start_str, end_str = part.split("-", 1)
-                start = int(start_str.strip())
-                end = int(end_str.strip())
-            except ValueError as e:
-                raise ValueError(f"Invalid range format: {part}") from e
-
-            if start < 1 or end < 1:
-                raise ValueError(f"Chapter numbers must be >= 1: {part}")
-            if start > end:
-                raise ValueError(f"Invalid range (start > end): {part}")
-            if end > total_chapters:
-                raise ValueError(
-                    f"Chapter {end} exceeds total chapters ({total_chapters})"
-                )
-
-            # Convert to 0-based indices
-            for i in range(start - 1, end):
-                indices.add(i)
-        else:
-            # Single chapter: "3"
-            try:
-                chapter_num = int(part)
-            except ValueError as e:
-                raise ValueError(f"Invalid chapter number: {part}") from e
-
-            if chapter_num < 1:
-                raise ValueError(f"Chapter number must be >= 1: {chapter_num}")
-            if chapter_num > total_chapters:
-                raise ValueError(
-                    f"Chapter {chapter_num} exceeds total chapters ({total_chapters})"
-                )
-
-            # Convert to 0-based index
-            indices.add(chapter_num - 1)
-
-    return sorted(indices)
 
 
 @dataclass
@@ -162,7 +96,7 @@ class PhonemeConversionState:
     pause_sentence: float = 0.2
     pause_paragraph: float = 0.75
     pause_variance: float = 0.05
-    trim_silence: bool = True
+    pause_mode: str = "auto"
     lang: Optional[str] = None  # Language override for phonemization
     chapters: list[PhonemeChapterState] = field(default_factory=list)
     started_at: str = ""
@@ -215,8 +149,8 @@ class PhonemeConversionState:
                 data["pause_paragraph"] = 0.75
             if "pause_variance" not in data:
                 data["pause_variance"] = 0.05
-            if "trim_silence" not in data:
-                data["trim_silence"] = True
+            if "pause_mode" not in data:
+                data["pause_mode"] = "auto"
             if "lang" not in data:
                 data["lang"] = None
 
@@ -240,7 +174,7 @@ class PhonemeConversionState:
             "pause_sentence": self.pause_sentence,
             "pause_paragraph": self.pause_paragraph,
             "pause_variance": self.pause_variance,
-            "trim_silence": self.trim_silence,
+            "pause_mode": self.pause_mode,
             "lang": self.lang,
             "chapters": [
                 {
@@ -278,7 +212,7 @@ class PhonemeConversionOptions:
     pause_sentence: float = 0.2  # For sentence boundaries
     pause_paragraph: float = 0.75  # For paragraph boundaries
     pause_variance: float = 0.05  # Standard deviation for natural variation
-    trim_silence: bool = True  # Enable automatic silence trimming
+    pause_mode: str = "auto"  # "tts", "manual", or "auto"
     # Chapter announcement settings
     announce_chapters: bool = True  # Read chapter titles aloud before content
     chapter_pause_after_title: float = 2.0  # Pause after chapter title (seconds)
@@ -328,8 +262,8 @@ class PhonemeConverter:
         self.progress_callback = progress_callback
         self.log_callback = log_callback
         self._cancelled = False
-        self._pipeline: Optional[KokoroPipeline] = None
-        self._voice_style: Optional[Union[str, np.ndarray, VoiceBlend]] = None
+        self._runner: KokoroRunner | None = None
+        self._merger = AudioMerger(log=self.log)
 
     def log(self, message: str, level: str = "info") -> None:
         """Log a message."""
@@ -339,70 +273,6 @@ class PhonemeConverter:
     def cancel(self) -> None:
         """Request cancellation of the conversion."""
         self._cancelled = True
-
-    def _init_pipeline(self) -> None:
-        """Initialize the TTS pipeline using ONNX backend."""
-        if self._pipeline is not None:
-            return
-
-        self.log("Initializing ONNX TTS pipeline...")
-
-        # Check if models are downloaded
-        if not are_models_downloaded():
-            self.log("Downloading ONNX model files...")
-            download_all_models()
-            self.log("Model download complete.")
-
-        # Resolve voice (handle blending)
-        if self.options.voice_blend:
-            blend = VoiceBlend.parse(self.options.voice_blend)
-            self._voice_style = blend
-            voice_names = ", ".join(f"{v}:{int(w * 100)}%" for v, w in blend.voices)
-            self.log(f"Using blended voice: {voice_names}")
-        else:
-            self._voice_style = self.options.voice
-            self.log(f"Using voice: {self.options.voice}")
-
-        if self.options.voice_database:
-            self.log(
-                "voice_database is not supported with the standard pipeline; "
-                "using builtin voices",
-                "warning",
-            )
-
-        if self.options.lang:
-            from .conversion import get_onnx_lang_code
-
-            default_lang = get_onnx_lang_code(self.options.lang)
-        else:
-            default_lang = self.book.lang or "en-us"
-        generation_config = self._build_generation_config(
-            default_lang, manual_pauses=False
-        )
-        pipeline_config = PipelineConfig(
-            voice=self._voice_style
-            if self._voice_style is not None
-            else self.options.voice,
-            generation=generation_config,
-            model_path=self.options.model_path,
-            voices_path=self.options.voices_path,
-        )
-        self._pipeline = KokoroPipeline(pipeline_config)
-
-    def _build_generation_config(
-        self, lang_code: str, manual_pauses: bool, is_phonemes: bool = False
-    ) -> GenerationConfig:
-        """Build GenerationConfig for a pipeline run."""
-        return GenerationConfig(
-            speed=self.options.speed,
-            lang=lang_code,
-            is_phonemes=is_phonemes,
-            pause_mode="manual" if manual_pauses else "tts",
-            pause_clause=self.options.pause_clause,
-            pause_sentence=self.options.pause_sentence,
-            pause_paragraph=self.options.pause_paragraph,
-            pause_variance=self.options.pause_variance,
-        )
 
     def _phoneme_segments_to_ssmd(self, segments: list[PhonemeSegment]) -> str:
         """Build SSMD text from phoneme segments."""
@@ -530,74 +400,6 @@ class PhonemeConverter:
             audio_bytes = audio.astype("float32").tobytes()
             ffmpeg_proc.stdin.write(audio_bytes)
 
-    def _add_chapters_to_m4b(
-        self,
-        output_path: Path,
-        chapters: list[dict[str, Any]],
-    ) -> None:
-        """Add chapter markers to an m4b file."""
-        if self.options.output_format != "m4b" or len(chapters) <= 1:
-            return
-
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
-
-        # Create chapters metadata file
-        chapters_file = output_path.with_suffix(".chapters.txt")
-        with open(chapters_file, "w", encoding="utf-8") as f:
-            f.write(";FFMETADATA1\n")
-            for ch in chapters:
-                title = ch["title"].replace("=", "\\=")
-                f.write("[CHAPTER]\n")
-                f.write("TIMEBASE=1/1000\n")
-                f.write(f"START={int(ch['start'] * 1000)}\n")
-                f.write(f"END={int(ch['end'] * 1000)}\n")
-                f.write(f"title={title}\n\n")
-
-        # Mux chapters into the file
-        tmp_path = output_path.with_suffix(".tmp.m4b")
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-i",
-            str(output_path),
-            "-i",
-            str(chapters_file),
-            "-map",
-            "0:a",
-            "-map_metadata",
-            "1",
-            "-map_chapters",
-            "1",
-            "-c:a",
-            "copy",
-        ]
-
-        # Re-add cover if exists
-        if self.options.cover_image and self.options.cover_image.exists():
-            cmd.extend(
-                [
-                    "-i",
-                    str(self.options.cover_image),
-                    "-map",
-                    "2",
-                    "-c:v",
-                    "copy",
-                    "-disposition:v",
-                    "attached_pic",
-                ]
-            )
-
-        cmd.append(str(tmp_path))
-
-        proc = create_process(cmd, suppress_output=True)
-        proc.wait()
-
-        # Replace original with chaptered version
-        os.replace(tmp_path, output_path)
-        chapters_file.unlink()
-
     def _convert_chapter_to_wav(
         self,
         chapter: PhonemeChapter,
@@ -621,6 +423,12 @@ class PhonemeConverter:
         """
         segments_processed = 0
         total_segments = len(chapter.segments)
+        assert self._runner is not None
+        lang_code = (
+            get_onnx_lang_code(self.options.lang)
+            if self.options.lang
+            else (chapter.segments[0].lang if chapter.segments else "en-us")
+        )
 
         # Open WAV file for writing
         with sf.SoundFile(
@@ -635,29 +443,12 @@ class PhonemeConverter:
             # Announce chapter title if enabled
             # Only announce if there are segments to follow
             if self.options.announce_chapters and chapter.title and chapter.segments:
-                # Format: "Chapter N. Title"
-                if chapter.title:
-                    announcement_text = f"{chapter.title}"
-                else:
-                    announcement_text = f"Chapter {chapter.chapter_index + 1}"
-                assert self._pipeline is not None
-
-                # Get language code for announcement
-                # Use lang override if provided, otherwise detect from first segment
-                if self.options.lang:
-                    from .conversion import get_onnx_lang_code
-
-                    lang_code = get_onnx_lang_code(self.options.lang)
-                elif chapter.segments:
-                    lang_code = chapter.segments[0].lang
-                else:
-                    lang_code = "en-us"  # Default fallback
-
-                generation = self._build_generation_config(
-                    lang_code, manual_pauses=False
+                title_samples = self._runner.synthesize(
+                    chapter.title,
+                    lang_code=lang_code,
+                    pause_mode="tts",
+                    is_phonemes=False,
                 )
-                result = self._pipeline.run(announcement_text, generation=generation)
-                title_samples = result.audio
                 out_file.write(title_samples)
                 duration += len(title_samples) / SAMPLE_RATE
 
@@ -671,24 +462,13 @@ class PhonemeConverter:
 
             if not self._cancelled and chapter.segments:
                 # Single pipeline call for entire chapter
-                assert self._pipeline is not None
-                if self.options.lang:
-                    from .conversion import get_onnx_lang_code
-
-                    lang_code = get_onnx_lang_code(self.options.lang)
-                elif chapter.segments:
-                    lang_code = chapter.segments[0].lang
-                else:
-                    lang_code = "en-us"
-
                 ssmd_text = self._phoneme_segments_to_ssmd(chapter.segments)
-                generation = self._build_generation_config(
-                    lang_code,
-                    manual_pauses=self.options.trim_silence,
+                samples = self._runner.synthesize(
+                    ssmd_text,
+                    lang_code=lang_code,
+                    pause_mode=self.options.pause_mode,
                     is_phonemes=True,
                 )
-                result = self._pipeline.run(ssmd_text, generation=generation)
-                samples = result.audio
 
                 out_file.write(samples)
                 duration += len(samples) / SAMPLE_RATE
@@ -715,134 +495,6 @@ class PhonemeConverter:
                     self.progress_callback(progress)
 
         return duration, segments_processed
-
-    def _merge_chapter_files(
-        self,
-        chapter_files: list[Path],
-        chapter_durations: list[float],
-        chapter_titles: list[str],
-        output_path: Path,
-    ) -> None:
-        """
-        Merge individual chapter WAV files into the final output format.
-
-        Args:
-            chapter_files: List of chapter WAV file paths
-            chapter_durations: Duration of each chapter in seconds
-            chapter_titles: Title of each chapter
-            output_path: Final output file path
-        """
-        ensure_ffmpeg()
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
-
-        fmt = self.options.output_format
-        silence_duration = self.options.silence_between_chapters
-
-        # Create a concat file for ffmpeg
-        concat_file = output_path.with_suffix(".concat.txt")
-        silence_file = output_path.parent / "_silence.wav"
-
-        # Generate silence file if needed
-        if silence_duration > 0 and len(chapter_files) > 1:
-            silence_samples = int(silence_duration * SAMPLE_RATE)
-            silence_audio = np.zeros(silence_samples, dtype="float32")
-            with sf.SoundFile(
-                str(silence_file),
-                "w",
-                samplerate=SAMPLE_RATE,
-                channels=1,
-                format="wav",
-            ) as f:
-                f.write(silence_audio)
-
-        # Write concat file
-        with open(concat_file, "w", encoding="utf-8") as f:
-            for i, chapter_file in enumerate(chapter_files):
-                f.write(f"file '{chapter_file.absolute()}'\n")
-                if i < len(chapter_files) - 1 and silence_duration > 0:
-                    f.write(f"file '{silence_file.absolute()}'\n")
-
-        # Build ffmpeg command
-        cmd = [
-            "ffmpeg",
-            "-y",
-            "-f",
-            "concat",
-            "-safe",
-            "0",
-            "-i",
-            str(concat_file),
-        ]
-
-        if fmt == "m4b":
-            if self.options.cover_image and self.options.cover_image.exists():
-                cmd.extend(
-                    [
-                        "-i",
-                        str(self.options.cover_image),
-                        "-map",
-                        "0:a",
-                        "-map",
-                        "1",
-                        "-c:v",
-                        "copy",
-                        "-disposition:v",
-                        "attached_pic",
-                    ]
-                )
-            cmd.extend(
-                [
-                    "-c:a",
-                    "aac",
-                    "-q:a",
-                    "2",
-                    "-movflags",
-                    "+faststart+use_metadata_tags",
-                ]
-            )
-            if self.options.title:
-                cmd.extend(["-metadata", f"title={self.options.title}"])
-            if self.options.author:
-                cmd.extend(["-metadata", f"artist={self.options.author}"])
-        elif fmt == "opus":
-            cmd.extend(["-c:a", "libopus", "-b:a", "24000"])
-        elif fmt == "mp3":
-            cmd.extend(["-c:a", "libmp3lame", "-q:a", "2"])
-        elif fmt == "flac":
-            cmd.extend(["-c:a", "flac"])
-        elif fmt == "wav":
-            cmd.extend(["-c:a", "pcm_s16le"])
-
-        cmd.append(str(output_path))
-
-        proc = create_process(cmd, suppress_output=True)
-        proc.wait()
-
-        # Clean up concat and silence files
-        concat_file.unlink(missing_ok=True)
-        silence_file.unlink(missing_ok=True)
-
-        # Add chapter markers for m4b
-        if fmt == "m4b" and len(chapter_files) > 1:
-            chapter_times: list[dict[str, Any]] = []
-            current_time = 0.0
-            for i, (duration, title) in enumerate(
-                zip(chapter_durations, chapter_titles)
-            ):
-                chapter_times.append(
-                    {
-                        "title": title,
-                        "start": current_time,
-                        "end": current_time + duration,
-                    }
-                )
-                current_time += duration
-                if i < len(chapter_durations) - 1:
-                    current_time += silence_duration
-
-            self._add_chapters_to_m4b(output_path, chapter_times)
 
     def _get_selected_chapters(self) -> list[PhonemeChapter]:
         """Get chapters based on selection option."""
@@ -922,7 +574,7 @@ class PhonemeConverter:
                         or state.pause_sentence != self.options.pause_sentence
                         or state.pause_paragraph != self.options.pause_paragraph
                         or state.pause_variance != self.options.pause_variance
-                        or state.trim_silence != self.options.trim_silence
+                        or state.pause_mode != self.options.pause_mode
                     ):
                         self.log(
                             f"Restoring settings from previous session: "
@@ -932,7 +584,7 @@ class PhonemeConverter:
                             f"pause_sentence={state.pause_sentence}s, "
                             f"pause_paragraph={state.pause_paragraph}s, "
                             f"pause_variance={state.pause_variance}s, "
-                            f"trim_silence={state.trim_silence}",
+                            f"pause_mode={state.pause_mode}",
                             "info",
                         )
                         # Apply saved settings for consistency
@@ -946,7 +598,7 @@ class PhonemeConverter:
                         self.options.pause_sentence = state.pause_sentence
                         self.options.pause_paragraph = state.pause_paragraph
                         self.options.pause_variance = state.pause_variance
-                        self.options.trim_silence = state.trim_silence
+                        self.options.pause_mode = state.pause_mode
 
             if state is None:
                 # Create new state
@@ -962,7 +614,7 @@ class PhonemeConverter:
                     pause_sentence=self.options.pause_sentence,
                     pause_paragraph=self.options.pause_paragraph,
                     pause_variance=self.options.pause_variance,
-                    trim_silence=self.options.trim_silence,
+                    pause_mode=self.options.pause_mode,
                     chapters=[
                         PhonemeChapterState(
                             index=idx,
@@ -980,8 +632,21 @@ class PhonemeConverter:
                 total = len(selected_chapters)
                 self.log(f"Resuming conversion: {completed}/{total} chapters completed")
 
-            # Initialize pipeline
-            self._init_pipeline()
+            opts = KokoroRunOptions(
+                voice=self.options.voice,
+                speed=self.options.speed,
+                use_gpu=self.options.use_gpu,
+                pause_clause=self.options.pause_clause,
+                pause_sentence=self.options.pause_sentence,
+                pause_paragraph=self.options.pause_paragraph,
+                pause_variance=self.options.pause_variance,
+                model_path=self.options.model_path,
+                voices_path=self.options.voices_path,
+                voice_blend=self.options.voice_blend,
+                voice_database=self.options.voice_database,
+            )
+            self._runner = KokoroRunner(opts, log=self.log)
+            self._runner.ensure_ready()
 
             total_segments = sum(len(ch.segments) for ch in selected_chapters)
             # Account for already completed chapters
@@ -1094,11 +759,19 @@ class PhonemeConverter:
             chapter_durations = [ch.duration for ch in state.chapters]
             chapter_titles = [ch.title for ch in state.chapters]
 
-            self._merge_chapter_files(
+            meta = MergeMeta(
+                fmt=self.options.output_format,
+                silence_between_chapters=self.options.silence_between_chapters,
+                title=self.options.title,
+                author=self.options.author,
+                cover_image=self.options.cover_image,
+            )
+            self._merger.merge_chapter_wavs(
                 chapter_files,
                 chapter_durations,
                 chapter_titles,
                 output_path,
+                meta,
             )
 
             total_duration = sum(chapter_durations)
@@ -1159,7 +832,21 @@ class PhonemeConverter:
         prevent_sleep_start()
 
         try:
-            self._init_pipeline()
+            opts = KokoroRunOptions(
+                voice=self.options.voice,
+                speed=self.options.speed,
+                use_gpu=self.options.use_gpu,
+                pause_clause=self.options.pause_clause,
+                pause_sentence=self.options.pause_sentence,
+                pause_paragraph=self.options.pause_paragraph,
+                pause_variance=self.options.pause_variance,
+                model_path=self.options.model_path,
+                voices_path=self.options.voices_path,
+                voice_blend=self.options.voice_blend,
+                voice_database=self.options.voice_database,
+            )
+            self._runner = KokoroRunner(opts, log=self.log)
+            self._runner.ensure_ready()
 
             total_segments = sum(len(ch.segments) for ch in selected_chapters)
             segments_processed = 0
@@ -1192,24 +879,19 @@ class PhonemeConverter:
 
                 total_chapter_segments = len(chapter.segments)
                 if not self._cancelled and chapter.segments:
-                    assert self._pipeline is not None
-                    if self.options.lang:
-                        from .conversion import get_onnx_lang_code
-
-                        lang_code = get_onnx_lang_code(self.options.lang)
-                    elif chapter.segments:
-                        lang_code = chapter.segments[0].lang
-                    else:
-                        lang_code = "en-us"
-
+                    assert self._runner is not None
+                    lang_code = (
+                        get_onnx_lang_code(self.options.lang)
+                        if self.options.lang
+                        else (chapter.segments[0].lang if chapter.segments else "en-us")
+                    )
                     ssmd_text = self._phoneme_segments_to_ssmd(chapter.segments)
-                    generation = self._build_generation_config(
-                        lang_code,
-                        manual_pauses=self.options.trim_silence,
+                    samples = self._runner.synthesize(
+                        ssmd_text,
+                        lang_code=lang_code,
+                        pause_mode=self.options.pause_mode,
                         is_phonemes=True,
                     )
-                    result = self._pipeline.run(ssmd_text, generation=generation)
-                    samples = result.audio
 
                     self._write_audio_chunk(samples, out_file, ffmpeg_proc)
                     current_time += len(samples) / SAMPLE_RATE
@@ -1262,7 +944,11 @@ class PhonemeConverter:
 
             # Add chapter markers for m4b
             if self.options.output_format == "m4b" and len(chapter_times) > 1:
-                self._add_chapters_to_m4b(output_path, chapter_times)
+                self._merger.add_chapters_to_m4b(
+                    output_path,
+                    chapter_times,
+                    self.options.cover_image,
+                )
 
             self.log(f"Conversion complete! Duration: {format_duration(current_time)}")
 

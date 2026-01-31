@@ -1,8 +1,10 @@
 """Constants for ttsforge - voices, languages, and formats."""
 
-# from pykokoro.onnx_backend import VOICE_NAMES_V1_0, VOICE_NAMES_V1_1_ZH, VOICE_NAMES_V1_1_DE
+# from pykokoro.onnx_backend import VOICE_NAMES_V1_0
+# from pykokoro.onnx_backend import VOICE_NAMES_V1_1_ZH, VOICE_NAMES_V1_1_DE
 
 from pykokoro.onnx_backend import VOICE_NAMES_V1_0 as VOICE_NAMES
+
 # Re-export from pykokoro for convenience
 VOICES = VOICE_NAMES
 
@@ -123,7 +125,7 @@ DEFAULT_CONFIG = {
     "pause_sentence": 0.7,
     "pause_paragraph": 0.9,
     "pause_variance": 0.05,
-    "trim_silence": True,
+    "pause_mode": "auto",  # "tts", "manual", or "auto
     # Language override for phonemization (e.g., 'de', 'fr', 'en-us')
     # If None, language is determined from voice prefix
     "phonemization_lang": None,

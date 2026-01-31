@@ -67,12 +67,6 @@ from .utils import (
 from .cli.helpers import DEFAULT_SAMPLE_TEXT
 
 
-# Language code mapping for backward compatibility
-def get_onnx_lang_code(ttsforge_lang: str) -> str:
-    """Convert ttsforge language code to kokoro language code."""
-    return LANG_CODE_TO_ONNX.get(ttsforge_lang, ttsforge_lang or "en-us")
-
-
 __all__ = [
     # Constants
     "DEFAULT_CONFIG",
@@ -94,7 +88,6 @@ __all__ = [
     "download_all_models",
     "download_model",
     "get_model_dir",
-    "get_onnx_lang_code",
     # Tokenizer (from pykokoro)
     "EspeakConfig",
     "MAX_PHONEME_LENGTH",
