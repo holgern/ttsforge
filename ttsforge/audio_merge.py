@@ -30,9 +30,7 @@ class AudioMerger:
     ) -> None:
         if len(chapters) <= 1:
             return
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
+        ensure_ffmpeg()
 
         chapters_file = output_path.with_suffix(".chapters.txt")
         chapters_file.write_text(self._ffmetadata(chapters), encoding="utf-8")
@@ -85,9 +83,6 @@ class AudioMerger:
         meta: MergeMeta,
     ) -> None:
         ensure_ffmpeg()
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
 
         concat_file = output_path.with_suffix(".concat.txt")
         silence_file = output_path.parent / "_silence.wav"
@@ -150,7 +145,9 @@ class AudioMerger:
         if meta.fmt == "m4b" and len(chapter_files) > 1:
             times = []
             t = 0.0
-            for i, (dur, title) in enumerate(zip(chapter_durations, chapter_titles)):
+            for i, (dur, title) in enumerate(
+                zip(chapter_durations, chapter_titles, strict=False)
+            ):
                 times.append({"title": title, "start": t, "end": t + dur})
                 t += dur
                 if i < len(chapter_durations) - 1:

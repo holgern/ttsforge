@@ -4,14 +4,37 @@ This module extracts proper names from text and generates phoneme suggestions
 using kokorog2p, making it easy to create custom phoneme dictionaries for books.
 """
 
+import functools
 import json
 import logging
 from collections import Counter
+from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import Callable, Optional
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SPACY_MODEL = "en_core_web_sm"
+
+
+@functools.lru_cache(maxsize=1)
+def _get_nlp(model_name: str = DEFAULT_SPACY_MODEL):
+    """Load and cache the spaCy pipeline."""
+    try:
+        import spacy
+    except ImportError as e:
+        raise ImportError(
+            "spaCy is required for name extraction. "
+            "Install with: pip install spacy && python -m spacy download en_core_web_sm"
+        ) from e
+
+    try:
+        return spacy.load(model_name)
+    except OSError as e:
+        raise ImportError(
+            f"spaCy model '{model_name}' not found. "
+            f"Install with: python -m spacy download {model_name}"
+        ) from e
 
 
 def _split_text_into_chunks(text: str, chunk_size: int = 100000) -> list[str]:
@@ -58,7 +81,9 @@ def extract_names_from_text(
     max_names: int = 100,
     include_all: bool = False,
     chunk_size: int = 100000,
-    progress_callback: Optional[Callable[[int, int], None]] = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+    model_name: str = DEFAULT_SPACY_MODEL,
+    batch_size: int = 4,
 ) -> dict[str, int]:
     """Extract proper names from text using spaCy NER and POS tagging.
 
@@ -72,6 +97,8 @@ def extract_names_from_text(
             (default: 100000)
         progress_callback: Optional callback function(current, total) for
             progress updates
+        model_name: spaCy model name to load (default: en_core_web_sm)
+        batch_size: Batch size for spaCy pipe processing
 
     Returns:
         Dictionary mapping name -> occurrence count, sorted by frequency
@@ -79,22 +106,7 @@ def extract_names_from_text(
     Raises:
         ImportError: If spaCy is not installed
     """
-    try:
-        import spacy
-    except ImportError as e:
-        raise ImportError(
-            "spaCy is required for name extraction. "
-            "Install with: pip install spacy && python -m spacy download en_core_web_sm"
-        ) from e
-
-    # Try to load English model
-    try:
-        nlp = spacy.load("en_core_web_sm")
-    except OSError as e:
-        raise ImportError(
-            "spaCy English model not found. "
-            "Install with: python -m spacy download en_core_web_sm"
-        ) from e
+    nlp = _get_nlp(model_name)
 
     # Split text into manageable chunks
     chunks = _split_text_into_chunks(text, chunk_size)
@@ -105,15 +117,12 @@ def extract_names_from_text(
     # Process each chunk and accumulate candidates
     candidates = []
 
-    for chunk_idx, chunk in enumerate(chunks, 1):
+    for chunk_idx, doc in enumerate(nlp.pipe(chunks, batch_size=batch_size), 1):
         if progress_callback:
             progress_callback(chunk_idx, total_chunks)
 
-        logger.debug(
-            f"Processing chunk {chunk_idx}/{total_chunks} ({len(chunk)} chars)"
-        )
-
-        doc = nlp(chunk)
+        chunk_len = len(chunks[chunk_idx - 1])
+        logger.debug(f"Processing chunk {chunk_idx}/{total_chunks} ({chunk_len} chars)")
 
         # Method 1: Named Entity Recognition (PERSON entities)
         for ent in doc.ents:
@@ -203,7 +212,7 @@ def generate_phoneme_suggestions(
 def save_phoneme_dictionary(
     names_with_phonemes: dict[str, dict],
     output_path: Path,
-    source_file: Optional[str] = None,
+    source_file: str | None = None,
     language: str = "en-us",
 ) -> None:
     """Save phoneme dictionary to JSON file with metadata.

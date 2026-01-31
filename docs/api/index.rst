@@ -52,7 +52,7 @@ Utilities
    SSMD generation and validation helpers.
 
 **ttsforge.input_reader**
-   EPUB/text/PDF input parsing helpers.
+   EPUB/text input parsing helpers.
 
 **ttsforge.name_extractor**
    Name extraction utilities for dictionary building.

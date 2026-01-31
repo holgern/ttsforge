@@ -7,9 +7,10 @@ bypassing text-to-phoneme conversion since phonemes/tokens are pre-computed.
 import json
 import subprocess
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import numpy as np
 import soundfile as sf
@@ -21,6 +22,7 @@ from .kokoro_lang import get_onnx_lang_code
 from .kokoro_runner import KokoroRunner, KokoroRunOptions
 from .phonemes import PhonemeBook, PhonemeChapter, PhonemeSegment
 from .utils import (
+    atomic_write_json,
     create_process,
     ensure_ffmpeg,
     format_duration,
@@ -62,9 +64,9 @@ class PhonemeConversionResult:
     """Result of a phoneme conversion operation."""
 
     success: bool
-    output_path: Optional[Path] = None
-    error_message: Optional[str] = None
-    chapters_dir: Optional[Path] = None
+    output_path: Path | None = None
+    error_message: str | None = None
+    chapters_dir: Path | None = None
     duration: float = 0.0
 
 
@@ -76,7 +78,7 @@ class PhonemeChapterState:
     title: str
     segment_count: int
     completed: bool = False
-    audio_file: Optional[str] = None  # Relative path to chapter audio
+    audio_file: str | None = None  # Relative path to chapter audio
     duration: float = 0.0
 
 
@@ -97,7 +99,7 @@ class PhonemeConversionState:
     pause_paragraph: float = 0.75
     pause_variance: float = 0.05
     pause_mode: str = "auto"
-    lang: Optional[str] = None  # Language override for phonemization
+    lang: str | None = None  # Language override for phonemization
     chapters: list[PhonemeChapterState] = field(default_factory=list)
     started_at: str = ""
     last_updated: str = ""
@@ -191,8 +193,7 @@ class PhonemeConversionState:
             "last_updated": self.last_updated,
             "selected_chapters": self.selected_chapters,
         }
-        with open(state_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        atomic_write_json(state_file, data, indent=2, ensure_ascii=True)
 
 
 @dataclass
@@ -206,7 +207,7 @@ class PhonemeConversionOptions:
     silence_between_chapters: float = 2.0
     # Language override for phonemization (e.g., 'de', 'en-us', 'fr')
     # If None, language from PhonemeSegments is used
-    lang: Optional[str] = None
+    lang: str | None = None
     # Pause settings (pykokoro built-in pause handling)
     pause_clause: float = 0.25  # For clause boundaries (commas)
     pause_sentence: float = 0.2  # For sentence boundaries
@@ -217,15 +218,15 @@ class PhonemeConversionOptions:
     announce_chapters: bool = True  # Read chapter titles aloud before content
     chapter_pause_after_title: float = 2.0  # Pause after chapter title (seconds)
     # Metadata for m4b
-    title: Optional[str] = None
-    author: Optional[str] = None
-    cover_image: Optional[Path] = None
+    title: str | None = None
+    author: str | None = None
+    cover_image: Path | None = None
     # Voice blending (e.g., "af_nicole:50,am_michael:50")
-    voice_blend: Optional[str] = None
+    voice_blend: str | None = None
     # Voice database for custom/synthetic voices
-    voice_database: Optional[Path] = None
+    voice_database: Path | None = None
     # Chapter selection (e.g., "1-5" or "3,5,7") - 1-based
-    chapters: Optional[str] = None
+    chapters: str | None = None
     # Resume capability
     resume: bool = True
     # Keep chapter files after merge
@@ -233,9 +234,9 @@ class PhonemeConversionOptions:
     # Filename template for chapter files
     chapter_filename_template: str = "{chapter_num:03d}_{book_title}_{chapter_title}"
     # Custom ONNX model path (None = use default downloaded model)
-    model_path: Optional[Path] = None
+    model_path: Path | None = None
     # Custom voices.bin path (None = use default downloaded voices)
-    voices_path: Optional[Path] = None
+    voices_path: Path | None = None
 
 
 class PhonemeConverter:
@@ -245,8 +246,8 @@ class PhonemeConverter:
         self,
         book: PhonemeBook,
         options: PhonemeConversionOptions,
-        progress_callback: Optional[Callable[[PhonemeConversionProgress], None]] = None,
-        log_callback: Optional[Callable[[str, str], None]] = None,
+        progress_callback: Callable[[PhonemeConversionProgress], None] | None = None,
+        log_callback: Callable[[str, str], None] | None = None,
     ) -> None:
         """
         Initialize the phoneme converter.
@@ -297,7 +298,7 @@ class PhonemeConverter:
 
     def _setup_output(
         self, output_path: Path
-    ) -> tuple[Optional[sf.SoundFile], Optional[subprocess.Popen[bytes]]]:
+    ) -> tuple[sf.SoundFile | None, subprocess.Popen[bytes] | None]:
         """Set up output file or ffmpeg process based on format."""
         fmt = self.options.output_format
 
@@ -313,9 +314,6 @@ class PhonemeConverter:
 
         # Formats requiring ffmpeg
         ensure_ffmpeg()
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
 
         cmd = [
             "ffmpeg",
@@ -376,8 +374,8 @@ class PhonemeConverter:
 
     def _finalize_output(
         self,
-        out_file: Optional[sf.SoundFile],
-        ffmpeg_proc: Optional[subprocess.Popen[bytes]],
+        out_file: sf.SoundFile | None,
+        ffmpeg_proc: subprocess.Popen[bytes] | None,
     ) -> None:
         """Finalize and close output file/process."""
         if out_file is not None:
@@ -390,8 +388,8 @@ class PhonemeConverter:
     def _write_audio_chunk(
         self,
         audio: np.ndarray,
-        out_file: Optional[sf.SoundFile],
-        ffmpeg_proc: Optional[subprocess.Popen[bytes]],
+        out_file: sf.SoundFile | None,
+        ffmpeg_proc: subprocess.Popen[bytes] | None,
     ) -> None:
         """Write audio chunk to file or ffmpeg process."""
         if out_file is not None:
@@ -404,8 +402,8 @@ class PhonemeConverter:
         self,
         chapter: PhonemeChapter,
         output_file: Path,
-        progress: Optional[PhonemeConversionProgress] = None,
-        start_time: Optional[float] = None,
+        progress: PhonemeConversionProgress | None = None,
+        start_time: float | None = None,
         segments_before: int = 0,
     ) -> tuple[float, int]:
         """
@@ -553,7 +551,7 @@ class PhonemeConverter:
             state_file = work_dir / f"{safe_book_title}_state.json"
 
             # Load or create state
-            state: Optional[PhonemeConversionState] = None
+            state: PhonemeConversionState | None = None
             if self.options.resume and state_file.exists():
                 state = PhonemeConversionState.load(state_file)
                 if state:

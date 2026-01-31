@@ -38,7 +38,7 @@ from .commands_utility import config, demo, download, extract_names, list_names,
 )
 @click.pass_context
 def main(
-    ctx: click.Context, version: bool, model: Optional[Path], voices: Optional[Path]
+    ctx: click.Context, version: bool, model: Path | None, voices: Path | None
 ) -> None:
     """ttsforge - Generate audiobooks from EPUB files with TTS."""
     ctx.ensure_object(dict)

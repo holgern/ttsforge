@@ -22,6 +22,9 @@ def parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
     """
     indices: set[int] = set()
 
+    if selection.strip().lower() == "all":
+        return list(range(total_chapters))
+
     for part in selection.split(","):
         part = part.strip()
         if not part:
@@ -31,8 +34,10 @@ def parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
             # Range: "1-5"
             try:
                 start_str, end_str = part.split("-", 1)
-                start = int(start_str.strip())
-                end = int(end_str.strip())
+                start_str = start_str.strip()
+                end_str = end_str.strip()
+                start = int(start_str) if start_str else 1
+                end = int(end_str) if end_str else total_chapters
             except ValueError as e:
                 raise ValueError(f"Invalid range format: {part}") from e
 

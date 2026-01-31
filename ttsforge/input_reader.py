@@ -1,4 +1,4 @@
-"""Unified input file reader for EPUB, TXT, and PDF files.
+"""Unified input file reader for EPUB, TXT, and SSMD files.
 
 This module provides a common interface for reading different input formats,
 extracting metadata, chapters, and content for TTS conversion.
@@ -50,13 +50,13 @@ class Chapter:
 
 
 class InputReader:
-    """Unified reader for EPUB, TXT (Gutenberg), and PDF files."""
+    """Unified reader for EPUB, TXT (Gutenberg), and SSMD files."""
 
     def __init__(self, file_path: Path | str):
         """Initialize the reader with a file path.
 
         Args:
-            file_path: Path to the input file (EPUB, TXT, or PDF)
+            file_path: Path to the input file (EPUB, TXT, or SSMD)
         """
         self.file_path = Path(file_path)
         self._metadata: Metadata | None = None
@@ -72,7 +72,7 @@ class InputReader:
         """Detect the file type based on extension.
 
         Returns:
-            File type: 'epub', 'txt', 'ssmd', or 'pdf'
+            File type: 'epub', 'txt', or 'ssmd'
         """
         suffix = self.file_path.suffix.lower()
         if suffix == ".epub":
@@ -82,11 +82,13 @@ class InputReader:
         elif suffix in [".txt", ".text"]:
             return "txt"
         elif suffix == ".pdf":
-            return "pdf"
+            raise ValueError(
+                "PDF input is not supported yet. Convert the PDF to EPUB or TXT "
+                "and try again."
+            )
         else:
             raise ValueError(
-                f"Unsupported file type: {suffix}. Supported types: "
-                ".epub, .txt, .ssmd, .pdf"
+                f"Unsupported file type: {suffix}. Supported types: .epub, .txt, .ssmd"
             )
 
     def get_metadata(self) -> Metadata:
@@ -105,7 +107,7 @@ class InputReader:
         elif self.file_type == "ssmd":
             self._metadata = self._get_ssmd_metadata()
         elif self.file_type == "pdf":
-            self._metadata = self._get_pdf_metadata()
+            raise ValueError("PDF input is not supported yet.")
 
         return self._metadata
 
@@ -125,7 +127,7 @@ class InputReader:
         elif self.file_type == "ssmd":
             self._chapters = self._get_ssmd_chapters()
         elif self.file_type == "pdf":
-            self._chapters = self._get_pdf_chapters()
+            raise ValueError("PDF input is not supported yet.")
 
         return self._chapters
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import hashlib
 import re
+from html.parser import HTMLParser
 from pathlib import Path
 
 
@@ -38,52 +39,88 @@ def _hash_content(content: str) -> str:
     return hashlib.md5(content.encode("utf-8")).hexdigest()[:12]
 
 
-def _detect_emphasis_from_html(html_content: str) -> dict[str, str]:
-    """Detect emphasis from HTML tags and map positions to emphasis levels.
+class _EmphasisHTMLParser(HTMLParser):
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self._stack: list[str] = []
+        self.segments: list[tuple[str, str]] = []
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        tag_lower = tag.lower()
+        if tag_lower in {"em", "i"}:
+            self._stack.append("*")
+        elif tag_lower in {"strong", "b"}:
+            self._stack.append("**")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag_lower = tag.lower()
+        if tag_lower in {"em", "i", "strong", "b"}:
+            for idx in range(len(self._stack) - 1, -1, -1):
+                if self._stack[idx] in {"*", "**"}:
+                    self._stack.pop(idx)
+                    break
+
+    def handle_data(self, data: str) -> None:
+        marker = "**" if "**" in self._stack else ("*" if "*" in self._stack else None)
+        if not marker:
+            return
+        if self.segments and self.segments[-1][1] == marker:
+            prev_text, _ = self.segments[-1]
+            self.segments[-1] = (prev_text + data, marker)
+        else:
+            self.segments.append((data, marker))
+
+
+def _detect_emphasis_from_html(html_content: str) -> list[tuple[str, str]]:
+    """Detect emphasis from HTML tags and return ordered text segments.
 
     Args:
         html_content: HTML content with formatting tags
 
     Returns:
-        Dictionary mapping text positions to emphasis markers
+        List of (text, marker) segments in document order
     """
-    emphasis_map = {}
-
-    # Pattern for <em>, <i> tags (moderate emphasis)
-    em_pattern = r"<(?:em|i)(?:\s[^>]*)?>([^<]+)</(?:em|i)>"
-    for match in re.finditer(em_pattern, html_content, re.IGNORECASE):
-        text = match.group(1)
-        emphasis_map[text] = "*"
-
-    # Pattern for <strong>, <b> tags (strong emphasis)
-    strong_pattern = r"<(?:strong|b)(?:\s[^>]*)?>([^<]+)</(?:strong|b)>"
-    for match in re.finditer(strong_pattern, html_content, re.IGNORECASE):
-        text = match.group(1)
-        emphasis_map[text] = "**"
-
-    return emphasis_map
+    parser = _EmphasisHTMLParser()
+    parser.feed(html_content)
+    return parser.segments
 
 
-def _apply_emphasis_markers(text: str, emphasis_map: dict[str, str]) -> str:
-    """Apply emphasis markers to text based on emphasis map.
+def _apply_emphasis_markers(text: str, emphasis_segments: list[tuple[str, str]]) -> str:
+    """Apply emphasis markers to text based on ordered emphasis segments.
 
     Args:
         text: Plain text
-        emphasis_map: Dictionary mapping text segments to emphasis markers
+        emphasis_segments: List of (text, marker) in document order
 
     Returns:
         Text with emphasis markers applied
     """
-    result = text
-    # Sort by length (longest first) to avoid partial replacements
-    for emphasized_text in sorted(emphasis_map.keys(), key=len, reverse=True):
-        marker = emphasis_map[emphasized_text]
-        # Use word boundaries to avoid partial matches
-        pattern = rf"\b{re.escape(emphasized_text)}\b"
-        replacement = f"{marker}{emphasized_text}{marker}"
-        result = re.sub(pattern, replacement, result, count=1)
+    if not emphasis_segments:
+        return text
 
-    return result
+    matches: list[tuple[int, int, str]] = []
+    cursor = 0
+    base_text = text
+
+    for emphasized_text, marker in emphasis_segments:
+        if not emphasized_text.strip():
+            continue
+        pattern = re.escape(emphasized_text)
+        pattern = re.sub(r"\s+", r"\\s+", pattern)
+        match = re.search(pattern, base_text[cursor:], flags=re.MULTILINE)
+        if not match:
+            continue
+        start = cursor + match.start()
+        end = cursor + match.end()
+        matches.append((start, end, marker))
+        cursor = end
+
+    for start, end, marker in reversed(matches):
+        base_text = (
+            base_text[:start] + marker + base_text[start:end] + marker + base_text[end:]
+        )
+
+    return base_text
 
 
 def _inject_phoneme_substitutions(
@@ -264,13 +301,13 @@ def chapter_to_ssmd(
             result = _strip_redundant_title(chapter_title, result)
 
         # Step 1: Detect emphasis from HTML if available
-        emphasis_map = {}
+        emphasis_segments: list[tuple[str, str]] = []
         if html_content:
-            emphasis_map = _detect_emphasis_from_html(html_content)
+            emphasis_segments = _detect_emphasis_from_html(html_content)
 
         # Step 2: Apply emphasis markers
-        if emphasis_map:
-            result = _apply_emphasis_markers(result, emphasis_map)
+        if emphasis_segments:
+            result = _apply_emphasis_markers(result, emphasis_segments)
 
         # Step 3: Inject phoneme substitutions
         if phoneme_dict:

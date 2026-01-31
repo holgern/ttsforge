@@ -1,14 +1,19 @@
 """Utility functions for ttsforge - config, GPU detection, encoding, etc."""
 
+import importlib
 import json
 import logging
+import os
 import platform
+import shlex
+import shutil
 import subprocess
 import sys
 import warnings
+from collections.abc import Callable
 from pathlib import Path
 from threading import Thread
-from typing import Any, Callable, Optional
+from typing import Any, Literal, overload
 
 from platformdirs import user_cache_dir, user_config_dir
 
@@ -46,7 +51,7 @@ def get_user_config_path() -> Path:
     return config_dir / "config.json"
 
 
-def get_user_cache_path(folder: Optional[str] = None) -> Path:
+def get_user_cache_path(folder: str | None = None) -> Path:
     """Get path to user cache directory, optionally with a subfolder."""
     cache_dir = Path(
         user_cache_dir("ttsforge", appauthor=False, opinion=True, ensure_exists=True)
@@ -60,28 +65,28 @@ def get_user_cache_path(folder: Optional[str] = None) -> Path:
 def load_config() -> dict[str, Any]:
     """Load configuration from file, returning defaults if not found."""
     global _LEGACY_GPU_KEY_WARNED
+    config_path = get_user_config_path()
     try:
-        config_path = get_user_config_path()
         if config_path.exists():
             with open(config_path, encoding="utf-8") as f:
                 user_config = json.load(f)
-                if (
-                    isinstance(user_config, dict)
-                    and "default_use_gpu" in user_config
-                    and "use_gpu" not in user_config
-                ):
-                    user_config["use_gpu"] = user_config["default_use_gpu"]
-                    if not _LEGACY_GPU_KEY_WARNED:
-                        _LEGACY_GPU_KEY_WARNED = True
-                        print(
-                            "Warning: config key 'default_use_gpu' is deprecated; "
-                            "use 'use_gpu' instead.",
-                            file=sys.stderr,
-                        )
-                # Merge with defaults to ensure all keys exist
-                return {**DEFAULT_CONFIG, **user_config}
-    except Exception:
-        pass
+            if (
+                isinstance(user_config, dict)
+                and "default_use_gpu" in user_config
+                and "use_gpu" not in user_config
+            ):
+                user_config["use_gpu"] = user_config["default_use_gpu"]
+                if not _LEGACY_GPU_KEY_WARNED:
+                    _LEGACY_GPU_KEY_WARNED = True
+                    print(
+                        "Warning: config key 'default_use_gpu' is deprecated; "
+                        "use 'use_gpu' instead.",
+                        file=sys.stderr,
+                    )
+            # Merge with defaults to ensure all keys exist
+            return {**DEFAULT_CONFIG, **user_config}
+    except (OSError, json.JSONDecodeError, ValueError) as exc:
+        _LOGGER.warning("Failed to load config from %s: %s", config_path, exc)
     return DEFAULT_CONFIG.copy()
 
 
@@ -163,15 +168,38 @@ def load_phoneme_dictionary(
         return None
 
 
+def atomic_write_json(
+    path: Path,
+    data: Any,
+    *,
+    indent: int | None = 2,
+    ensure_ascii: bool = True,
+) -> None:
+    """Write JSON to a temp file and atomically replace the target."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = path.with_name(f"{path.name}.tmp")
+    try:
+        with open(tmp_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, indent=indent, ensure_ascii=ensure_ascii)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp_path, path)
+    finally:
+        if tmp_path.exists():
+            try:
+                tmp_path.unlink()
+            except OSError as exc:
+                _LOGGER.debug("Failed to remove temp file %s: %s", tmp_path, exc)
+
+
 def save_config(config: dict[str, Any]) -> bool:
     """Save configuration to file. Returns True on success."""
+    config_path = get_user_config_path()
     try:
-        config_path = get_user_config_path()
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2)
+        atomic_write_json(config_path, config, indent=2, ensure_ascii=True)
         return True
-    except Exception:
+    except (OSError, TypeError, ValueError) as exc:
+        _LOGGER.warning("Failed to save config to %s: %s", config_path, exc)
         return False
 
 
@@ -196,7 +224,8 @@ def detect_encoding(file_path: str | Path) -> str:
             if result and result.get("encoding"):
                 detected_encoding = result["encoding"]
                 break
-        except Exception:
+        except Exception as exc:
+            _LOGGER.debug("Encoding detector failed: %s", exc)
             continue
 
     encoding = detected_encoding if detected_encoding else "utf-8"
@@ -277,13 +306,72 @@ def get_device(use_gpu: bool = True) -> str:
     return "CPUExecutionProvider"
 
 
+def run_process(
+    cmd: list[str] | str,
+    *,
+    stdin: int | None = None,
+    text: bool = True,
+    shell: bool = False,
+    check: bool = False,
+    timeout: float | None = None,
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]:
+    """Run a subprocess and capture output safely."""
+    if isinstance(cmd, str) and not shell:
+        cmd = shlex.split(cmd)
+    elif isinstance(cmd, list) and shell:
+        cmd = subprocess.list2cmdline(cmd)
+
+    kwargs: dict[str, Any] = {
+        "shell": shell,
+        "capture_output": True,
+        "text": text,
+        "check": check,
+        "stdin": stdin,
+        "timeout": timeout,
+    }
+    if text:
+        kwargs["encoding"] = DEFAULT_ENCODING
+        kwargs["errors"] = "replace"
+
+    return subprocess.run(cmd, **kwargs)
+
+
+@overload
 def create_process(
     cmd: list[str] | str,
-    stdin: Optional[int] = None,
+    stdin: int | None = None,
+    text: bool = True,
+    *,
+    capture_output: Literal[False] = False,
+    suppress_output: bool = False,
+    shell: bool = False,
+) -> subprocess.Popen: ...
+
+
+@overload
+def create_process(
+    cmd: list[str] | str,
+    stdin: int | None = None,
+    text: bool = True,
+    *,
+    capture_output: Literal[True],
+    suppress_output: bool = False,
+    shell: bool = False,
+) -> subprocess.CompletedProcess[str] | subprocess.CompletedProcess[bytes]: ...
+
+
+def create_process(
+    cmd: list[str] | str,
+    stdin: int | None = None,
     text: bool = True,
     capture_output: bool = False,
     suppress_output: bool = False,
-) -> subprocess.Popen:
+    shell: bool = False,
+) -> (
+    subprocess.Popen
+    | subprocess.CompletedProcess[str]
+    | subprocess.CompletedProcess[bytes]
+):
     """
     Create a subprocess with proper platform handling.
 
@@ -291,17 +379,30 @@ def create_process(
         cmd: Command to execute (list or string)
         stdin: stdin pipe option (e.g., subprocess.PIPE)
         text: Whether to use text mode
-        capture_output: Whether to capture output
+        capture_output: Whether to capture output (uses subprocess.run)
         suppress_output: Suppress all output (for rich progress bars)
+        shell: Whether to run with shell=True (default: False)
 
     Returns:
-        Popen object
+        Popen object or CompletedProcess when capture_output=True
     """
-    use_shell = isinstance(cmd, str)
-    kwargs: dict[str, Any] = {
-        "shell": use_shell,
-        "bufsize": 1,
-    }
+    if capture_output and suppress_output:
+        raise ValueError("capture_output and suppress_output cannot both be True")
+
+    if capture_output:
+        return run_process(
+            cmd,
+            stdin=stdin,
+            text=text,
+            shell=shell,
+        )
+
+    if isinstance(cmd, str) and not shell:
+        cmd = shlex.split(cmd)
+    elif isinstance(cmd, list) and shell:
+        cmd = subprocess.list2cmdline(cmd)
+
+    kwargs: dict[str, Any] = {"shell": shell, "bufsize": 1}
 
     # Suppress output if requested (avoids rich progress interference)
     if suppress_output:
@@ -350,8 +451,8 @@ def create_process(
                             chunk.decode(DEFAULT_ENCODING, errors="replace")
                         )
                         sys.stdout.flush()
-                    except Exception:
-                        pass
+                    except Exception as exc:
+                        _LOGGER.debug("Failed to decode subprocess output: %s", exc)
             stream.close()
 
         Thread(target=_stream_output, args=(proc.stdout,), daemon=True).start()
@@ -361,18 +462,32 @@ def create_process(
 
 def ensure_ffmpeg() -> bool:
     """
-    Ensure ffmpeg is available, installing static-ffmpeg if needed.
+    Ensure ffmpeg is available (system ffmpeg or static-ffmpeg).
 
     Returns:
         True if ffmpeg is available
     """
-    try:
-        import static_ffmpeg
-
-        static_ffmpeg.add_paths()
+    if shutil.which("ffmpeg"):
         return True
+
+    try:
+        static_ffmpeg = importlib.import_module("static_ffmpeg")
     except ImportError:
-        return False
+        static_ffmpeg = None
+
+    if static_ffmpeg is not None:
+        try:
+            static_ffmpeg.add_paths()
+        except Exception as exc:
+            _LOGGER.debug("static-ffmpeg add_paths failed: %s", exc)
+
+    if shutil.which("ffmpeg"):
+        return True
+
+    raise RuntimeError(
+        "ffmpeg is required but was not found. Install ffmpeg or add "
+        "static-ffmpeg (pip install static-ffmpeg)."
+    )
 
 
 def load_tts_pipeline() -> tuple[Any, Any]:
@@ -391,7 +506,7 @@ def load_tts_pipeline() -> tuple[Any, Any]:
 class LoadPipelineThread(Thread):
     """Thread for loading TTS pipeline in background."""
 
-    def __init__(self, callback: Callable[[Any, Any, Optional[str]], None]) -> None:
+    def __init__(self, callback: Callable[[Any, Any, str | None], None]) -> None:
         super().__init__()
         self.callback = callback
 
@@ -404,7 +519,7 @@ class LoadPipelineThread(Thread):
 
 
 # Sleep prevention for long conversions
-_sleep_procs: dict[str, Optional[subprocess.Popen[str]]] = {
+_sleep_procs: dict[str, subprocess.Popen[str] | None] = {
     "Darwin": None,
     "Linux": None,
 }
@@ -420,7 +535,7 @@ def prevent_sleep_start() -> None:
             0x80000000 | 0x00000001 | 0x00000040
         )
     elif system == "Darwin":
-        _sleep_procs["Darwin"] = create_process(["caffeinate"], capture_output=True)
+        _sleep_procs["Darwin"] = create_process(["caffeinate"], suppress_output=True)
     elif system == "Linux":
         import shutil
 
@@ -435,7 +550,7 @@ def prevent_sleep_start() -> None:
                     "sleep",
                     "infinity",
                 ],
-                capture_output=True,
+                suppress_output=True,
             )
 
 
@@ -452,8 +567,8 @@ def prevent_sleep_end() -> None:
             try:
                 proc.terminate()
                 _sleep_procs[system] = None
-            except Exception:
-                pass
+            except OSError as exc:
+                _LOGGER.debug("Failed to terminate sleep prevention: %s", exc)
 
 
 def sanitize_filename(name: str, max_length: int = 100) -> str:

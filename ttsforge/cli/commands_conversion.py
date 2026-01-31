@@ -12,7 +12,6 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.panel import Panel
@@ -28,6 +27,7 @@ from rich.progress import (
 from rich.prompt import Confirm
 from rich.table import Table
 
+from ..chapter_selection import parse_chapter_selection
 from ..constants import (
     LANGUAGE_DESCRIPTIONS,
     SUPPORTED_OUTPUT_FORMATS,
@@ -270,40 +270,40 @@ from .helpers import DEFAULT_SAMPLE_TEXT, console, parse_voice_parameter
 def convert(  # noqa: C901
     ctx: click.Context,
     epub_file: Path,
-    output: Optional[Path],
-    output_format: Optional[str],
-    voice: Optional[str],
-    language: Optional[str],
-    lang: Optional[str],
-    speed: Optional[float],
-    use_gpu: Optional[bool],
-    chapters: Optional[str],
-    silence: Optional[float],
-    pause_clause: Optional[float],
-    pause_sentence: Optional[float],
-    pause_paragraph: Optional[float],
-    pause_variance: Optional[float],
-    pause_mode: Optional[str],
-    announce_chapters: Optional[bool],
-    chapter_pause: Optional[float],
-    title: Optional[str],
-    author: Optional[str],
-    cover: Optional[Path],
+    output: Path | None,
+    output_format: str | None,
+    voice: str | None,
+    language: str | None,
+    lang: str | None,
+    speed: float | None,
+    use_gpu: bool | None,
+    chapters: str | None,
+    silence: float | None,
+    pause_clause: float | None,
+    pause_sentence: float | None,
+    pause_paragraph: float | None,
+    pause_variance: float | None,
+    pause_mode: str | None,
+    announce_chapters: bool | None,
+    chapter_pause: float | None,
+    title: str | None,
+    author: str | None,
+    cover: Path | None,
     yes: bool,
     verbose: bool,
-    split_mode: Optional[str],
+    split_mode: str | None,
     resume: bool,
     generate_ssmd_only: bool,
     detect_emphasis: bool,
     fresh: bool,
     keep_chapter_files: bool,
-    voice_blend: Optional[str],
-    voice_database: Optional[Path],
+    voice_blend: str | None,
+    voice_database: Path | None,
     use_mixed_language: bool,
-    mixed_language_primary: Optional[str],
-    mixed_language_allowed: Optional[str],
-    mixed_language_confidence: Optional[float],
-    phoneme_dictionary_path: Optional[str],
+    mixed_language_primary: str | None,
+    mixed_language_allowed: str | None,
+    mixed_language_confidence: float | None,
+    phoneme_dictionary_path: str | None,
     phoneme_dict_case_sensitive: bool,
 ) -> None:
     """Convert an EPUB file to an audiobook.
@@ -385,9 +385,13 @@ def convert(  # noqa: C901
         language = "a"
 
     # Chapter selection
-    selected_indices: Optional[list[int]] = None
+    selected_indices: list[int] | None = None
     if chapters:
-        selected_indices = _parse_chapter_selection(chapters, len(epub_chapters))
+        try:
+            selected_indices = parse_chapter_selection(chapters, len(epub_chapters))
+        except ValueError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+            sys.exit(1)
     elif not yes:
         selected_indices = _interactive_chapter_selection(epub_chapters)
 
@@ -688,7 +692,7 @@ def convert(  # noqa: C901
 def list_chapters(epub_file: Path) -> None:
     """List chapters in a file.
 
-    EPUB_FILE is the path to the file (EPUB, TXT, or PDF).
+    EPUB_FILE is the path to the file (EPUB, TXT, or SSMD).
     """
     from ..input_reader import InputReader
 
@@ -726,7 +730,7 @@ def list_chapters(epub_file: Path) -> None:
 def info(epub_file: Path) -> None:
     """Show metadata and information about a file.
 
-    EPUB_FILE is the path to the file (EPUB, TXT, or PDF).
+    EPUB_FILE is the path to the file (EPUB, TXT, or SSMD).
     """
     from ..input_reader import InputReader
 
@@ -870,22 +874,22 @@ def info(epub_file: Path) -> None:
 @click.pass_context
 def sample(
     ctx: click.Context,
-    text: Optional[str],
-    output: Optional[Path],
+    text: str | None,
+    output: Path | None,
     output_format: str,
-    voice: Optional[str],
-    language: Optional[str],
-    lang: Optional[str],
-    speed: Optional[float],
-    use_gpu: Optional[bool],
-    split_mode: Optional[str],
+    voice: str | None,
+    language: str | None,
+    lang: str | None,
+    speed: float | None,
+    use_gpu: bool | None,
+    split_mode: str | None,
     play_audio: bool,
     verbose: bool,
     use_mixed_language: bool,
-    mixed_language_primary: Optional[str],
-    mixed_language_allowed: Optional[str],
-    mixed_language_confidence: Optional[float],
-    phoneme_dictionary_path: Optional[str],
+    mixed_language_primary: str | None,
+    mixed_language_allowed: str | None,
+    mixed_language_confidence: float | None,
+    phoneme_dictionary_path: str | None,
     phoneme_dict_case_sensitive: bool,
 ) -> None:
     """Generate a sample audio file to test TTS settings.
@@ -915,7 +919,7 @@ def sample(
     sample_text = text or DEFAULT_SAMPLE_TEXT
 
     # Handle output path for playback mode
-    temp_dir: Optional[str] = None
+    temp_dir: str | None = None
     save_output = output is not None or not play_audio
 
     if play_audio and output is None:
@@ -1061,37 +1065,7 @@ def sample(
         raise SystemExit(1) from None
 
 
-def _parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
-    """Parse chapter selection string into list of indices."""
-    if selection.lower() == "all":
-        return list(range(total_chapters))
-
-    indices: set[int] = set()
-
-    for part in selection.split(","):
-        part = part.strip()
-        if "-" in part:
-            # Range
-            try:
-                start, end = part.split("-")
-                start_idx = int(start) - 1
-                end_idx = int(end)
-                indices.update(range(max(0, start_idx), min(total_chapters, end_idx)))
-            except ValueError:
-                console.print(f"[yellow]Invalid range: {part}[/yellow]")
-        else:
-            # Single number
-            try:
-                idx = int(part) - 1
-                if 0 <= idx < total_chapters:
-                    indices.add(idx)
-            except ValueError:
-                console.print(f"[yellow]Invalid chapter number: {part}[/yellow]")
-
-    return sorted(indices)
-
-
-def _interactive_chapter_selection(chapters: list) -> Optional[list[int]]:
+def _interactive_chapter_selection(chapters: list) -> list[int] | None:
     """Interactive chapter selection using Rich."""
     console.print("\n[bold]Available Chapters:[/bold]")
 
@@ -1116,7 +1090,11 @@ def _interactive_chapter_selection(chapters: list) -> Optional[list[int]]:
     if not selection:
         return None  # All chapters
 
-    return _parse_chapter_selection(selection, len(chapters))
+    try:
+        return parse_chapter_selection(selection, len(chapters))
+    except ValueError as exc:
+        console.print(f"[yellow]{exc}[/yellow]")
+        return []
 
 
 def _show_conversion_summary(
@@ -1130,10 +1108,10 @@ def _show_conversion_summary(
     num_chapters: int,
     title: str,
     author: str,
-    lang: Optional[str] = None,
+    lang: str | None = None,
     use_mixed_language: bool = False,
-    mixed_language_primary: Optional[str] = None,
-    mixed_language_allowed: Optional[list[str]] = None,
+    mixed_language_primary: str | None = None,
+    mixed_language_allowed: list[str] | None = None,
     mixed_language_confidence: float = 0.7,
 ) -> None:
     """Show conversion summary before starting."""
@@ -1284,25 +1262,25 @@ def _show_conversion_summary(
 @click.pass_context
 def read(  # noqa: C901
     ctx: click.Context,
-    input_file: Optional[Path],
-    voice: Optional[str],
-    language: Optional[str],
-    speed: Optional[float],
-    use_gpu: Optional[bool],
-    content_mode: Optional[str],
-    chapters: Optional[str],
-    pages: Optional[str],
-    start_chapter: Optional[int],
-    start_page: Optional[int],
-    page_size: Optional[int],
+    input_file: Path | None,
+    voice: str | None,
+    language: str | None,
+    speed: float | None,
+    use_gpu: bool | None,
+    content_mode: str | None,
+    chapters: str | None,
+    pages: str | None,
+    start_chapter: int | None,
+    start_page: int | None,
+    page_size: int | None,
     resume: bool,
     list_content: bool,
-    split_mode: Optional[str],
-    pause_clause: Optional[float],
-    pause_sentence: Optional[float],
-    pause_paragraph: Optional[float],
-    pause_variance: Optional[float],
-    pause_mode: Optional[str],
+    split_mode: str | None,
+    pause_clause: float | None,
+    pause_sentence: float | None,
+    pause_paragraph: float | None,
+    pause_variance: float | None,
+    pause_mode: str | None,
 ) -> None:
     """Read an EPUB or text file aloud with streaming playback.
 
@@ -1556,12 +1534,16 @@ def read(  # noqa: C901
         return
 
     # Content selection (chapters or pages)
-    selected_indices: Optional[list[int]] = None
+    selected_indices: list[int] | None = None
 
     if effective_content_mode == "pages":
         # Page selection
         if pages:
-            selected_indices = _parse_chapter_selection(pages, len(content_data))
+            try:
+                selected_indices = parse_chapter_selection(pages, len(content_data))
+            except ValueError as exc:
+                console.print(f"[yellow]{exc}[/yellow]")
+                sys.exit(1)
         elif start_page:
             if start_page < 1 or start_page > len(content_data):
                 console.print(
@@ -1573,7 +1555,11 @@ def read(  # noqa: C901
     else:
         # Chapter selection
         if chapters:
-            selected_indices = _parse_chapter_selection(chapters, len(content_data))
+            try:
+                selected_indices = parse_chapter_selection(chapters, len(content_data))
+            except ValueError as exc:
+                console.print(f"[yellow]{exc}[/yellow]")
+                sys.exit(1)
         elif start_chapter:
             if start_chapter < 1 or start_chapter > len(content_data):
                 console.print(

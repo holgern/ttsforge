@@ -4,7 +4,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional, cast
+from typing import cast
 
 import click
 import numpy as np
@@ -42,6 +42,7 @@ from rich.progress import (
 )
 from rich.table import Table
 
+from ..chapter_selection import parse_chapter_selection
 from ..constants import (
     DEFAULT_CONFIG,
     DEFAULT_VOICE_FOR_LANG,
@@ -53,36 +54,6 @@ from ..utils import format_size, load_config, reset_config, save_config
 from .helpers import DEMO_TEXT, VOICE_BLEND_PRESETS, console, parse_voice_parameter
 
 
-def _parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
-    """Parse chapter selection string into list of indices."""
-    if selection.lower() == "all":
-        return list(range(total_chapters))
-
-    indices: set[int] = set()
-
-    for part in selection.split(","):
-        part = part.strip()
-        if "-" in part:
-            # Range
-            try:
-                start, end = part.split("-")
-                start_idx = int(start) - 1
-                end_idx = int(end)
-                indices.update(range(max(0, start_idx), min(total_chapters, end_idx)))
-            except ValueError:
-                console.print(f"[yellow]Invalid range: {part}[/yellow]")
-        else:
-            # Single number
-            try:
-                idx = int(part) - 1
-                if 0 <= idx < total_chapters:
-                    indices.add(idx)
-            except ValueError:
-                console.print(f"[yellow]Invalid chapter number: {part}[/yellow]")
-
-    return sorted(indices)
-
-
 @click.command()
 @click.option(
     "-l",
@@ -91,7 +62,7 @@ def _parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
     default=None,
     help="Filter voices by language (default: all languages).",
 )
-def voices(language: Optional[str]) -> None:
+def voices(language: str | None) -> None:
     """List available TTS voices."""
     table = Table(title="Available Voices")
     table.add_column("Voice", style="bold")
@@ -189,15 +160,15 @@ def voices(language: Optional[str]) -> None:
 @click.pass_context
 def demo(  # noqa: C901
     ctx: click.Context,
-    output: Optional[Path],
-    language: Optional[str],
-    voices_filter: Optional[str],
+    output: Path | None,
+    language: str | None,
+    voices_filter: str | None,
     speed: float,
-    use_gpu: Optional[bool],
+    use_gpu: bool | None,
     silence: float,
-    text: Optional[str],
+    text: str | None,
     separate: bool,
-    blend: Optional[str],
+    blend: str | None,
     blend_presets: bool,
     play_audio: bool,
 ) -> None:
@@ -544,7 +515,7 @@ def demo(  # noqa: C901
     default=None,
     help="Model quality/quantization level. Default: from config or fp32.",
 )
-def download(force: bool, quality: Optional[str]) -> None:
+def download(force: bool, quality: str | None) -> None:
     """Download ONNX model and voice files required for TTS.
 
     Downloads from Hugging Face (onnx-community/Kokoro-82M-v1.0-ONNX).
@@ -807,7 +778,7 @@ def config(show: bool, reset: bool, set_option: tuple[tuple[str, str], ...]) -> 
 )
 def extract_names(
     input_file: Path,
-    output: Optional[Path],
+    output: Path | None,
     min_count: int,
     max_names: int,
     language: str,
@@ -871,11 +842,12 @@ def extract_names(
         # Determine which chapters to process
         if chapters is not None:
             # Parse chapter selection (supports 'all', ranges, and specific chapters)
-            if chapters.lower() == "all":
-                selected_chapters = all_chapters
-            else:
-                selected_indices = _parse_chapter_selection(chapters, len(all_chapters))
+            try:
+                selected_indices = parse_chapter_selection(chapters, len(all_chapters))
                 selected_chapters = [all_chapters[i] for i in selected_indices]
+            except ValueError as exc:
+                console.print(f"[yellow]{exc}[/yellow]")
+                sys.exit(1)
 
             if len(selected_chapters) < len(all_chapters):
                 console.print(

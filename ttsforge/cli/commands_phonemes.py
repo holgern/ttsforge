@@ -10,7 +10,6 @@ This module contains commands for working with phonemes and pre-tokenized conten
 import re
 import sys
 from pathlib import Path
-from typing import Optional
 
 import click
 from rich.progress import (
@@ -25,6 +24,7 @@ from rich.progress import (
 from rich.prompt import Confirm
 from rich.table import Table
 
+from ..chapter_selection import parse_chapter_selection
 from ..constants import (
     LANGUAGE_DESCRIPTIONS,
     SUPPORTED_OUTPUT_FORMATS,
@@ -36,36 +36,6 @@ from ..utils import (
     load_config,
 )
 from .helpers import console, parse_voice_parameter
-
-
-def _parse_chapter_selection(selection: str, total_chapters: int) -> list[int]:
-    """Parse chapter selection string into list of indices."""
-    if selection.lower() == "all":
-        return list(range(total_chapters))
-
-    indices: set[int] = set()
-
-    for part in selection.split(","):
-        part = part.strip()
-        if "-" in part:
-            # Range
-            try:
-                start, end = part.split("-")
-                start_idx = int(start) - 1
-                end_idx = int(end)
-                indices.update(range(max(0, start_idx), min(total_chapters, end_idx)))
-            except ValueError:
-                console.print(f"[yellow]Invalid range: {part}[/yellow]")
-        else:
-            # Single number
-            try:
-                idx = int(part) - 1
-                if 0 <= idx < total_chapters:
-                    indices.add(idx)
-            except ValueError:
-                console.print(f"[yellow]Invalid chapter number: {part}[/yellow]")
-
-    return sorted(indices)
 
 
 @click.group()
@@ -132,10 +102,10 @@ def phonemes() -> None:
 )
 def phonemes_export(
     epub_file: Path,
-    output: Optional[Path],
+    output: Path | None,
     readable: bool,
     language: str,
-    chapters: Optional[str],
+    chapters: str | None,
     vocab_version: str,
     split_mode: str,
     max_chars: int,
@@ -184,9 +154,13 @@ def phonemes_export(
         sys.exit(1)
 
     # Chapter selection
-    selected_indices: Optional[list[int]] = None
+    selected_indices: list[int] | None = None
     if chapters:
-        selected_indices = _parse_chapter_selection(chapters, len(epub_chapters))
+        try:
+            selected_indices = parse_chapter_selection(chapters, len(epub_chapters))
+        except ValueError as exc:
+            console.print(f"[yellow]{exc}[/yellow]")
+            sys.exit(1)
 
     # Get effective title and author
     default_title = config.get("default_title", "Untitled")
@@ -445,25 +419,25 @@ def phonemes_export(
 def phonemes_convert(
     ctx: click.Context,
     phoneme_file: Path,
-    output: Optional[Path],
-    output_format: Optional[str],
-    voice: Optional[str],
+    output: Path | None,
+    output_format: str | None,
+    voice: str | None,
     speed: float,
-    use_gpu: Optional[bool],
+    use_gpu: bool | None,
     silence: float,
-    pause_clause: Optional[float],
-    pause_sentence: Optional[float],
-    pause_paragraph: Optional[float],
-    pause_variance: Optional[float],
-    pause_mode: Optional[str],
-    announce_chapters: Optional[bool],
-    chapter_pause: Optional[float],
-    chapters: Optional[str],
-    title: Optional[str],
-    author: Optional[str],
-    cover: Optional[Path],
-    voice_blend: Optional[str],
-    voice_database: Optional[Path],
+    pause_clause: float | None,
+    pause_sentence: float | None,
+    pause_paragraph: float | None,
+    pause_variance: float | None,
+    pause_mode: str | None,
+    announce_chapters: bool | None,
+    chapter_pause: float | None,
+    chapters: str | None,
+    title: str | None,
+    author: str | None,
+    cover: Path | None,
+    voice_blend: str | None,
+    voice_database: Path | None,
     streaming: bool,
     keep_chapters: bool,
     yes: bool,
@@ -657,7 +631,7 @@ def phonemes_convert(
     )
 
     # Progress tracking with Rich
-    progress_bar: Optional[Progress] = None
+    progress_bar: Progress | None = None
     task_id = None
 
     def log_callback(message: str, level: str) -> None:
@@ -1011,7 +985,7 @@ def phonemes_info(phoneme_file: Path, stats: bool) -> None:
         max_count = max(bucket_counts) if bucket_counts else 1
         bar_width = 30
 
-        for label, count in zip(bucket_labels, bucket_counts):
+        for label, count in zip(bucket_labels, bucket_counts, strict=False):
             if count > 0 or label in [
                 "0-49",
                 "50-99",

@@ -6,14 +6,20 @@ audio chunks and play them seamlessly without gaps.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Callable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
+
+from .utils import atomic_write_json
+
+_LOGGER = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
     pass
@@ -78,6 +84,7 @@ class StreamingAudioPlayer:
         channels: int = 1,
         buffer_size: int = 2048,
         on_chunk_played: Callable[[int], None] | None = None,
+        max_buffer_seconds: float = 10.0,
     ):
         """
         Initialize the streaming audio player.
@@ -87,14 +94,25 @@ class StreamingAudioPlayer:
             channels: Number of audio channels (default: 1 for mono)
             buffer_size: Size of audio buffer frames (default: 2048)
             on_chunk_played: Optional callback when a chunk finishes playing
+            max_buffer_seconds: Max queued audio in seconds before blocking
         """
         self.sample_rate = sample_rate
         self.channels = channels
         self.buffer_size = buffer_size
         self.on_chunk_played = on_chunk_played
+        self.max_buffer_seconds = max_buffer_seconds
+
+        max_samples = int(max_buffer_seconds * sample_rate)
+        self._max_buffer_samples = max(max_samples, buffer_size * 2)
+        self._max_queue_chunks = max(1, int(self._max_buffer_samples / buffer_size))
 
         # Audio queue for buffering chunks
-        self._audio_queue: queue.Queue[np.ndarray | None] = queue.Queue()
+        self._audio_queue: queue.Queue[np.ndarray | None] = queue.Queue(
+            maxsize=self._max_queue_chunks
+        )
+        self._queue_lock = threading.Lock()
+        self._queue_not_full = threading.Condition(self._queue_lock)
+        self._queued_samples = 0
 
         # Current audio buffer being played
         self._current_buffer: np.ndarray | None = None
@@ -168,6 +186,13 @@ class StreamingAudioPlayer:
                     self._current_buffer = self._audio_queue.get_nowait()
                     self._buffer_position = 0
 
+                    if self._current_buffer is not None:
+                        with self._queue_not_full:
+                            self._queued_samples = max(
+                                0, self._queued_samples - len(self._current_buffer)
+                            )
+                            self._queue_not_full.notify_all()
+
                     if self._current_buffer is None:
                         # None signals end of audio
                         outdata[output_pos:].fill(0)
@@ -233,6 +258,8 @@ class StreamingAudioPlayer:
         """Stop playback and close the stream."""
         self._should_stop = True
         self._is_playing = False
+        self._current_buffer = None
+        self._buffer_position = 0
 
         if self._stream is not None:
             self._stream.stop()
@@ -245,6 +272,13 @@ class StreamingAudioPlayer:
                 self._audio_queue.get_nowait()
             except queue.Empty:
                 break
+
+        with self._queue_not_full:
+            self._queued_samples = 0
+            self._queue_not_full.notify_all()
+
+        self._all_audio_added.set()
+        self._finished.set()
 
     def pause(self) -> None:
         """Pause playback."""
@@ -277,12 +311,40 @@ class StreamingAudioPlayer:
         if audio.ndim > 1:
             audio = audio.flatten()
 
-        self._audio_queue.put(audio)
+        audio_len = len(audio)
+        with self._queue_not_full:
+            while (
+                not self._should_stop
+                and self._queued_samples + audio_len > self._max_buffer_samples
+            ):
+                self._queue_not_full.wait(timeout=0.1)
+
+            if self._should_stop:
+                return
+
+            self._queued_samples += audio_len
+
+        while True:
+            try:
+                self._audio_queue.put(audio, timeout=0.1)
+                break
+            except queue.Full:
+                if self._should_stop:
+                    with self._queue_not_full:
+                        self._queued_samples = max(0, self._queued_samples - audio_len)
+                        self._queue_not_full.notify_all()
+                    return
 
     def finish_adding(self) -> None:
         """Signal that no more audio will be added."""
         self._all_audio_added.set()
-        self._audio_queue.put(None)  # Sentinel value
+        while True:
+            try:
+                self._audio_queue.put(None, timeout=0.1)
+                break
+            except queue.Full:
+                if self._should_stop:
+                    break
 
     def wait_until_done(self, timeout: float | None = None) -> bool:
         """
@@ -299,6 +361,10 @@ class StreamingAudioPlayer:
     def request_stop(self) -> None:
         """Request playback to stop (used for Ctrl+C handling)."""
         self._should_stop = True
+        self._all_audio_added.set()
+        self._finished.set()
+        with self._queue_not_full:
+            self._queue_not_full.notify_all()
 
 
 def save_playback_position(
@@ -311,8 +377,6 @@ def save_playback_position(
         position: PlaybackPosition to save
         cache_dir: Directory to save to (default: ~/.cache/ttsforge)
     """
-    import json
-
     from .utils import get_user_cache_path
 
     if cache_dir is None:
@@ -321,8 +385,12 @@ def save_playback_position(
     position_file = cache_dir / "reading_position.json"
     position_file.parent.mkdir(parents=True, exist_ok=True)
 
-    with open(position_file, "w", encoding="utf-8") as f:
-        json.dump(position.to_dict(), f, indent=2)
+    try:
+        atomic_write_json(
+            position_file, position.to_dict(), indent=2, ensure_ascii=True
+        )
+    except (OSError, TypeError, ValueError) as exc:
+        _LOGGER.debug("Failed to save playback position: %s", exc)
 
 
 def load_playback_position(

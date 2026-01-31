@@ -4,9 +4,10 @@ import hashlib
 import json
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Any, Optional
 
 import soundfile as sf
 
@@ -27,6 +28,7 @@ from .ssmd_generator import (
     save_ssmd_file,
 )
 from .utils import (
+    atomic_write_json,
     format_duration,
     format_filename_template,
     load_phoneme_dictionary,
@@ -43,7 +45,7 @@ class Chapter:
     title: str
     content: str
     index: int = 0
-    html_content: Optional[str] = None  # Optional HTML for emphasis detection
+    html_content: str | None = None  # Optional HTML for emphasis detection
     is_ssmd: bool = False
 
     @property
@@ -85,10 +87,10 @@ class ConversionResult:
     """Result of a conversion operation."""
 
     success: bool
-    output_path: Optional[Path] = None
-    subtitle_path: Optional[Path] = None
-    error_message: Optional[str] = None
-    chapters_dir: Optional[Path] = None
+    output_path: Path | None = None
+    subtitle_path: Path | None = None
+    error_message: str | None = None
+    chapters_dir: Path | None = None
 
 
 @dataclass
@@ -99,11 +101,11 @@ class ChapterState:
     title: str
     content_hash: str  # Hash of chapter content for integrity check
     completed: bool = False
-    audio_file: Optional[str] = None  # Relative path to chapter audio
+    audio_file: str | None = None  # Relative path to chapter audio
     duration: float = 0.0  # Duration in seconds
     char_count: int = 0
-    ssmd_file: Optional[str] = None  # Relative path to SSMD file
-    ssmd_hash: Optional[str] = None  # Hash of SSMD content for change detection
+    ssmd_file: str | None = None  # Relative path to SSMD file
+    ssmd_hash: str | None = None  # Hash of SSMD content for change detection
 
 
 @dataclass
@@ -126,7 +128,7 @@ class ConversionState:
     pause_paragraph: float = 0.75
     pause_variance: float = 0.05
     pause_mode: str = "auto"  # "tts", "manual", or "auto
-    lang: Optional[str] = None  # Language override for phonemization
+    lang: str | None = None  # Language override for phonemization
     chapters: list[ChapterState] = field(default_factory=list)
     started_at: str = ""
     last_updated: str = ""
@@ -217,14 +219,13 @@ class ConversionState:
             "started_at": self.started_at,
             "last_updated": self.last_updated,
         }
-        with open(state_file, "w", encoding="utf-8") as f:
-            json.dump(data, f, indent=2)
+        atomic_write_json(state_file, data, indent=2, ensure_ascii=True)
 
     def get_completed_count(self) -> int:
         """Get the number of completed chapters."""
         return sum(1 for ch in self.chapters if ch.completed)
 
-    def get_next_incomplete_index(self) -> Optional[int]:
+    def get_next_incomplete_index(self) -> int | None:
         """Get the index of the next incomplete chapter."""
         for ch in self.chapters:
             if not ch.completed:
@@ -264,19 +265,19 @@ class ConversionOptions:
     language: str = "a"
     speed: float = 1.0
     output_format: str = "m4b"
-    output_dir: Optional[Path] = None
+    output_dir: Path | None = None
     use_gpu: bool = False  # GPU requires onnxruntime-gpu
     silence_between_chapters: float = 2.0
     # Language override for phonemization (e.g., 'de', 'en-us', 'fr')
     # If None, language is determined from voice prefix
-    lang: Optional[str] = None
+    lang: str | None = None
     # Mixed-language support (auto-detect and handle multiple languages)
     use_mixed_language: bool = False
-    mixed_language_primary: Optional[str] = None
-    mixed_language_allowed: Optional[list[str]] = None
+    mixed_language_primary: str | None = None
+    mixed_language_allowed: list[str] | None = None
     mixed_language_confidence: float = 0.7
     # Custom phoneme dictionary for pronunciation overrides
-    phoneme_dictionary_path: Optional[str] = None
+    phoneme_dictionary_path: str | None = None
     phoneme_dict_case_sensitive: bool = False
     # Pause settings (pykokoro built-in pause handling)
     pause_clause: float = 0.25  # For clause boundaries (commas)
@@ -295,19 +296,19 @@ class ConversionOptions:
     resume: bool = True  # Enable resume by default for long conversions
     keep_chapter_files: bool = False  # Keep individual chapter files after merge
     # Metadata for m4b
-    title: Optional[str] = None
-    author: Optional[str] = None
-    cover_image: Optional[Path] = None
+    title: str | None = None
+    author: str | None = None
+    cover_image: Path | None = None
     # Voice blending (e.g., "af_nicole:50,am_michael:50")
-    voice_blend: Optional[str] = None
+    voice_blend: str | None = None
     # Voice database for custom/synthetic voices
-    voice_database: Optional[Path] = None
+    voice_database: Path | None = None
     # Filename template for chapter files
     chapter_filename_template: str = "{chapter_num:03d}_{book_title}_{chapter_title}"
     # Custom ONNX model path (None = use default downloaded model)
-    model_path: Optional[Path] = None
+    model_path: Path | None = None
     # Custom voices.bin path (None = use default downloaded voices)
-    voices_path: Optional[Path] = None
+    voices_path: Path | None = None
     # SSMD generation control
     generate_ssmd_only: bool = False  # If True, only generate SSMD files, no audio
     detect_emphasis: bool = False  # If True, detect emphasis from HTML tags in EPUB
@@ -327,7 +328,7 @@ CHAPTER_PATTERN = re.compile(
 )
 
 
-def detect_language_from_iso(iso_code: Optional[str]) -> str:
+def detect_language_from_iso(iso_code: str | None) -> str:
     """Convert ISO language code to ttsforge language code."""
     if not iso_code:
         return "a"  # Default to American English
@@ -352,8 +353,8 @@ class TTSConverter:
     def __init__(
         self,
         options: ConversionOptions,
-        progress_callback: Optional[Callable[[ConversionProgress], None]] = None,
-        log_callback: Optional[Callable[[str, str], None]] = None,
+        progress_callback: Callable[[ConversionProgress], None] | None = None,
+        log_callback: Callable[[str, str], None] | None = None,
     ) -> None:
         """
         Initialize the TTS converter.
@@ -418,9 +419,9 @@ class TTSConverter:
     def _build_ssmd_content(
         self,
         chapter: Chapter,
-        phoneme_dict: Optional[dict[str, str]],
-        mixed_language_config: Optional[dict[str, Any]],
-        html_content: Optional[str],
+        phoneme_dict: dict[str, str] | None,
+        mixed_language_config: dict[str, Any] | None,
+        html_content: str | None,
     ) -> str:
         """Generate SSMD content for a chapter, falling back to plain text."""
         try:
@@ -441,12 +442,12 @@ class TTSConverter:
         self,
         chapter: Chapter,
         ssmd_file: Path,
-        phoneme_dict: Optional[dict[str, str]],
-        mixed_language_config: Optional[dict[str, Any]],
-        html_content: Optional[str],
+        phoneme_dict: dict[str, str] | None,
+        mixed_language_config: dict[str, Any] | None,
+        html_content: str | None,
     ) -> tuple[str, str]:
         """Load SSMD from disk or generate and save it."""
-        ssmd_content: Optional[str] = None
+        ssmd_content: str | None = None
         ssmd_hash = ""
 
         if chapter.is_ssmd:
@@ -520,7 +521,7 @@ class TTSConverter:
         self,
         chapters: list[Chapter],
         output_path: Path,
-        source_file: Optional[Path] = None,
+        source_file: Path | None = None,
         resume: bool = True,
     ) -> ConversionResult:
         """
@@ -562,7 +563,7 @@ class TTSConverter:
             state_file = work_dir / f"{safe_book_title}_state.json"
 
             # Load or create state
-            state: Optional[ConversionState] = None
+            state: ConversionState | None = None
             if resume and state_file.exists():
                 state = ConversionState.load(state_file)
                 if state:
@@ -934,8 +935,11 @@ class TTSConverter:
 
             try:
                 shutil.rmtree(result.chapters_dir)
-            except Exception:
-                pass
+            except OSError as exc:
+                self.log(
+                    f"Failed to clean up chapter dir {result.chapters_dir}: {exc}",
+                    "warning",
+                )
 
     def convert_text(self, text: str, output_path: Path) -> ConversionResult:
         """
@@ -955,7 +959,7 @@ class TTSConverter:
         self,
         epub_path: Path,
         output_path: Path,
-        selected_chapters: Optional[list[int]] = None,
+        selected_chapters: list[int] | None = None,
     ) -> ConversionResult:
         """
         Convert an EPUB file to audio.
@@ -1018,8 +1022,8 @@ class TTSConverter:
                         self.options.title = metadata.title
                     if not self.options.author and metadata.authors:
                         self.options.author = metadata.authors[0]
-            except Exception:
-                pass
+            except (AttributeError, OSError, ValueError) as exc:
+                self.log(f"Failed to read EPUB metadata: {exc}", "warning")
 
         result = self.convert_chapters_resumable(
             chapters,
