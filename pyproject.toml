@@ -28,7 +28,7 @@ dependencies = [
     "platformdirs>=3.0.0",
     "sounddevice>=0.4.6",
     # TTS engine (includes onnxruntime and kokorog2p)
-    "pykokoro>=0.6.3",
+    "pykokoro>=0.6.4",
 ]
 classifiers=[
     'Intended Audience :: End Users/Desktop',
