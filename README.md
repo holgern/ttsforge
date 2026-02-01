@@ -333,14 +333,14 @@ SSMD files use a simple markdown-like syntax:
 **Custom Phonemes**:
 
 ```
-[Hermione](ph: /hɝmˈIni/)    # Override pronunciation
-[API](ph: /ˌeɪpiˈaɪ/)        # Technical terms
+[Hermione]{ph="hɝmˈIni"}    # Override pronunciation
+[API]{ph="ˌeɪpiˈaɪ"}        # Technical terms
 ```
 
 **Language Switching** (planned):
 
 ```
-[Bonjour](fr)    # Mark text as French
+[Bonjour]{lang="fr"}    # Mark text as French
 ```
 
 #### Example SSMD File
@@ -348,7 +348,7 @@ SSMD files use a simple markdown-like syntax:
 ```ssmd
 Chapter One ...p
 
-[Harry](ph: /hæɹi/) Potter was a *highly unusual* boy in many ways. ...s
+[Harry]{ph="hæɹi"} Potter was a *highly unusual* boy in many ways. ...s
 For one thing, he **hated** the summer holidays more than any other
 time of year. ...s For another, he really wanted to do his homework,
 but was forced to do it in secret, in the dead of the night. ...p
@@ -435,12 +435,12 @@ Edit `custom_phonemes.json` to fix any incorrect phonemes. The file format is:
   },
   "entries": {
     "Hermione": {
-      "phoneme": "/hɝmˈIni/",
+      "phoneme": "hɝmˈIni",
       "occurrences": 847,
       "verified": false
     },
     "Kubernetes": {
-      "phoneme": "/kubɚnˈɛtɪs/",
+      "phoneme": "kubɚnˈɛtɪs",
       "occurrences": 12,
       "verified": false
     }
@@ -452,8 +452,8 @@ Or use the simple format:
 
 ```json
 {
-  "Hermione": "/hɝmˈIni/",
-  "Kubernetes": "/kubɚnˈɛtɪs/"
+  "Hermione": "hɝmˈIni",
+  "Kubernetes": "kubɚnˈɛtɪs"
 }
 ```
 
@@ -485,9 +485,9 @@ You can create a dictionary manually without extraction:
 
 ```json
 {
-  "Katniss": "/kætnɪs/",
-  "Peeta": "/pitə/",
-  "Panem": "/pænəm/"
+  "Katniss": "kætnɪs",
+  "Peeta": "pitə",
+  "Panem": "pænəm"
 }
 ```
 

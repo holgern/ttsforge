@@ -2,8 +2,8 @@
 
 This module converts chapter text to SSMD format with markup for:
 - Emphasis (*text* for moderate, **text** for strong)
-- Language switches ([text](lang_code))
-- Phoneme substitutions ([word](ph: /phoneme/))
+- Language switches ([text]{lang="lang_code"})
+- Phoneme substitutions ([word]{ph="phoneme"})
 
 Note: Structural breaks (paragraphs, sentences, clauses) are NOT automatically
 added. The SSMD parser in pykokoro handles sentence detection automatically.
@@ -170,7 +170,7 @@ def _inject_phoneme_substitutions(
         if not phoneme:
             return matched_word
         clean_phoneme = phoneme.strip("/")
-        return f"[{matched_word}](ph: /{clean_phoneme}/)"
+        return f"[{matched_word}]" + "{" + f'ph="{clean_phoneme}"' + "}"
 
     segments: list[str] = []
     last_index = 0

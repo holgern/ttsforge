@@ -174,7 +174,7 @@ def generate_phoneme_suggestions(
         Dictionary with phoneme suggestions and metadata:
         {
             "name": {
-                "phoneme": "/phoneme/",
+                "phoneme": "phoneme",
                 "occurrences": count,
                 "suggestion_quality": "auto"
             }
@@ -190,7 +190,7 @@ def generate_phoneme_suggestions(
             phoneme = phonemize(name, language=language).phonemes
 
             # Wrap in / / format for dictionary
-            phoneme_formatted = f"/{phoneme}/"
+            phoneme_formatted = f"{phoneme}"
 
             suggestions[name] = {
                 "phoneme": phoneme_formatted,
@@ -201,7 +201,7 @@ def generate_phoneme_suggestions(
             logger.warning(f"Failed to generate phoneme for '{name}': {e}")
             # Add placeholder
             suggestions[name] = {
-                "phoneme": "/FIXME/",
+                "phoneme": "FIXME",
                 "occurrences": count,
                 "suggestion_quality": "error",
                 "error": str(e),

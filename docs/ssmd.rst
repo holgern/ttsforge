@@ -101,15 +101,15 @@ Override pronunciation using IPA phonemes:
 
 .. code-block:: ssmd
 
-   [word](ph: /phoneme/)
+   [word]{ph="phoneme"}
 
 Examples:
 
 .. code-block:: ssmd
 
-   [Hermione](ph: /hɝmˈIni/) Granger was Harry's best friend. ...s
-   The [API](ph: /ˌeɪpiˈaɪ/) supports [JSON](ph: /dʒˈeɪsɑn/). ...s
-   [Kubernetes](ph: /kubɚnˈɛtɪs/) is a container orchestrator. ...s
+   [Hermione]{ph="hɝmˈIni"} Granger was Harry's best friend. ...s
+   The [API]{ph="ˌeɪpiˈaɪ"} supports [JSON]{ph="dʒˈeɪsɑn"}. ...s
+   [Kubernetes]{ph="kubɚnˈɛtɪs"} is a container orchestrator. ...s
 
 
 Language Switching (Planned)
@@ -119,8 +119,8 @@ Mark text as a different language (placeholder for future):
 
 .. code-block:: ssmd
 
-   [Bonjour](fr)      # French text
-   [Hola](es)         # Spanish text
+   [Bonjour]{lang="fr"}      # French text
+   [Hola]{lang="es"}         # Spanish text
 
 
 Complete Example
@@ -132,14 +132,14 @@ Here's a complete SSMD file example:
 
    Chapter One ...p
 
-   [Harry](ph: /hæɹi/) Potter was a *highly unusual* boy in many ways. ...s
+   [Harry]{ph="hæɹi"} Potter was a *highly unusual* boy in many ways. ...s
    For one thing, he **hated** the summer holidays more than any other
    time of year. ...s For another, he really wanted to do his homework,
    but was forced to do it in secret, in the dead of the night. ...p
 
    And he also happened to be a wizard. ...p
 
-   The [Dursleys](ph: /dɝzliz/) had everything they wanted, but they
+   The [Dursleys]{ph="dɝzliz"} had everything they wanted, but they
    also had a secret. ...s And their greatest fear was that somebody
    would discover it. ...p
 
@@ -163,7 +163,7 @@ The generated SSMD will include:
 
 .. code-block:: ssmd
 
-   [Hermione](ph: /hɝmˈIni/) loved reading books. ...s
+   [Hermione]{ph="hɝmˈIni"} loved reading books. ...s
 
 
 HTML Emphasis Detection

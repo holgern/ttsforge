@@ -13,8 +13,8 @@ class TestPhonemeDictionary:
     def test_load_simple_dictionary(self):
         """Test loading a simple phoneme dictionary."""
         test_dict = {
-            "Misaki": "/misˈɑki/",
-            "Kubernetes": "/kubɚnˈɛtɪs/",
+            "Misaki": "misˈɑki",
+            "Kubernetes": "kubɚnˈɛtɪs",
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
@@ -40,8 +40,8 @@ class TestPhonemeDictionary:
                 "language": "en-us",
             },
             "entries": {
-                "Misaki": {"phoneme": "/misˈɑki/", "occurrences": 42},
-                "nginx": {"phoneme": "/ˈɛnʤɪnˈɛks/", "occurrences": 8},
+                "Misaki": {"phoneme": "misˈɑki", "occurrences": 42},
+                "nginx": {"phoneme": "ˈɛnʤɪnˈɛks", "occurrences": 8},
             },
         }
 
@@ -67,8 +67,8 @@ class TestPhonemeDictionary:
         """Test loading dictionary with metadata format but simple string values."""
         test_dict = {
             "entries": {
-                "Misaki": "/misˈɑki/",
-                "nginx": "/ˈɛnʤɪnˈɛks/",
+                "Misaki": "misˈɑki",
+                "nginx": "ˈɛnʤɪnˈɛks",
             }
         }
 
@@ -112,8 +112,8 @@ class TestPhonemeDictionary:
     def test_phonemize_with_dictionary(self):
         """Test phonemization with custom dictionary - through SSMD notation."""
         test_dict = {
-            "Misaki": "/misˈɑki/",
-            "Kubernetes": "/kubɚnˈɛtɪs/",
+            "Misaki": "misˈɑki",
+            "Kubernetes": "kubɚnˈɛtɪs",
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
@@ -130,8 +130,8 @@ class TestPhonemeDictionary:
             ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
 
             # Verify SSMD notation is applied
-            assert "[Misaki]{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
-            assert "[Kubernetes]{ph=" in ssmd_text or "[Kubernetes](ph:" in ssmd_text
+            assert "[Misaki]{ph=" in ssmd_text
+            assert "[Kubernetes]{ph=" in ssmd_text
         finally:
             Path(temp_path).unlink()
 
@@ -162,7 +162,7 @@ class TestPhonemeDictionary:
 
     def test_case_sensitive_matching(self):
         """Test case-sensitive dictionary matching."""
-        test_dict = {"Misaki": "/misˈɑki/"}
+        test_dict = {"Misaki": "misˈɑki"}
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(test_dict, f)
@@ -184,13 +184,13 @@ class TestPhonemeDictionary:
             assert phoneme_count == 1, f"Expected 1 match, got {phoneme_count}"
 
             # Verify it's "Misaki" that matched
-            assert "[Misaki]{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
+            assert "[Misaki]{ph=" in ssmd_text
         finally:
             Path(temp_path).unlink()
 
     def test_word_boundaries(self):
         """Test that word boundaries are respected."""
-        test_dict = {"test": "/tˈɛst/"}
+        test_dict = {"test": "tˈɛst"}
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(test_dict, f)
@@ -246,7 +246,7 @@ class TestPhonemeDictionary:
     def test_special_characters_in_words(self):
         """Test dictionary words with special regex characters (periods, etc.)."""
         # Use a simple word that can be phonemized
-        test_dict = {"Misaki": "/misˈɑki/"}
+        test_dict = {"Misaki": "misˈɑki"}
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(test_dict, f)
@@ -262,13 +262,13 @@ class TestPhonemeDictionary:
             ssmd_text = tokenizer._phoneme_dictionary_obj.apply(text)
 
             # Should use custom phoneme
-            assert "[Misaki]{ph=" in ssmd_text or "[Misaki](ph:" in ssmd_text
+            assert "[Misaki]{ph=" in ssmd_text
         finally:
             Path(temp_path).unlink()
 
     def test_multiple_occurrences(self):
         """Test that all occurrences of a word are replaced."""
-        test_dict = {"test": "/tˈɛst/"}
+        test_dict = {"test": "tˈɛst"}
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
             json.dump(test_dict, f)
@@ -293,8 +293,8 @@ class TestPhonemeDictionary:
         # Note: Multi-word phoneme annotations have limitations in kokorog2p's
         # markdown processing. Testing with overlapping single words instead.
         test_dict = {
-            "testing": "/tˈɛstɪŋ/",
-            "test": "/tˈɛst/",  # Shorter word, different pronunciation
+            "testing": "tˈɛstɪŋ",
+            "test": "tˈɛst",  # Shorter word, different pronunciation
         }
 
         with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
