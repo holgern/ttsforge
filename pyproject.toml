@@ -25,7 +25,6 @@ dependencies = [
     "chardet",
     "charset-normalizer",
     "platformdirs>=3.0.0",
-    "sounddevice>=0.4.6",
     # TTS engine (includes onnxruntime and kokorog2p)
     "pykokoro>=0.6.4",
 ]
@@ -46,6 +45,9 @@ classifiers=[
 dynamic=["version"]
 
 [project.optional-dependencies]
+audio = [
+    "sounddevice>=0.4.6",
+]
 dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",

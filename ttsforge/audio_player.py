@@ -28,6 +28,18 @@ if TYPE_CHECKING:
 DEFAULT_SAMPLE_RATE = 24000
 
 
+def _import_sounddevice() -> Any:
+    try:
+        import sounddevice as sd
+    except ImportError as exc:
+        message = (
+            "Audio playback requires the optional dependency 'sounddevice'. "
+            "Install with: pip install ttsforge[audio] or pip install sounddevice."
+        )
+        raise RuntimeError(message) from exc
+    return sd
+
+
 @dataclass
 class PlaybackPosition:
     """Represents the current playback position for resume functionality."""
@@ -235,7 +247,7 @@ class StreamingAudioPlayer:
 
     def start(self) -> None:
         """Start the audio output stream."""
-        import sounddevice as sd
+        sd = _import_sounddevice()
 
         if self._stream is not None:
             return
@@ -245,14 +257,15 @@ class StreamingAudioPlayer:
         self._all_audio_added.clear()
         self._is_playing = True
 
-        self._stream = sd.OutputStream(
+        stream = sd.OutputStream(
             samplerate=self.sample_rate,
             channels=self.channels,
             dtype=np.float32,
             blocksize=self.buffer_size,
             callback=self._audio_callback,
         )
-        self._stream.start()
+        self._stream = stream
+        stream.start()
 
     def stop(self) -> None:
         """Stop playback and close the stream."""
@@ -454,7 +467,7 @@ def play_audio_blocking(
         audio: Audio samples as numpy array
         sample_rate: Sample rate (default: 24000)
     """
-    import sounddevice as sd
+    sd = _import_sounddevice()
 
     sd.play(audio, sample_rate)
     sd.wait()

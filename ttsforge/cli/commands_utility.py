@@ -63,6 +63,23 @@ ModelSource: TypeAlias = Literal["huggingface", "github"]
 ModelVariant: TypeAlias = Literal["v1.0", "v1.1-zh", "v1.1-de"]
 
 
+def _require_sounddevice() -> Any:
+    try:
+        import sounddevice as sd
+    except ImportError:
+        console.print(
+            "[red]Error:[/red] Audio playback requires the optional dependency "
+            "'sounddevice'."
+        )
+        console.print(
+            "[yellow]Install with:[/yellow]\n"
+            "  pip install ttsforge[audio]\n"
+            "  pip install sounddevice"
+        )
+        raise SystemExit(1) from None
+    return sd
+
+
 @click.command()
 @click.option(
     "-l",
@@ -330,7 +347,7 @@ def demo(  # noqa: C901
 
                     # Handle playback
                     if play_audio:
-                        import sounddevice as sd
+                        sd = _require_sounddevice()
 
                         progress.console.print(f"  [dim]Playing {description}...[/dim]")
                         sd.play(samples, sr)
@@ -491,7 +508,7 @@ def demo(  # noqa: C901
 
         # Play audio if requested
         if play_audio:
-            import sounddevice as sd
+            sd = _require_sounddevice()
 
             console.print("[dim]Playing audio...[/dim]")
             sd.play(combined, sample_rate)
@@ -1323,11 +1340,11 @@ def list_names(  # noqa: C901
 
                         if result.success:
                             # Play the audio
-                            import sounddevice as sd
                             import soundfile as sf
 
                             audio_data, sample_rate = sf.read(str(temp_output))
                             console.print("[dim]▶ Playing...[/dim]")
+                            sd = _require_sounddevice()
                             sd.play(audio_data, sample_rate)
                             sd.wait()
                             console.print("[green]✓ Done[/green]")

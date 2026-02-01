@@ -10,6 +10,7 @@ This module contains commands for working with phonemes and pre-tokenized conten
 import re
 import sys
 from pathlib import Path
+from typing import Any
 
 import click
 from rich.progress import (
@@ -37,6 +38,23 @@ from ..utils import (
     load_config,
 )
 from .helpers import console, parse_voice_parameter
+
+
+def _require_sounddevice() -> Any:
+    try:
+        import sounddevice as sd
+    except ImportError:
+        console.print(
+            "[red]Error:[/red] Audio playback requires the optional dependency "
+            "'sounddevice'."
+        )
+        console.print(
+            "[yellow]Install with:[/yellow]\n"
+            "  pip install ttsforge[audio]\n"
+            "  pip install sounddevice"
+        )
+        raise SystemExit(1) from None
+    return sd
 
 
 @click.group()
@@ -836,11 +854,11 @@ def phonemes_preview(
 
                 if result.success:
                     # Play the audio
-                    import sounddevice as sd
                     import soundfile as sf
 
                     audio_data, sample_rate = sf.read(str(temp_output))
                     console.print("[dim]▶ Playing...[/dim]")
+                    sd = _require_sounddevice()
                     sd.play(audio_data, sample_rate)
                     sd.wait()
                     console.print("[green]✓ Playback complete[/green]")
