@@ -1,8 +1,9 @@
 [codecrate]
 output = "context_ttsforge.md"
 keep_docstrings = true
-dedupe = true
+dedupe = false
 metadata = false
+manifest = false
 respect_gitignore = true
 exclude = ["*/.venv/*"]
 include = ["**/*.py", "**/*.toml", "**/*.rst", "**/*.md"]

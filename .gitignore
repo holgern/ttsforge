@@ -216,7 +216,6 @@ onnx/
 *.m4a
 
 # Test/demo scripts at project root
-test_*.py
 demo_*.py
 
 # Binary data files

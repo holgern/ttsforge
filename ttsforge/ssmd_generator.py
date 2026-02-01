@@ -260,7 +260,7 @@ def _strip_redundant_title(chapter_title: str, chapter_text: str) -> str:
         return chapter_text
 
     trimmed_line = title_pattern.sub("", first_line, count=1).lstrip(
-        " \t:;\-\u2013\u2014"
+        " \t:;-\u2013\u2014"
     )
     if trimmed_line:
         lines[first_idx] = trimmed_line
