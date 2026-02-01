@@ -536,17 +536,17 @@ def convert(  # noqa: C901
         pause_clause=(
             pause_clause
             if pause_clause is not None
-            else config.get("pause_clause", 0.25)
+            else config.get("pause_clause", 0.3)
         ),
         pause_sentence=(
             pause_sentence
             if pause_sentence is not None
-            else config.get("pause_sentence", 0.2)
+            else config.get("pause_sentence", 0.5)
         ),
         pause_paragraph=(
             pause_paragraph
             if pause_paragraph is not None
-            else config.get("pause_paragraph", 0.75)
+            else config.get("pause_paragraph", 0.9)
         ),
         pause_variance=(
             pause_variance
@@ -1369,17 +1369,17 @@ def read(  # noqa: C901
         effective_split_mode = config_split_mode
     # Pause settings
     effective_pause_clause = (
-        pause_clause if pause_clause is not None else config.get("pause_clause", 0.25)
+        pause_clause if pause_clause is not None else config.get("pause_clause", 0.3)
     )
     effective_pause_sentence = (
         pause_sentence
         if pause_sentence is not None
-        else config.get("pause_sentence", 0.2)
+        else config.get("pause_sentence", 0.5)
     )
     effective_pause_paragraph = (
         pause_paragraph
         if pause_paragraph is not None
-        else config.get("pause_paragraph", 0.75)
+        else config.get("pause_paragraph", 0.9)
     )
     effective_pause_variance = (
         pause_variance
@@ -1695,7 +1695,6 @@ def read(  # noqa: C901
 
         def generate_audio(text_segment: str) -> tuple[np.ndarray, int]:
             """Generate audio for a text segment."""
-            print(text_segment)
             result = pipeline.run(text_segment)
             return result.audio, result.sample_rate
 

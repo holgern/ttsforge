@@ -80,5 +80,5 @@ def test_conversion_state_backward_compat(tmp_path: Path) -> None:
     assert loaded is not None
     assert loaded.pause_sentence == 0.2
     assert loaded.pause_paragraph == 0.75
-    assert loaded.pause_clause == 0.25
+    assert loaded.pause_clause == 0.3
     assert loaded.pause_variance >= 0.01

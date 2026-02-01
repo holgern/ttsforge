@@ -60,10 +60,6 @@ Utilities
 **ttsforge.vocab**
    Vocabulary utilities and metadata.
 
-**ttsforge.trim**
-   Audio trimming utilities for silence removal.
-
-
 Quick API Examples
 ------------------
 
@@ -80,9 +76,9 @@ Basic Text-to-Speech
        voice="af_heart",
        speed=1.0,
        use_gpu=False,
-       pause_clause=0.25,
-       pause_sentence=0.2,
-       pause_paragraph=0.75,
+       pause_clause=0.3,
+       pause_sentence=0.5,
+       pause_paragraph=0.9,
        pause_variance=0.05,
    )
    runner = KokoroRunner(opts, log=print)
@@ -239,11 +235,6 @@ Auto-generated API Documentation
    :show-inheritance:
 
 .. automodule:: ttsforge.vocab
-   :members:
-   :undoc-members:
-   :show-inheritance:
-
-.. automodule:: ttsforge.trim
    :members:
    :undoc-members:
    :show-inheritance:

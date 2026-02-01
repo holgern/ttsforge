@@ -603,17 +603,17 @@ def phonemes_convert(
         pause_clause=(
             pause_clause
             if pause_clause is not None
-            else config.get("pause_clause", 0.25)
+            else config.get("pause_clause", 0.3)
         ),
         pause_sentence=(
             pause_sentence
             if pause_sentence is not None
-            else config.get("pause_sentence", 0.2)
+            else config.get("pause_sentence", 0.5)
         ),
         pause_paragraph=(
             pause_paragraph
             if pause_paragraph is not None
-            else config.get("pause_paragraph", 0.75)
+            else config.get("pause_paragraph", 0.9)
         ),
         pause_variance=(
             pause_variance

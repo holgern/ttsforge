@@ -124,9 +124,9 @@ class ConversionState:
     split_mode: str = "auto"
     output_format: str = "m4b"
     silence_between_chapters: float = 2.0
-    pause_clause: float = 0.25
-    pause_sentence: float = 0.2
-    pause_paragraph: float = 0.75
+    pause_clause: float = 0.3
+    pause_sentence: float = 0.5
+    pause_paragraph: float = 0.9
     pause_variance: float = 0.05
     pause_mode: str = "auto"  # "tts", "manual", or "auto
     lang: str | None = None  # Language override for phonemization
@@ -174,11 +174,11 @@ class ConversionState:
 
             # Set defaults for new parameters
             if "pause_clause" not in data:
-                data["pause_clause"] = 0.25
+                data["pause_clause"] = 0.3
             if "pause_sentence" not in data:
-                data["pause_sentence"] = 0.2
+                data["pause_sentence"] = 0.5
             if "pause_paragraph" not in data:
-                data["pause_paragraph"] = 0.75
+                data["pause_paragraph"] = 0.9
             if "pause_variance" not in data:
                 data["pause_variance"] = 0.05
             if "pause_mode" not in data:
@@ -289,9 +289,9 @@ class ConversionOptions:
     phoneme_dictionary_path: str | None = None
     phoneme_dict_case_sensitive: bool = False
     # Pause settings (pykokoro built-in pause handling)
-    pause_clause: float = 0.25  # For clause boundaries (commas)
-    pause_sentence: float = 0.2  # For sentence boundaries
-    pause_paragraph: float = 0.75  # For paragraph boundaries
+    pause_clause: float = 0.3  # For clause boundaries (commas)
+    pause_sentence: float = 0.5  # For sentence boundaries
+    pause_paragraph: float = 0.9  # For paragraph boundaries
     pause_variance: float = 0.05  # Standard deviation for natural variation
     pause_mode: str = "auto"  # "tts", "manual", or "auto
     # Chapter announcement settings
