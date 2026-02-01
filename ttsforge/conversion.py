@@ -376,9 +376,13 @@ class TTSConverter:
         self.options = options
         self.progress_callback = progress_callback
         self.log_callback = log_callback
-        self._cancelled = threading.Event()
+        self._cancel_event = threading.Event()
         self._runner: KokoroRunner | None = None
         self._merger = AudioMerger(log=self.log)
+
+    @property
+    def _cancelled(self) -> bool:
+        return self._cancel_event.is_set()
 
     def log(self, message: str, level: str = "info") -> None:
         """Log a message."""
@@ -387,7 +391,7 @@ class TTSConverter:
 
     def cancel(self) -> None:
         """Request cancellation of the conversion."""
-        self._cancelled.set()
+        self._cancel_event.set()
 
     def _init_runner(self) -> None:
         """Initialize the Kokoro runner."""
@@ -561,7 +565,7 @@ class TTSConverter:
                 error_message=f"Unsupported format: {self.options.output_format}",
             )
 
-        self._cancelled.clear()
+        self._cancel_event.clear()
         prevent_sleep_start()
 
         try:
@@ -719,7 +723,7 @@ class TTSConverter:
 
             # Convert each chapter
             for chapter_idx, chapter in enumerate(chapters):
-                if self._cancelled.is_set():
+                if self._cancel_event.is_set():
                     state.save(state_file)
                     return ConversionResult(
                         success=False,
@@ -834,7 +838,7 @@ class TTSConverter:
                     ssmd_content,
                 )
 
-                if self._cancelled.is_set():
+                if self._cancel_event.is_set():
                     # Remove incomplete files
                     chapter_file.unlink(missing_ok=True)
                     ssmd_file.unlink(missing_ok=True)

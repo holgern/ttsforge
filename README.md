@@ -1,3 +1,8 @@
+[![PyPI - Version](https://img.shields.io/pypi/v/ttsforge)](https://pypi.org/project/ttsforge/)
+![PyPI - Python Version](https://img.shields.io/pypi/pyversions/ttsforge)
+![PyPI - Downloads](https://img.shields.io/pypi/dm/ttsforge)
+[![codecov](https://codecov.io/gh/holgern/ttsforge/graph/badge.svg?token=iCHXwbjAXG)](https://codecov.io/gh/holgern/ttsforge)
+
 # ttsforge
 
 Convert EPUB files to audiobooks using Kokoro ONNX TTS.

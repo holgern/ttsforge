@@ -263,9 +263,13 @@ class PhonemeConverter:
         self.options = options
         self.progress_callback = progress_callback
         self.log_callback = log_callback
-        self._cancelled = threading.Event()
+        self._cancel_event = threading.Event()
         self._runner: KokoroRunner | None = None
         self._merger = AudioMerger(log=self.log)
+
+    @property
+    def _cancelled(self) -> bool:
+        return self._cancel_event.is_set()
 
     def log(self, message: str, level: str = "info") -> None:
         """Log a message."""
@@ -274,7 +278,7 @@ class PhonemeConverter:
 
     def cancel(self) -> None:
         """Request cancellation of the conversion."""
-        self._cancelled.set()
+        self._cancel_event.set()
 
     def _phoneme_segments_to_ssmd(self, segments: list[PhonemeSegment]) -> str:
         """Build SSMD text from phoneme segments."""
@@ -462,7 +466,7 @@ class PhonemeConverter:
                     out_file.write(pause_audio)
                     duration += pause_duration
 
-            if not self._cancelled.is_set() and chapter.segments:
+            if not self._cancel_event.is_set() and chapter.segments:
                 # Single pipeline call for entire chapter
                 ssmd_text = self._phoneme_segments_to_ssmd(chapter.segments)
                 samples = self._runner.synthesize(
@@ -544,7 +548,7 @@ class PhonemeConverter:
                 error_message=f"Unsupported format: {self.options.output_format}",
             )
 
-        self._cancelled.clear()
+        self._cancel_event.clear()
         prevent_sleep_start()
 
         try:
@@ -670,7 +674,7 @@ class PhonemeConverter:
 
             # Convert each chapter
             for state_idx, chapter_state in enumerate(state.chapters):
-                if self._cancelled.is_set():
+                if self._cancel_event.is_set():
                     state.save(state_file)
                     return PhonemeConversionResult(
                         success=False,
@@ -724,7 +728,7 @@ class PhonemeConverter:
                     segments_before=segments_processed,
                 )
 
-                if self._cancelled.is_set():
+                if self._cancel_event.is_set():
                     # Remove incomplete file
                     chapter_file.unlink(missing_ok=True)
                     state.save(state_file)
@@ -832,7 +836,7 @@ class PhonemeConverter:
                 error_message=f"Unsupported format: {self.options.output_format}",
             )
 
-        self._cancelled.clear()
+        self._cancel_event.clear()
         prevent_sleep_start()
 
         try:
@@ -867,7 +871,7 @@ class PhonemeConverter:
             out_file, ffmpeg_proc = self._setup_output(output_path)
 
             for chapter_idx, chapter in enumerate(selected_chapters):
-                if self._cancelled.is_set():
+                if self._cancel_event.is_set():
                     break
 
                 progress.current_chapter = chapter_idx + 1
@@ -882,7 +886,7 @@ class PhonemeConverter:
                 chapter_start = current_time
 
                 total_chapter_segments = len(chapter.segments)
-                if not self._cancelled.is_set() and chapter.segments:
+                if not self._cancel_event.is_set() and chapter.segments:
                     assert self._runner is not None
                     lang_code = (
                         get_onnx_lang_code(self.options.lang)
@@ -944,7 +948,7 @@ class PhonemeConverter:
             # Finalize output
             self._finalize_output(out_file, ffmpeg_proc)
 
-            if self._cancelled.is_set():
+            if self._cancel_event.is_set():
                 # Clean up partial file
                 output_path.unlink(missing_ok=True)
                 return PhonemeConversionResult(success=False, error_message="Cancelled")
