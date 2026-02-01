@@ -307,7 +307,7 @@ class PhonemeConverter:
         """Set up output file or ffmpeg process based on format."""
         fmt = self.options.output_format
 
-        if fmt in ["wav", "mp3", "flac"]:
+        if fmt == "wav":
             out_file = sf.SoundFile(
                 str(output_path),
                 "w",
