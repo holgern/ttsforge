@@ -462,11 +462,27 @@ def create_process(
 
 def ensure_ffmpeg() -> bool:
     """
-    Ensure ffmpeg is available (system ffmpeg or static-ffmpeg).
+    Ensure ffmpeg is available.
 
+    Preference order:
+      1) System ffmpeg on PATH
+      2) Optional static-ffmpeg (if installed) via static_ffmpeg.add_paths()
+
+    You may also point to a custom ffmpeg via env var:
+      - TTSFORGE_FFMPEG=/full/path/to/ffmpeg   (or a directory containing
+         ffmpeg)
     Returns:
         True if ffmpeg is available
     """
+    # Allow explicit override without changing all call sites (they call "ffmpeg")
+    ffmpeg_env = os.environ.get("TTSFORGE_FFMPEG") or os.environ.get("FFMPEG")
+    if ffmpeg_env:
+        p = Path(ffmpeg_env)
+        if p.is_file():
+            os.environ["PATH"] = f"{p.parent}{os.pathsep}{os.environ.get('PATH', '')}"
+        elif p.is_dir():
+            os.environ["PATH"] = f"{p}{os.pathsep}{os.environ.get('PATH', '')}"
+
     if shutil.which("ffmpeg"):
         return True
 
@@ -485,9 +501,35 @@ def ensure_ffmpeg() -> bool:
         return True
 
     raise RuntimeError(
-        "ffmpeg is required but was not found. Install ffmpeg or add "
-        "static-ffmpeg (pip install static-ffmpeg)."
+        "ffmpeg is required but was not found on PATH. Install ffmpeg (recommended). "
+        "Optionally, on supported platforms, you can install prebuilt binaries via "
+        "'pip install \"ttsforge[static_ffmpeg]\"' (or 'pip install static-ffmpeg')."
     )
+
+
+def get_ffmpeg_path() -> str:
+    """
+    Return an absolute path to the ffmpeg executable.
+
+    Resolution order:
+      1) $TTSFORGE_FFMPEG (or $FFMPEG) if set (can be an absolute path or a command)
+      2) whatever is on PATH (after ensure_ffmpeg() has had a chance to add it)
+    """
+    override = os.environ.get("TTSFORGE_FFMPEG") or os.environ.get("FFMPEG")
+    if override:
+        p = Path(override).expanduser()
+        if p.is_file():
+            return str(p)
+        found = shutil.which(override)
+        if found:
+            return found
+
+    ensure_ffmpeg()
+    found = shutil.which("ffmpeg")
+    if not found:
+        # ensure_ffmpeg() should have raised already, but be defensive.
+        raise RuntimeError("ffmpeg is required but was not found.")
+    return found
 
 
 def load_tts_pipeline() -> tuple[Any, Any]:

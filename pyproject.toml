@@ -22,7 +22,6 @@ dependencies = [
     "epub2text",
     "numpy",
     "soundfile>=0.12.0",
-    "static-ffmpeg",
     "chardet",
     "charset-normalizer",
     "platformdirs>=3.0.0",
@@ -51,6 +50,9 @@ dev = [
     "pytest>=7.0.0",
     "ruff>=0.1.0",
     "mypy>=1.8.0",
+]
+static_ffmpeg = [
+    "static-ffmpeg>=3.0",
 ]
 gpu = [
     "onnxruntime-gpu>=1.16.0",

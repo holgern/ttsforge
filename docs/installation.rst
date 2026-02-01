@@ -22,6 +22,13 @@ ffmpeg (Required for M4B/OPUS)
 
 ffmpeg is required for M4B audiobook format and OPUS audio encoding.
 
+**Termux (Android):**
+
+.. code-block:: bash
+
+   pkg install ffmpeg
+
+
 **Ubuntu/Debian:**
 
 .. code-block:: bash
@@ -37,6 +44,15 @@ ffmpeg is required for M4B audiobook format and OPUS audio encoding.
 **Windows:**
 
 Download from https://ffmpeg.org/download.html and add to PATH.
+
+Optional: bundled ffmpeg via Python (not available on all platforms)
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If you cannot install a system ffmpeg, you can try the optional prebuilt binaries:
+
+.. code-block:: bash
+
+   pip install "ttsforge[static_ffmpeg]"
 
 espeak-ng (Required for Phonemization)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^

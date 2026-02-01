@@ -25,9 +25,9 @@ from .phonemes import PhonemeBook, PhonemeChapter, PhonemeSegment
 from .utils import (
     atomic_write_json,
     create_process,
-    ensure_ffmpeg,
     format_duration,
     format_filename_template,
+    get_ffmpeg_path,
     prevent_sleep_end,
     prevent_sleep_start,
     sanitize_filename,
@@ -314,10 +314,10 @@ class PhonemeConverter:
             return out_file, None
 
         # Formats requiring ffmpeg
-        ensure_ffmpeg()
+        ffmpeg = get_ffmpeg_path()
 
         cmd = [
-            "ffmpeg",
+            ffmpeg,
             "-y",
             "-thread_queue_size",
             "32768",

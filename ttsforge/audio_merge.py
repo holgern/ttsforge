@@ -9,7 +9,7 @@ import numpy as np
 import soundfile as sf
 
 from .constants import SAMPLE_RATE
-from .utils import create_process, ensure_ffmpeg
+from .utils import create_process, get_ffmpeg_path
 
 
 @dataclass(slots=True)
@@ -33,14 +33,14 @@ class AudioMerger:
     ) -> None:
         if len(chapters) <= 1:
             return
-        ensure_ffmpeg()
+        ffmpeg = get_ffmpeg_path()
 
         chapters_file = output_path.with_suffix(".chapters.txt")
         chapters_file.write_text(self._ffmetadata(chapters), encoding="utf-8")
 
         tmp_path = output_path.with_suffix(".tmp.m4b")
         cmd = [
-            "ffmpeg",
+            ffmpeg,
             "-y",
             "-i",
             str(output_path),
@@ -85,7 +85,7 @@ class AudioMerger:
         output_path: Path,
         meta: MergeMeta,
     ) -> None:
-        ensure_ffmpeg()
+        ffmpeg = get_ffmpeg_path()
 
         concat_file = output_path.with_suffix(".concat.txt")
         silence_file = output_path.parent / "_silence.wav"
@@ -99,7 +99,7 @@ class AudioMerger:
                 if i < len(chapter_files) - 1 and meta.silence_between_chapters > 0:
                     f.write(f"file '{silence_file.absolute()}'\n")
 
-        cmd = ["ffmpeg", "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file)]
+        cmd = [ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(concat_file)]
 
         if meta.fmt == "m4b":
             if meta.cover_image and meta.cover_image.exists():
