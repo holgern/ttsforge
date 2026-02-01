@@ -296,7 +296,7 @@ class TestPhonemeBook:
             assert path.exists()
 
             # Read and verify content
-            content = path.read_text()
+            content = path.read_text(encoding="utf-8")
             assert "# Test Book" in content
             assert "hello [həˈloʊ]" in content
             assert "world [wɜːld]" in content

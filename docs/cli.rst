@@ -53,6 +53,10 @@ Options
    ``p`` (Brazilian Portuguese), ``z`` (Mandarin Chinese).
    Default: auto-detected from EPUB metadata.
 
+``--lang LANG``
+   Override language for phonemization (e.g., ``de``, ``fr``, ``en-us``).
+   By default, language is determined from the voice.
+
 ``-s, --speed FLOAT``
    Speech speed multiplier (0.5 to 2.0). Default: ``1.0``.
 
@@ -66,11 +70,26 @@ Options
 ``--silence FLOAT``
    Silence duration between chapters in seconds. Default: ``2.0``.
 
-``--segment-pause-min FLOAT``
-   Minimum pause between segments (sentences) in seconds. Default: ``0.1``.
+``--pause-clause FLOAT``
+   Pause after clauses in seconds. Default: ``0.5``.
 
-``--segment-pause-max FLOAT``
-   Maximum pause between segments (sentences) in seconds. Default: ``0.3``.
+``--pause-sentence FLOAT``
+   Pause after sentences in seconds. Default: ``0.7``.
+
+``--pause-paragraph FLOAT``
+   Pause after paragraphs in seconds. Default: ``0.9``.
+
+``--pause-variance FLOAT``
+   Random variance added to pauses in seconds. Default: ``0.05``.
+
+``--pause-mode MODE``
+   Pause mode: ``tts``, ``manual``, or ``auto``. Default: ``auto``.
+
+``--announce-chapters / --no-announce-chapters``
+   Read chapter titles aloud before chapter content. Default: enabled.
+
+``--chapter-pause FLOAT``
+   Pause after chapter title announcement in seconds. Default: ``2.0``.
 
 ``--title TEXT``
    Title metadata for the audiobook. Defaults to EPUB title.
@@ -97,6 +116,12 @@ Options
 ``--fresh``
    Discard any previous progress and start conversion from scratch.
 
+``--generate-ssmd``
+   Generate only SSMD files without creating audio (for manual editing).
+
+``--detect-emphasis / --no-detect-emphasis``
+   Detect emphasis (italic/bold) from EPUB HTML. Default: disabled.
+
 ``--keep-chapters``
    Keep individual chapter audio files after conversion.
 
@@ -109,6 +134,12 @@ Options
 
 ``--voice-db PATH``
    Path to custom voice database (SQLite).
+
+``--phoneme-dict PATH``
+   Path to custom phoneme dictionary JSON file for pronunciation overrides.
+
+``--phoneme-dict-case-sensitive``
+   Make phoneme dictionary matching case-sensitive (default: case-insensitive).
 
 ``--use-mixed-language``
    Enable mixed-language support (auto-detect multiple languages in text).
@@ -246,6 +277,9 @@ Options
 ``-l, --language LANG``
    Language for TTS.
 
+``--lang LANG``
+   Override language for phonemization (e.g., ``de``, ``fr``, ``en-us``).
+
 ``-s, --speed FLOAT``
    Speech speed. Default: ``1.0``.
 
@@ -258,6 +292,11 @@ Options
 ``--verbose``
    Show detailed output.
 
+``-p, --play``
+   Play audio directly (also saves to file if ``-o`` specified).
+
+   **Note:** Playback requires the optional ``ttsforge[audio]`` extra.
+
 ``--use-mixed-language``
    Enable mixed-language support (auto-detect multiple languages in text).
 
@@ -269,6 +308,12 @@ Options
 
 ``--mixed-language-confidence FLOAT``
    Detection confidence threshold (0.0-1.0). Default: ``0.7``.
+
+``--phoneme-dict PATH``
+   Path to custom phoneme dictionary JSON file for pronunciation overrides.
+
+``--phoneme-dict-case-sensitive``
+   Make phoneme dictionary matching case-sensitive (default: case-insensitive).
 
 Examples
 ^^^^^^^^
@@ -286,10 +331,99 @@ Examples
 
    # Mixed-language sample
    ttsforge sample \
-       "Das ist ein Test. This is a test." \
-       --use-mixed-language \
-       --mixed-language-primary de \
-       --mixed-language-allowed de,en-us
+      "Das ist ein Test. This is a test." \
+      --use-mixed-language \
+      --mixed-language-primary de \
+      --mixed-language-allowed de,en-us
+
+
+read
+----
+
+Stream playback from an EPUB or text file (no output files).
+
+.. code-block:: bash
+
+   ttsforge read [INPUT_FILE] [OPTIONS]
+
+Arguments
+^^^^^^^^^
+
+``INPUT_FILE``
+   Path to EPUB/TXT file, or ``-`` to read from stdin. If omitted, reads stdin.
+
+Options
+^^^^^^^
+
+``-v, --voice VOICE``
+   TTS voice to use.
+
+``-l, --language LANG``
+   Language for TTS.
+
+``-s, --speed FLOAT``
+   Speech speed. Default: ``1.0``.
+
+``--gpu / --no-gpu``
+   Enable or disable GPU acceleration.
+
+``--mode MODE``
+   Content mode: ``chapters`` or ``pages``.
+
+``-c, --chapters SELECTION``
+   Chapter selection for ``chapters`` mode.
+
+``-p, --pages SELECTION``
+   Page selection for ``pages`` mode.
+
+``--start-chapter INT``
+   Start from specific chapter number (1-indexed).
+
+``--start-page INT``
+   Start from specific page number (1-indexed).
+
+``--page-size INT``
+   Synthetic page size in characters (default: 2000).
+
+``--resume``
+   Resume from last saved position.
+
+``--list``
+   List chapters/pages and exit without reading.
+
+``--split MODE``
+   Text splitting mode: ``sentence`` or ``paragraph``.
+
+``--pause-clause FLOAT``
+   Pause after clauses in seconds.
+
+``--pause-sentence FLOAT``
+   Pause after sentences in seconds.
+
+``--pause-paragraph FLOAT``
+   Pause after paragraphs in seconds.
+
+``--pause-variance FLOAT``
+   Random variance added to pauses in seconds.
+
+``--pause-mode MODE``
+   Pause mode: ``tts``, ``manual``, or ``auto``.
+
+**Note:** Playback requires the optional ``ttsforge[audio]`` extra.
+
+Examples
+^^^^^^^^
+
+.. code-block:: bash
+
+   # Read an EPUB aloud
+   ttsforge read book.epub
+
+   # Read pages 1-10
+   ttsforge read book.epub --mode pages --pages 1-10
+
+   # Resume from last position
+   ttsforge read book.epub --resume
 
 
 voices
@@ -358,6 +492,17 @@ Options
 
 ``--separate``
    Save each voice as a separate file instead of concatenating.
+
+``--blend SPEC``
+   Voice blend to demo (e.g., ``af_nicole:50,am_michael:50``).
+
+``--blend-presets``
+   Demo a curated set of voice blend combinations.
+
+``-p, --play``
+   Play audio directly instead of only saving files.
+
+   **Note:** Playback requires the optional ``ttsforge[audio]`` extra.
 
 Examples
 ^^^^^^^^
@@ -550,11 +695,26 @@ Options
 ``--silence FLOAT``
    Silence between chapters. Default: ``2.0``.
 
-``--segment-pause-min FLOAT``
-   Minimum pause between segments. Default: ``0.1``.
+``--pause-clause FLOAT``
+   Pause after clauses in seconds. Default: ``0.5``.
 
-``--segment-pause-max FLOAT``
-   Maximum pause between segments. Default: ``0.3``.
+``--pause-sentence FLOAT``
+   Pause after sentences in seconds. Default: ``0.7``.
+
+``--pause-paragraph FLOAT``
+   Pause after paragraphs in seconds. Default: ``0.9``.
+
+``--pause-variance FLOAT``
+   Random variance added to pauses in seconds. Default: ``0.05``.
+
+``--pause-mode MODE``
+   Pause mode: ``tts``, ``manual``, or ``auto``. Default: ``auto``.
+
+``--announce-chapters / --no-announce-chapters``
+   Read chapter titles aloud before chapter content. Default: enabled.
+
+``--chapter-pause FLOAT``
+   Pause after chapter title announcement in seconds. Default: ``2.0``.
 
 ``--chapters SELECTION``
    Select chapters to convert.
@@ -644,6 +804,8 @@ Options
 
 ``--play``
    Generate and play audio preview of the phonemes.
+
+   **Note:** Playback requires the optional ``ttsforge[audio]`` extra.
 
 ``--tokens``
    Show token IDs in addition to phonemes.

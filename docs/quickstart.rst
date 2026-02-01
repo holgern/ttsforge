@@ -183,6 +183,28 @@ Generate a sample to test your settings:
    # With specific voice and speed
    ttsforge sample --voice am_adam --speed 1.1
 
+   # Play directly (requires audio extra)
+   ttsforge sample --play
+
+
+Streaming Read (Optional)
+-------------------------
+
+Listen to an EPUB or text file in real-time with the ``read`` command.
+This requires the optional audio playback extra:
+
+.. code-block:: bash
+
+   pip install "ttsforge[audio]"
+
+.. code-block:: bash
+
+   # Read an EPUB aloud
+   ttsforge read mybook.epub
+
+   # Read a text file
+   ttsforge read story.txt
+
 
 Voice Demo
 ----------

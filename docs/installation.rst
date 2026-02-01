@@ -17,10 +17,10 @@ Dependencies
 
 ttsforge requires the following external tools:
 
-ffmpeg (Required for M4B/OPUS)
+ffmpeg (Required for MP3/FLAC/OPUS/M4B)
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
-ffmpeg is required for M4B audiobook format and OPUS audio encoding.
+ffmpeg is required for MP3/FLAC/OPUS/M4B output and chapter merging.
 
 **Termux (Android):**
 
@@ -75,6 +75,22 @@ espeak-ng is used for text-to-phoneme conversion.
 
 Download from https://github.com/espeak-ng/espeak-ng/releases
 
+Audio Playback (Optional)
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Audio playback features (``--play`` flags and the ``read`` command) require
+``sounddevice``:
+
+.. code-block:: bash
+
+   pip install "ttsforge[audio]"
+
+Or install directly:
+
+.. code-block:: bash
+
+   pip install sounddevice
+
 
 Installing ttsforge
 -------------------
@@ -85,6 +101,19 @@ From PyPI (Recommended)
 .. code-block:: bash
 
    pip install ttsforge
+
+Optional extras:
+
+.. code-block:: bash
+
+   # Audio playback (required for --play and read)
+   pip install "ttsforge[audio]"
+
+   # Bundled ffmpeg binaries
+   pip install "ttsforge[static_ffmpeg]"
+
+   # GPU acceleration
+   pip install "ttsforge[gpu]"
 
 From Source
 ^^^^^^^^^^^

@@ -36,6 +36,7 @@ Features
 - **GPU Acceleration**: Optional GPU support for faster processing
 - **Chapter Selection**: Convert specific chapters or chapter ranges
 - **Metadata Support**: Automatic language detection and metadata embedding
+- **Streaming Read**: Real-time playback with the ``read`` command (optional audio extra)
 
 
 Quick Example
@@ -79,9 +80,10 @@ Requirements
 ------------
 
 - Python 3.10 or later
-- ffmpeg (required for M4B and OPUS formats)
+- ffmpeg (required for MP3/FLAC/OPUS/M4B output and chapter merging)
 - espeak-ng (for phonemization)
 - ~330MB disk space for ONNX models (downloaded automatically)
+- sounddevice (optional, for playback features)
 
 
 License

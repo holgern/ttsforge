@@ -376,31 +376,32 @@ class TestHashFunctions:
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f:
             f.write("Test content")
             f.flush()
-            try:
-                hash1 = _hash_file(Path(f.name))
-                hash2 = _hash_file(Path(f.name))
-                assert hash1 == hash2
-                assert len(hash1) == 12  # First 12 chars of MD5
-            finally:
-                Path(f.name).unlink()
+            temp_path = Path(f.name)
+        try:
+            hash1 = _hash_file(temp_path)
+            hash2 = _hash_file(temp_path)
+            assert hash1 == hash2
+            assert len(hash1) == 12  # First 12 chars of MD5
+        finally:
+            temp_path.unlink()
 
     def test_hash_file_different_content(self):
         """Different files should produce different hashes."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f1:
             f1.write("Content 1")
             f1.flush()
-            with tempfile.NamedTemporaryFile(
-                mode="w", suffix=".txt", delete=False
-            ) as f2:
-                f2.write("Content 2")
-                f2.flush()
-                try:
-                    hash1 = _hash_file(Path(f1.name))
-                    hash2 = _hash_file(Path(f2.name))
-                    assert hash1 != hash2
-                finally:
-                    Path(f1.name).unlink()
-                    Path(f2.name).unlink()
+            temp_path1 = Path(f1.name)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as f2:
+            f2.write("Content 2")
+            f2.flush()
+            temp_path2 = Path(f2.name)
+        try:
+            hash1 = _hash_file(temp_path1)
+            hash2 = _hash_file(temp_path2)
+            assert hash1 != hash2
+        finally:
+            temp_path1.unlink()
+            temp_path2.unlink()
 
     def test_hash_file_nonexistent(self):
         """Should return empty string for nonexistent file."""

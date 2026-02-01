@@ -64,6 +64,13 @@ Voice and Language Settings
    - Choices: ``a``, ``b``, ``e``, ``f``, ``h``, ``i``, ``j``, ``p``, ``z``
    - Example: ``ttsforge config --set default_language b``
 
+``phonemization_lang``
+   Override language for phonemization (e.g., ``de``, ``fr``, ``en-us``).
+
+   - Type: string or null
+   - Default: ``None``
+   - Example: ``ttsforge config --set phonemization_lang de``
+
 ``default_speed``
    Default speech speed multiplier.
 
@@ -94,6 +101,22 @@ Processing Settings
    - Requires: ``onnxruntime-gpu`` package
    - Example: ``ttsforge config --set use_gpu true``
 
+``model_quality``
+   ONNX model quality/quantization.
+
+   - Type: string
+   - Default: ``fp32``
+   - Choices: ``fp32``, ``fp16``, ``q8``, ``q8f16``, ``q4``, ``q4f16``, ``uint8``, ``uint8f16``
+   - Example: ``ttsforge config --set model_quality fp16``
+
+``model_variant``
+   Model variant to download.
+
+   - Type: string
+   - Default: ``v1.0``
+   - Choices: ``v1.0``, ``v1.1-zh``, ``v1.1-de``
+   - Example: ``ttsforge config --set model_variant v1.1-de``
+
 ``auto_detect_language``
    Automatically detect language from EPUB metadata.
 
@@ -108,6 +131,23 @@ Processing Settings
    - Default: ``auto``
    - Choices: ``auto``, ``line``, ``paragraph``, ``sentence``, ``clause``
    - Example: ``ttsforge config --set default_split_mode sentence``
+
+Read Settings
+^^^^^^^^^^^^^
+
+``default_content_mode``
+   Default content mode for ``read`` (``chapters`` or ``pages``).
+
+   - Type: string
+   - Default: ``chapters``
+   - Example: ``ttsforge config --set default_content_mode pages``
+
+``default_page_size``
+   Synthetic page size in characters for ``read`` pages mode.
+
+   - Type: integer
+   - Default: ``2000``
+   - Example: ``ttsforge config --set default_page_size 2500``
 
 Mixed-Language Settings
 ^^^^^^^^^^^^^^^^^^^^^^^
@@ -155,34 +195,57 @@ Audio Timing Settings
    - Default: ``2.0``
    - Example: ``ttsforge config --set silence_between_chapters 3.0``
 
-``segment_pause_min``
-   Minimum pause between segments (sentences) in seconds.
-
-   - Type: float
-   - Default: ``0.1``
-   - Example: ``ttsforge config --set segment_pause_min 0.15``
-
-``segment_pause_max``
-   Maximum pause between segments (sentences) in seconds.
-
-   - Type: float
-   - Default: ``0.3``
-   - Example: ``ttsforge config --set segment_pause_max 0.5``
-
-``paragraph_pause_min``
-   Minimum pause between paragraphs in seconds. Paragraph pauses are typically
-   longer than sentence pauses to create natural breaks in the audio.
+``pause_clause``
+   Pause after clauses in seconds.
 
    - Type: float
    - Default: ``0.5``
-   - Example: ``ttsforge config --set paragraph_pause_min 0.6``
+   - Example: ``ttsforge config --set pause_clause 0.4``
 
-``paragraph_pause_max``
-   Maximum pause between paragraphs in seconds.
+``pause_sentence``
+   Pause after sentences in seconds.
 
    - Type: float
-   - Default: ``1.0``
-   - Example: ``ttsforge config --set paragraph_pause_max 1.5``
+   - Default: ``0.7``
+   - Example: ``ttsforge config --set pause_sentence 0.6``
+
+``pause_paragraph``
+   Pause after paragraphs in seconds.
+
+   - Type: float
+   - Default: ``0.9``
+   - Example: ``ttsforge config --set pause_paragraph 1.1``
+
+``pause_variance``
+   Random variance added to pause durations in seconds.
+
+   - Type: float
+   - Default: ``0.05``
+   - Example: ``ttsforge config --set pause_variance 0.08``
+
+``pause_mode``
+   Pause mode: ``tts``, ``manual``, or ``auto``.
+
+   - Type: string
+   - Default: ``auto``
+   - Example: ``ttsforge config --set pause_mode manual``
+
+Chapter Announcement Settings
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+``announce_chapters``
+   Read chapter titles aloud before chapter content.
+
+   - Type: boolean
+   - Default: ``true``
+   - Example: ``ttsforge config --set announce_chapters false``
+
+``chapter_pause_after_title``
+   Pause duration after the chapter title announcement in seconds.
+
+   - Type: float
+   - Default: ``2.0``
+   - Example: ``ttsforge config --set chapter_pause_after_title 1.5``
 
 File Output Settings
 ^^^^^^^^^^^^^^^^^^^^
@@ -266,26 +329,46 @@ Complete Configuration Reference
      - boolean
      - ``false``
      - Enable GPU acceleration
+   * - ``model_quality``
+     - string
+     - ``fp32``
+     - Model quality/quantization
+   * - ``model_variant``
+     - string
+     - ``v1.0``
+     - Model variant
    * - ``silence_between_chapters``
      - float
      - ``2.0``
      - Silence between chapters (seconds)
-   * - ``segment_pause_min``
-     - float
-     - ``0.1``
-     - Minimum segment pause (seconds)
-   * - ``segment_pause_max``
-     - float
-     - ``0.3``
-     - Maximum segment pause (seconds)
-   * - ``paragraph_pause_min``
+   * - ``pause_clause``
      - float
      - ``0.5``
-     - Minimum paragraph pause (seconds)
-   * - ``paragraph_pause_max``
+     - Clause pause (seconds)
+   * - ``pause_sentence``
      - float
-     - ``1.0``
-     - Maximum paragraph pause (seconds)
+     - ``0.7``
+     - Sentence pause (seconds)
+   * - ``pause_paragraph``
+     - float
+     - ``0.9``
+     - Paragraph pause (seconds)
+   * - ``pause_variance``
+     - float
+     - ``0.05``
+     - Pause variance (seconds)
+   * - ``pause_mode``
+     - string
+     - ``auto``
+     - Pause mode (tts/manual/auto)
+   * - ``announce_chapters``
+     - boolean
+     - ``true``
+     - Speak chapter titles
+   * - ``chapter_pause_after_title``
+     - float
+     - ``2.0``
+     - Pause after chapter titles (seconds)
    * - ``save_chapters_separately``
      - boolean
      - ``false``
@@ -298,10 +381,22 @@ Complete Configuration Reference
      - boolean
      - ``true``
      - Auto-detect language from EPUB
+   * - ``phonemization_lang``
+     - string/null
+     - ``None``
+     - Override phonemization language
    * - ``default_split_mode``
      - string
      - ``auto``
      - Text splitting mode
+   * - ``default_content_mode``
+     - string
+     - ``chapters``
+     - Default read mode (chapters/pages)
+   * - ``default_page_size``
+     - integer
+     - ``2000``
+     - Page size for read pages mode
    * - ``output_filename_template``
      - string
      - ``{book_title}``
@@ -349,18 +444,26 @@ Here's an example ``config.json`` with custom settings:
      "default_speed": 1.1,
      "default_format": "m4b",
      "use_gpu": true,
-     "silence_between_chapters": 2.5,
-     "segment_pause_min": 0.1,
-     "segment_pause_max": 0.3,
-     "paragraph_pause_min": 0.5,
-     "paragraph_pause_max": 1.0,
-     "save_chapters_separately": false,
-     "merge_at_end": true,
-     "auto_detect_language": true,
-     "default_split_mode": "sentence",
-     "output_filename_template": "{author} - {book_title}",
-     "chapter_filename_template": "{chapter_num:03d}_{chapter_title}",
-     "phoneme_export_template": "{book_title}",
+     "model_quality": "fp32",
+     "model_variant": "v1.0",
+      "silence_between_chapters": 2.5,
+     "pause_clause": 0.5,
+     "pause_sentence": 0.7,
+     "pause_paragraph": 0.9,
+     "pause_variance": 0.05,
+     "pause_mode": "auto",
+     "announce_chapters": true,
+     "chapter_pause_after_title": 2.0,
+      "save_chapters_separately": false,
+      "merge_at_end": true,
+      "auto_detect_language": true,
+     "phonemization_lang": null,
+      "default_split_mode": "sentence",
+     "default_content_mode": "chapters",
+     "default_page_size": 2000,
+      "output_filename_template": "{author} - {book_title}",
+      "chapter_filename_template": "{chapter_num:03d}_{chapter_title}",
+      "phoneme_export_template": "{book_title}",
      "default_title": "Untitled",
      "use_mixed_language": false,
      "mixed_language_primary": null,

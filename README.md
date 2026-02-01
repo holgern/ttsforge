@@ -25,6 +25,7 @@ with support for 54 neural voices across 9 languages.
 - **Voice Blending**: Mix multiple voices for custom narration
 - **GPU Acceleration**: Optional CUDA support for faster processing
 - **Chapter Support**: M4B files include chapter markers from EPUB
+- **Streaming Read**: Listen to EPUB/text directly with the `read` command
 
 ## Installation
 
@@ -32,10 +33,24 @@ with support for 54 neural voices across 9 languages.
 pip install ttsforge
 ```
 
+Optional extras:
+
+```bash
+# Audio playback (required for --play and read)
+pip install "ttsforge[audio]"
+
+# Bundled ffmpeg (if you cannot install system ffmpeg)
+pip install "ttsforge[static_ffmpeg]"
+
+# GPU acceleration (CUDA)
+pip install "ttsforge[gpu]"
+```
+
 ### Dependencies
 
-- **ffmpeg**: Required for M4B and OPUS formats
+- **ffmpeg**: Required for MP3/FLAC/OPUS/M4B output and chapter merging
 - **espeak-ng**: Required for phonemization
+- **sounddevice (optional)**: Required for audio playback (`--play`, `read`)
 
 **Ubuntu/Debian:**
 
@@ -66,6 +81,9 @@ ttsforge voices
 
 # Generate a voice demo
 ttsforge demo
+
+# Read an EPUB aloud (streaming playback)
+ttsforge read book.epub
 ```
 
 ## Usage
@@ -492,6 +510,7 @@ To find the correct IPA phonemes for a word:
 | `list`             | List chapters in EPUB                |
 | `info`             | Show EPUB metadata                   |
 | `sample`           | Generate sample audio                |
+| `read`             | Stream playback from EPUB/text       |
 | `voices`           | List available voices                |
 | `demo`             | Generate voice demo                  |
 | `extract-names`    | Extract names for phoneme dictionary |
@@ -520,23 +539,31 @@ ttsforge convert book.epub --gpu
 
 ## Configuration Options
 
-| Option                      | Default        | Description                     |
-| --------------------------- | -------------- | ------------------------------- |
-| `default_voice`             | `af_heart`     | Default TTS voice               |
-| `default_language`          | `a`            | Default language code           |
-| `default_speed`             | `1.0`          | Speech speed (0.5-2.0)          |
-| `default_format`            | `m4b`          | Output format                   |
-| `use_gpu`                   | `false`        | Enable GPU acceleration         |
-| `silence_between_chapters`  | `2.0`          | Chapter gap (seconds)           |
-| `segment_pause_min`         | `0.1`          | Min sentence pause              |
-| `segment_pause_max`         | `0.3`          | Max sentence pause              |
-| `paragraph_pause_min`       | `0.5`          | Min paragraph pause             |
-| `paragraph_pause_max`       | `1.0`          | Max paragraph pause             |
-| `output_filename_template`  | `{book_title}` | Output filename template        |
-| `use_mixed_language`        | `false`        | Enable mixed-language mode      |
-| `mixed_language_primary`    | `None`         | Primary language for mixed mode |
-| `mixed_language_allowed`    | `None`         | Allowed languages (list)        |
-| `mixed_language_confidence` | `0.7`          | Language detection threshold    |
+| Option                      | Default        | Description                          |
+| --------------------------- | -------------- | ------------------------------------ |
+| `default_voice`             | `af_heart`     | Default TTS voice                    |
+| `default_language`          | `a`            | Default language code                |
+| `default_speed`             | `1.0`          | Speech speed (0.5-2.0)               |
+| `default_format`            | `m4b`          | Output format                        |
+| `use_gpu`                   | `false`        | Enable GPU acceleration              |
+| `model_quality`             | `fp32`         | Model quality/quantization           |
+| `model_variant`             | `v1.0`         | Model variant                        |
+| `silence_between_chapters`  | `2.0`          | Chapter gap (seconds)                |
+| `pause_clause`              | `0.5`          | Clause pause (seconds)               |
+| `pause_sentence`            | `0.7`          | Sentence pause (seconds)             |
+| `pause_paragraph`           | `0.9`          | Paragraph pause (seconds)            |
+| `pause_variance`            | `0.05`         | Pause variance (seconds)             |
+| `pause_mode`                | `auto`         | Pause mode (`tts`, `manual`, `auto`) |
+| `announce_chapters`         | `true`         | Speak chapter titles                 |
+| `chapter_pause_after_title` | `2.0`          | Pause after chapter title            |
+| `phonemization_lang`        | `None`         | Override phonemization language      |
+| `output_filename_template`  | `{book_title}` | Output filename template             |
+| `default_content_mode`      | `chapters`     | `read` mode (`chapters`/`pages`)     |
+| `default_page_size`         | `2000`         | Page size for `read` pages mode      |
+| `use_mixed_language`        | `false`        | Enable mixed-language mode           |
+| `mixed_language_primary`    | `None`         | Primary language for mixed mode      |
+| `mixed_language_allowed`    | `None`         | Allowed languages (list)             |
+| `mixed_language_confidence` | `0.7`          | Language detection threshold         |
 
 ## Documentation
 
@@ -553,9 +580,10 @@ make html
 ## Requirements
 
 - Python 3.10+
-- ffmpeg (for M4B/OPUS)
+- ffmpeg (for MP3/FLAC/OPUS/M4B output and chapter merging)
 - espeak-ng (for phonemization)
 - ~330MB disk space (ONNX models)
+- sounddevice (optional, for audio playback)
 
 ## License
 
