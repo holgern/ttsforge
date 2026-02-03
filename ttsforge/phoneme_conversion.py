@@ -15,6 +15,14 @@ from typing import Any, Literal, Optional, cast
 
 import numpy as np
 import soundfile as sf
+from pykokoro.onnx_backend import (
+    DEFAULT_MODEL_QUALITY,
+    DEFAULT_MODEL_SOURCE,
+    DEFAULT_MODEL_VARIANT,
+    ModelQuality,
+    ModelSource,
+    ModelVariant,
+)
 
 from .audio_merge import AudioMerger, MergeMeta
 from .chapter_selection import parse_chapter_selection
@@ -94,12 +102,16 @@ class PhonemeConversionState:
     voice: str = ""
     speed: float = 1.0
     output_format: str = "m4b"
+    model_quality: ModelQuality | None = DEFAULT_MODEL_QUALITY
+    model_source: ModelSource = DEFAULT_MODEL_SOURCE
+    model_variant: ModelVariant = DEFAULT_MODEL_VARIANT
     silence_between_chapters: float = 2.0
     pause_clause: float = 0.3
     pause_sentence: float = 0.5
     pause_paragraph: float = 0.9
     pause_variance: float = 0.05
     pause_mode: str = "auto"
+    enable_short_sentence: bool | None = None
     lang: str | None = None  # Language override for phonemization
     chapters: list[PhonemeChapterState] = field(default_factory=list)
     started_at: str = ""
@@ -154,8 +166,16 @@ class PhonemeConversionState:
                 data["pause_variance"] = 0.05
             if "pause_mode" not in data:
                 data["pause_mode"] = "auto"
+            if "enable_short_sentence" not in data:
+                data["enable_short_sentence"] = None
             if "lang" not in data:
                 data["lang"] = None
+            if "model_quality" not in data:
+                data["model_quality"] = DEFAULT_MODEL_QUALITY
+            if "model_source" not in data:
+                data["model_source"] = DEFAULT_MODEL_SOURCE
+            if "model_variant" not in data:
+                data["model_variant"] = DEFAULT_MODEL_VARIANT
 
             return cls(**data)
         except (json.JSONDecodeError, TypeError, KeyError):
@@ -172,12 +192,16 @@ class PhonemeConversionState:
             "voice": self.voice,
             "speed": self.speed,
             "output_format": self.output_format,
+            "model_quality": self.model_quality,
+            "model_source": self.model_source,
+            "model_variant": self.model_variant,
             "silence_between_chapters": self.silence_between_chapters,
             "pause_clause": self.pause_clause,
             "pause_sentence": self.pause_sentence,
             "pause_paragraph": self.pause_paragraph,
             "pause_variance": self.pause_variance,
             "pause_mode": self.pause_mode,
+            "enable_short_sentence": self.enable_short_sentence,
             "lang": self.lang,
             "chapters": [
                 {
@@ -215,6 +239,7 @@ class PhonemeConversionOptions:
     pause_paragraph: float = 0.9  # For paragraph boundaries
     pause_variance: float = 0.05  # Standard deviation for natural variation
     pause_mode: str = "auto"  # "tts", "manual", or "auto"
+    enable_short_sentence: bool | None = None  # Enable short sentence handling
     # Chapter announcement settings
     announce_chapters: bool = True  # Read chapter titles aloud before content
     chapter_pause_after_title: float = 2.0  # Pause after chapter title (seconds)
@@ -235,6 +260,9 @@ class PhonemeConversionOptions:
     # Filename template for chapter files
     chapter_filename_template: str = "{chapter_num:03d}_{book_title}_{chapter_title}"
     # Custom ONNX model path (None = use default downloaded model)
+    model_quality: ModelQuality | None = DEFAULT_MODEL_QUALITY
+    model_source: ModelSource = DEFAULT_MODEL_SOURCE
+    model_variant: ModelVariant = DEFAULT_MODEL_VARIANT
     model_path: Path | None = None
     # Custom voices.bin path (None = use default downloaded voices)
     voices_path: Path | None = None
@@ -583,6 +611,11 @@ class PhonemeConverter:
                         or state.pause_paragraph != self.options.pause_paragraph
                         or state.pause_variance != self.options.pause_variance
                         or state.pause_mode != self.options.pause_mode
+                        or state.enable_short_sentence
+                        != self.options.enable_short_sentence
+                        or state.model_quality != self.options.model_quality
+                        or state.model_source != self.options.model_source
+                        or state.model_variant != self.options.model_variant
                     ):
                         self.log(
                             f"Restoring settings from previous session: "
@@ -592,7 +625,11 @@ class PhonemeConverter:
                             f"pause_sentence={state.pause_sentence}s, "
                             f"pause_paragraph={state.pause_paragraph}s, "
                             f"pause_variance={state.pause_variance}s, "
-                            f"pause_mode={state.pause_mode}",
+                            f"pause_mode={state.pause_mode}, "
+                            f"enable_short_sentence={state.enable_short_sentence}, "
+                            f"model_source={state.model_source}, "
+                            f"model_variant={state.model_variant}, "
+                            f"model_quality={state.model_quality}",
                             "info",
                         )
                         # Apply saved settings for consistency
@@ -607,6 +644,10 @@ class PhonemeConverter:
                         self.options.pause_paragraph = state.pause_paragraph
                         self.options.pause_variance = state.pause_variance
                         self.options.pause_mode = state.pause_mode
+                        self.options.enable_short_sentence = state.enable_short_sentence
+                        self.options.model_quality = state.model_quality
+                        self.options.model_source = state.model_source
+                        self.options.model_variant = state.model_variant
 
             if state is None:
                 # Create new state
@@ -617,12 +658,16 @@ class PhonemeConverter:
                     voice=self.options.voice,
                     speed=self.options.speed,
                     output_format=self.options.output_format,
+                    model_quality=self.options.model_quality,
+                    model_source=self.options.model_source,
+                    model_variant=self.options.model_variant,
                     silence_between_chapters=self.options.silence_between_chapters,
                     pause_clause=self.options.pause_clause,
                     pause_sentence=self.options.pause_sentence,
                     pause_paragraph=self.options.pause_paragraph,
                     pause_variance=self.options.pause_variance,
                     pause_mode=self.options.pause_mode,
+                    enable_short_sentence=self.options.enable_short_sentence,
                     chapters=[
                         PhonemeChapterState(
                             index=idx,
@@ -648,6 +693,9 @@ class PhonemeConverter:
                 pause_sentence=self.options.pause_sentence,
                 pause_paragraph=self.options.pause_paragraph,
                 pause_variance=self.options.pause_variance,
+                model_quality=self.options.model_quality,
+                model_source=self.options.model_source,
+                model_variant=self.options.model_variant,
                 model_path=self.options.model_path,
                 voices_path=self.options.voices_path,
                 voice_blend=self.options.voice_blend,
@@ -848,6 +896,9 @@ class PhonemeConverter:
                 pause_sentence=self.options.pause_sentence,
                 pause_paragraph=self.options.pause_paragraph,
                 pause_variance=self.options.pause_variance,
+                model_quality=self.options.model_quality,
+                model_source=self.options.model_source,
+                model_variant=self.options.model_variant,
                 model_path=self.options.model_path,
                 voices_path=self.options.voices_path,
                 voice_blend=self.options.voice_blend,

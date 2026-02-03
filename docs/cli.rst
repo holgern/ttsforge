@@ -85,6 +85,9 @@ Options
 ``--pause-mode MODE``
    Pause mode: ``tts``, ``manual``, or ``auto``. Default: ``auto``.
 
+``--enable-short-sentence``
+   Enable special handling for short sentences (less than 5 words).
+
 ``--announce-chapters / --no-announce-chapters``
    Read chapter titles aloud before chapter content. Default: enabled.
 

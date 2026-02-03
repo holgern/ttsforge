@@ -11,6 +11,14 @@ from pathlib import Path
 from typing import Any, Literal, Optional, cast
 
 import soundfile as sf
+from pykokoro.onnx_backend import (
+    DEFAULT_MODEL_QUALITY,
+    DEFAULT_MODEL_SOURCE,
+    DEFAULT_MODEL_VARIANT,
+    ModelQuality,
+    ModelSource,
+    ModelVariant,
+)
 
 from .audio_merge import AudioMerger, MergeMeta
 from .constants import (
@@ -123,12 +131,16 @@ class ConversionState:
     speed: float = 1.0
     split_mode: str = "auto"
     output_format: str = "m4b"
+    model_quality: ModelQuality | None = DEFAULT_MODEL_QUALITY
+    model_source: ModelSource = DEFAULT_MODEL_SOURCE
+    model_variant: ModelVariant = DEFAULT_MODEL_VARIANT
     silence_between_chapters: float = 2.0
     pause_clause: float = 0.3
     pause_sentence: float = 0.5
     pause_paragraph: float = 0.9
     pause_variance: float = 0.05
     pause_mode: str = "auto"  # "tts", "manual", or "auto
+    enable_short_sentence: bool | None = None
     lang: str | None = None  # Language override for phonemization
     chapters: list[ChapterState] = field(default_factory=list)
     started_at: str = ""
@@ -183,8 +195,16 @@ class ConversionState:
                 data["pause_variance"] = 0.05
             if "pause_mode" not in data:
                 data["pause_mode"] = "auto"
+            if "enable_short_sentence" not in data:
+                data["enable_short_sentence"] = None
             if "lang" not in data:
                 data["lang"] = None
+            if "model_quality" not in data:
+                data["model_quality"] = DEFAULT_MODEL_QUALITY
+            if "model_source" not in data:
+                data["model_source"] = DEFAULT_MODEL_SOURCE
+            if "model_variant" not in data:
+                data["model_variant"] = DEFAULT_MODEL_VARIANT
 
             return cls(**data)
         except (json.JSONDecodeError, TypeError, KeyError):
@@ -204,12 +224,16 @@ class ConversionState:
             "speed": self.speed,
             "split_mode": self.split_mode,
             "output_format": self.output_format,
+            "model_quality": self.model_quality,
+            "model_source": self.model_source,
+            "model_variant": self.model_variant,
             "silence_between_chapters": self.silence_between_chapters,
             "pause_clause": self.pause_clause,
             "pause_sentence": self.pause_sentence,
             "pause_paragraph": self.pause_paragraph,
             "pause_variance": self.pause_variance,
             "pause_mode": self.pause_mode,
+            "enable_short_sentence": self.enable_short_sentence,
             "lang": self.lang,
             "chapters": [
                 {
@@ -294,6 +318,7 @@ class ConversionOptions:
     pause_paragraph: float = 0.9  # For paragraph boundaries
     pause_variance: float = 0.05  # Standard deviation for natural variation
     pause_mode: str = "auto"  # "tts", "manual", or "auto
+    enable_short_sentence: bool | None = None  # Enable short sentence handling
     # Chapter announcement settings
     announce_chapters: bool = True  # Read chapter titles aloud before content
     chapter_pause_after_title: float = 2.0  # Pause after chapter title (seconds)
@@ -315,6 +340,9 @@ class ConversionOptions:
     # Filename template for chapter files
     chapter_filename_template: str = "{chapter_num:03d}_{book_title}_{chapter_title}"
     # Custom ONNX model path (None = use default downloaded model)
+    model_quality: ModelQuality | None = DEFAULT_MODEL_QUALITY
+    model_source: ModelSource = DEFAULT_MODEL_SOURCE
+    model_variant: ModelVariant = DEFAULT_MODEL_VARIANT
     model_path: Path | None = None
     # Custom voices.bin path (None = use default downloaded voices)
     voices_path: Path | None = None
@@ -420,6 +448,9 @@ class TTSConverter:
             pause_sentence=self.options.pause_sentence,
             pause_paragraph=self.options.pause_paragraph,
             pause_variance=self.options.pause_variance,
+            model_quality=self.options.model_quality,
+            model_source=self.options.model_source,
+            model_variant=self.options.model_variant,
             model_path=self.options.model_path,
             voices_path=self.options.voices_path,
             voice_blend=self.options.voice_blend,
@@ -600,53 +631,79 @@ class TTSConverter:
                         )
                         state = None
                     else:
-                        # Check if settings differ from saved state
-                        settings_changed = (
-                            state.voice != self.options.voice
-                            or state.language != self.options.language
-                            or state.speed != self.options.speed
-                            or state.split_mode != self.options.split_mode
-                            or state.silence_between_chapters
-                            != self.options.silence_between_chapters
-                            or state.pause_clause != self.options.pause_clause
-                            or state.pause_sentence != self.options.pause_sentence
-                            or state.pause_paragraph != self.options.pause_paragraph
-                            or state.pause_variance != self.options.pause_variance
-                            or state.pause_mode != self.options.pause_mode
-                            or state.lang != self.options.lang
+                        model_settings_changed = (
+                            state.model_quality != self.options.model_quality
+                            or state.model_source != self.options.model_source
+                            or state.model_variant != self.options.model_variant
                         )
 
-                        if settings_changed:
+                        if model_settings_changed:
                             self.log(
-                                f"Restoring settings from previous session: "
-                                f"voice={state.voice}, language={state.language}, "
-                                f"lang_override={state.lang}, "
-                                f"speed={state.speed}, "
-                                f"split_mode={state.split_mode}, "
-                                f"silence={state.silence_between_chapters}s, "
-                                f"pauses: clause={state.pause_clause}s "
-                                f"sent={state.pause_sentence}s "
-                                f"para={state.pause_paragraph}s "
-                                f"var={state.pause_variance}s "
-                                f"pause_mode={state.pause_mode}",
-                                "info",
+                                "Model settings changed, starting fresh conversion",
+                                "warning",
+                            )
+                            state = None
+                        else:
+                            # Check if settings differ from saved state
+                            settings_changed = (
+                                state.voice != self.options.voice
+                                or state.language != self.options.language
+                                or state.speed != self.options.speed
+                                or state.split_mode != self.options.split_mode
+                                or state.silence_between_chapters
+                                != self.options.silence_between_chapters
+                                or state.pause_clause != self.options.pause_clause
+                                or state.pause_sentence != self.options.pause_sentence
+                                or state.pause_paragraph != self.options.pause_paragraph
+                                or state.pause_variance != self.options.pause_variance
+                                or state.pause_mode != self.options.pause_mode
+                                or state.enable_short_sentence
+                                != self.options.enable_short_sentence
+                                or state.lang != self.options.lang
                             )
 
-                        # Apply saved settings to options for consistency
-                        self.options.voice = state.voice
-                        self.options.language = state.language
-                        self.options.speed = state.speed
-                        self.options.split_mode = state.split_mode
-                        self.options.output_format = state.output_format
-                        self.options.silence_between_chapters = (
-                            state.silence_between_chapters
-                        )
-                        self.options.pause_clause = state.pause_clause
-                        self.options.pause_sentence = state.pause_sentence
-                        self.options.pause_paragraph = state.pause_paragraph
-                        self.options.pause_variance = state.pause_variance
-                        self.options.pause_mode = state.pause_mode
-                        self.options.lang = state.lang
+                            if settings_changed:
+                                self.log(
+                                    f"Restoring settings from previous session: "
+                                    f"voice={state.voice}, language={state.language}, "
+                                    f"lang_override={state.lang}, "
+                                    f"speed={state.speed}, "
+                                    f"split_mode={state.split_mode}, "
+                                    f"silence={state.silence_between_chapters}s, "
+                                    f"pauses: clause={state.pause_clause}s "
+                                    f"sent={state.pause_sentence}s "
+                                    f"para={state.pause_paragraph}s "
+                                    f"var={state.pause_variance}s "
+                                    f"pause_mode={state.pause_mode}, "
+                                    f"enable_short_sentence="
+                                    f"{state.enable_short_sentence}, "
+                                    f"model_source={state.model_source}, "
+                                    f"model_variant={state.model_variant}, "
+                                    f"model_quality={state.model_quality}",
+                                    "info",
+                                )
+
+                            # Apply saved settings to options for consistency
+                            self.options.voice = state.voice
+                            self.options.language = state.language
+                            self.options.speed = state.speed
+                            self.options.split_mode = state.split_mode
+                            self.options.output_format = state.output_format
+                            self.options.silence_between_chapters = (
+                                state.silence_between_chapters
+                            )
+                            self.options.pause_clause = state.pause_clause
+                            self.options.pause_sentence = state.pause_sentence
+                            self.options.pause_paragraph = state.pause_paragraph
+                            self.options.pause_variance = state.pause_variance
+                            self.options.pause_mode = state.pause_mode
+                            self.options.enable_short_sentence = (
+                                state.enable_short_sentence
+                            )
+                            self.options.lang = state.lang
+                            self.options.model_quality = state.model_quality
+                            self.options.model_source = state.model_source
+                            self.options.model_variant = state.model_variant
 
             if state is None:
                 # Create new state
@@ -661,12 +718,16 @@ class TTSConverter:
                     speed=self.options.speed,
                     split_mode=self.options.split_mode,
                     output_format=self.options.output_format,
+                    model_quality=self.options.model_quality,
+                    model_source=self.options.model_source,
+                    model_variant=self.options.model_variant,
                     silence_between_chapters=self.options.silence_between_chapters,
                     pause_clause=self.options.pause_clause,
                     pause_sentence=self.options.pause_sentence,
                     pause_paragraph=self.options.pause_paragraph,
                     pause_variance=self.options.pause_variance,
                     pause_mode=self.options.pause_mode,
+                    enable_short_sentence=self.options.enable_short_sentence,
                     lang=self.options.lang,
                     chapters=[
                         ChapterState(

@@ -10,9 +10,10 @@ This module contains commands for working with phonemes and pre-tokenized conten
 import re
 import sys
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import click
+from pykokoro.onnx_backend import DEFAULT_MODEL_QUALITY, ModelQuality
 from rich.progress import (
     BarColumn,
     Progress,
@@ -37,6 +38,7 @@ from ..utils import (
     format_filename_template,
     load_config,
 )
+from .commands_utility import _resolve_model_source_and_variant
 from .helpers import console, parse_voice_parameter
 
 
@@ -500,6 +502,10 @@ def phonemes_convert(
     config = load_config()
     model_path = ctx.obj.get("model_path") if ctx.obj else None
     voices_path = ctx.obj.get("voices_path") if ctx.obj else None
+    model_source, model_variant = _resolve_model_source_and_variant(config)
+    model_quality = cast(
+        ModelQuality, config.get("model_quality", DEFAULT_MODEL_QUALITY)
+    )
 
     # Get book info and metadata
     book_info = book.get_info()
@@ -599,6 +605,9 @@ def phonemes_convert(
         speed=speed,
         output_format=fmt,
         use_gpu=gpu,
+        model_quality=model_quality,
+        model_source=model_source,
+        model_variant=model_variant,
         silence_between_chapters=silence,
         pause_clause=(
             pause_clause
@@ -834,6 +843,12 @@ def phonemes_preview(
             # Auto-detect if voice is a blend
             parsed_voice, parsed_voice_blend = parse_voice_parameter(voice)
 
+            config = load_config()
+            model_source, model_variant = _resolve_model_source_and_variant(config)
+            model_quality = cast(
+                ModelQuality, config.get("model_quality", DEFAULT_MODEL_QUALITY)
+            )
+
             # Initialize converter
             options = ConversionOptions(
                 phoneme_dictionary_path=str(phoneme_dict) if phoneme_dict else None,
@@ -841,6 +856,9 @@ def phonemes_preview(
                 voice_blend=parsed_voice_blend,
                 language=language,
                 output_format="wav",  # Explicitly set WAV format
+                model_quality=model_quality,
+                model_source=model_source,
+                model_variant=model_variant,
             )
             converter = TTSConverter(options)
 

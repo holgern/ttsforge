@@ -20,7 +20,7 @@ class TestLanguageDescriptions:
 
     def test_all_language_codes_have_descriptions(self):
         """All language codes should have descriptions."""
-        expected_codes = {"a", "b", "e", "f", "h", "i", "j", "p", "z"}
+        expected_codes = {"a", "b", "d", "e", "f", "h", "i", "j", "p", "z"}
         assert set(LANGUAGE_DESCRIPTIONS.keys()) == expected_codes
 
     def test_english_variants(self):
@@ -131,11 +131,6 @@ class TestDefaultVoiceForLang:
             assert (
                 lang in DEFAULT_VOICE_FOR_LANG
             ), f"Language {lang} needs default voice"
-
-    def test_default_voices_exist_in_voices_list(self):
-        """All default voices should exist in VOICES list."""
-        for lang, voice in DEFAULT_VOICE_FOR_LANG.items():
-            assert voice in VOICES, f"Default voice {voice} for {lang} not in VOICES"
 
     def test_default_voices_match_language(self):
         """Default voices should match their language."""

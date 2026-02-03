@@ -7,11 +7,19 @@ from typing import Any, Literal, Protocol, cast
 import numpy as np
 from pykokoro import GenerationConfig, KokoroPipeline, PipelineConfig
 from pykokoro.onnx_backend import (
+    DEFAULT_MODEL_QUALITY,
+    DEFAULT_MODEL_SOURCE,
+    DEFAULT_MODEL_VARIANT,
     Kokoro,
+    ModelQuality,
+    ModelSource,
+    ModelVariant,
     VoiceBlend,
     are_models_downloaded,
     download_all_models,
+    download_all_models_github,
 )
+from pykokoro.pipeline import build_pipeline
 from pykokoro.stages.audio_generation.onnx import OnnxAudioGenerationAdapter
 from pykokoro.stages.audio_postprocessing.onnx import OnnxAudioPostprocessingAdapter
 from pykokoro.stages.phoneme_processing.onnx import OnnxPhonemeProcessorAdapter
@@ -26,6 +34,9 @@ class KokoroRunOptions:
     pause_sentence: float
     pause_paragraph: float
     pause_variance: float
+    model_quality: ModelQuality | None = DEFAULT_MODEL_QUALITY
+    model_source: ModelSource = DEFAULT_MODEL_SOURCE
+    model_variant: ModelVariant = DEFAULT_MODEL_VARIANT
     model_path: Any | None = None
     voices_path: Any | None = None
     voice_blend: str | None = None
@@ -48,15 +59,32 @@ class KokoroRunner:
         if self._pipeline is not None:
             return
 
-        if not are_models_downloaded():
-            self.log("Downloading ONNX model files...")
-            download_all_models()
+        if self.opts.model_path is None or self.opts.voices_path is None:
+            model_quality = self.opts.model_quality or DEFAULT_MODEL_QUALITY
+            model_source = self.opts.model_source or DEFAULT_MODEL_SOURCE
+            if model_source == "github":
+                if not are_models_downloaded(quality=model_quality):
+                    self.log("Downloading ONNX model files from GitHub...")
+                download_all_models_github(
+                    variant=self.opts.model_variant,
+                    quality=model_quality,
+                )
+            else:
+                if not are_models_downloaded(quality=model_quality):
+                    self.log("Downloading ONNX model files...")
+                download_all_models(
+                    variant=self.opts.model_variant,
+                    quality=model_quality,
+                )
 
         self._kokoro = Kokoro(
             model_path=self.opts.model_path,
             voices_path=self.opts.voices_path,
             use_gpu=self.opts.use_gpu,
             tokenizer_config=self.opts.tokenizer_config,
+            model_quality=self.opts.model_quality,
+            model_source=self.opts.model_source,
+            model_variant=self.opts.model_variant,
         )
 
         assert self._kokoro is not None
@@ -88,14 +116,18 @@ class KokoroRunner:
         pipeline_cfg = PipelineConfig(
             voice=self._voice_style,
             generation=GenerationConfig(speed=self.opts.speed, lang="en-us"),
+            model_quality=self.opts.model_quality,
+            model_source=self.opts.model_source,
+            model_variant=self.opts.model_variant,
             model_path=self.opts.model_path,
             voices_path=self.opts.voices_path,
             tokenizer_config=self.opts.tokenizer_config,
         )
 
         # Use the same adapters everywhere (text + phonemes)
-        self._pipeline = KokoroPipeline(
-            pipeline_cfg,
+        self._pipeline = build_pipeline(
+            config=pipeline_cfg,
+            backend=self._kokoro,
             phoneme_processing=OnnxPhonemeProcessorAdapter(self._kokoro),
             audio_generation=OnnxAudioGenerationAdapter(self._kokoro),
             audio_postprocessing=OnnxAudioPostprocessingAdapter(self._kokoro),
@@ -116,6 +148,7 @@ class KokoroRunner:
             lang=lang_code,
             is_phonemes=is_phonemes,
             pause_mode=pause_mode,
+            enable_short_sentence=self.opts.enable_short_sentence,
             pause_clause=self.opts.pause_clause,
             pause_sentence=self.opts.pause_sentence,
             pause_paragraph=self.opts.pause_paragraph,

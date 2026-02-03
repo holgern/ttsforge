@@ -17,6 +17,7 @@ from typing import Literal, TypedDict, cast
 
 import click
 import numpy as np
+from pykokoro.onnx_backend import DEFAULT_MODEL_QUALITY, ModelQuality
 from rich.panel import Panel
 from rich.progress import (
     BarColumn,
@@ -37,7 +38,6 @@ from ..constants import (
     LANGUAGE_DESCRIPTIONS,
     SUPPORTED_OUTPUT_FORMATS,
     VOICE_PREFIX_TO_LANG,
-    VOICES,
 )
 from ..conversion import (
     Chapter,
@@ -54,6 +54,7 @@ from ..utils import (
     load_config,
     resolve_conversion_defaults,
 )
+from .commands_utility import _resolve_model_source_and_variant, _resolve_voice_names
 from .helpers import DEFAULT_SAMPLE_TEXT, console, parse_voice_parameter
 
 
@@ -62,6 +63,14 @@ class ContentItem(TypedDict):
     text: str
     index: int
     page_number: NotRequired[int]
+
+
+def get_voices() -> list[str]:
+    """Get the list of available voices."""
+    cfg = load_config()
+
+    model_source, model_variant = _resolve_model_source_and_variant(cfg)
+    return _resolve_voice_names(model_source, model_variant)
 
 
 @click.command()
@@ -82,7 +91,7 @@ class ContentItem(TypedDict):
 @click.option(
     "-v",
     "--voice",
-    type=click.Choice(VOICES),
+    type=click.Choice(get_voices()),
     help="Voice to use for TTS.",
 )
 @click.option(
@@ -149,6 +158,12 @@ class ContentItem(TypedDict):
     type=str,
     default=None,
     help="Pause mode: 'tts', 'manual', or 'auto' (default: auto).",
+)
+@click.option(
+    "--enable-short-sentence/--disable-short-sentence",
+    "enable_short_sentence",
+    default=None,
+    help="Enable/disable special handling for short sentences.",
 )
 @click.option(
     "--announce-chapters/--no-announce-chapters",
@@ -296,6 +311,7 @@ def convert(  # noqa: C901
     pause_paragraph: float | None,
     pause_variance: float | None,
     pause_mode: str | None,
+    enable_short_sentence: bool | None,
     announce_chapters: bool | None,
     chapter_pause: float | None,
     title: str | None,
@@ -325,6 +341,10 @@ def convert(  # noqa: C901
     config = load_config()
     model_path = ctx.obj.get("model_path") if ctx.obj else None
     voices_path = ctx.obj.get("voices_path") if ctx.obj else None
+    model_source, model_variant = _resolve_model_source_and_variant(config)
+    model_quality = cast(
+        ModelQuality, config.get("model_quality", DEFAULT_MODEL_QUALITY)
+    )
 
     # Get format first (needed for output path construction)
     fmt = output_format or config.get("default_format", "m4b")
@@ -467,6 +487,9 @@ def convert(  # noqa: C901
         language=language or "a",
         speed=speed or config.get("default_speed", 1.0),
         use_gpu=use_gpu if use_gpu is not None else config.get("use_gpu", False),
+        model_source=model_source,
+        model_variant=model_variant,
+        model_quality=model_quality,
         num_chapters=len(selected_indices) if selected_indices else len(epub_chapters),
         title=effective_title,
         author=effective_author,
@@ -510,6 +533,9 @@ def convert(  # noqa: C901
         output_format=output_format or config.get("default_format", "m4b"),
         output_dir=output.parent,
         use_gpu=use_gpu if use_gpu is not None else config.get("use_gpu", False),
+        model_quality=model_quality,
+        model_source=model_source,
+        model_variant=model_variant,
         silence_between_chapters=silence or config.get("silence_between_chapters", 2.0),
         lang=lang or config.get("phonemization_lang"),
         use_mixed_language=(
@@ -555,6 +581,11 @@ def convert(  # noqa: C901
         ),
         pause_mode=(
             pause_mode if pause_mode is not None else config.get("pause_mode", "auto")
+        ),
+        enable_short_sentence=(
+            enable_short_sentence
+            if enable_short_sentence is not None
+            else config.get("enable_short_sentence", None)
         ),
         announce_chapters=(
             announce_chapters
@@ -947,6 +978,10 @@ def sample(
 
     # Load config for defaults
     user_config = load_config()
+    model_source, model_variant = _resolve_model_source_and_variant(user_config)
+    model_quality = cast(
+        ModelQuality, user_config.get("model_quality", DEFAULT_MODEL_QUALITY)
+    )
     resolved_defaults = resolve_conversion_defaults(
         user_config,
         {
@@ -980,6 +1015,9 @@ def sample(
         use_gpu=resolved_defaults["use_gpu"],
         split_mode=resolved_defaults["split_mode"],
         lang=resolved_defaults["lang"],
+        model_quality=model_quality,
+        model_source=model_source,
+        model_variant=model_variant,
         use_mixed_language=(
             use_mixed_language or user_config.get("use_mixed_language", False)
         ),
@@ -1117,6 +1155,9 @@ def _show_conversion_summary(
     language: str,
     speed: float,
     use_gpu: bool,
+    model_source: str,
+    model_variant: str,
+    model_quality: str | None,
     num_chapters: int,
     title: str,
     author: str,
@@ -1139,6 +1180,9 @@ def _show_conversion_summary(
     table.add_row("Chapters", str(num_chapters))
     table.add_row("Voice", voice)
     table.add_row("Language", LANGUAGE_DESCRIPTIONS.get(language, language))
+    table.add_row("Model Source", model_source)
+    table.add_row("Model Variant", model_variant)
+    table.add_row("Model Quality", str(model_quality))
     if lang:
         table.add_row("Phonemization Lang", f"{lang} (override)")
     if use_mixed_language:
@@ -1167,7 +1211,7 @@ def _show_conversion_summary(
 @click.option(
     "-v",
     "--voice",
-    type=click.Choice(VOICES),
+    type=click.Choice(get_voices()),
     help="TTS voice to use.",
 )
 @click.option(
@@ -1271,6 +1315,11 @@ def _show_conversion_summary(
     default=None,
     help="Trim leading/trailing silence from audio.",
 )
+@click.option(
+    "--enable-short-sentence/--disable-short-sentence",
+    default=None,
+    help="Enable special handling for short sentences.",
+)
 @click.pass_context
 def read(  # noqa: C901
     ctx: click.Context,
@@ -1293,6 +1342,7 @@ def read(  # noqa: C901
     pause_paragraph: float | None,
     pause_variance: float | None,
     pause_mode: str | None,
+    enable_short_sentence: bool | None,
 ) -> None:
     """Read an EPUB or text file aloud with streaming playback.
 
@@ -1340,6 +1390,10 @@ def read(  # noqa: C901
 
     # Load config for defaults
     config = load_config()
+    model_source, model_variant = _resolve_model_source_and_variant(config)
+    model_quality = cast(
+        ModelQuality, config.get("model_quality", DEFAULT_MODEL_QUALITY)
+    )
     resolved_defaults = resolve_conversion_defaults(
         config,
         {
@@ -1388,6 +1442,11 @@ def read(  # noqa: C901
     )
     effective_pause_mode = (
         pause_mode if pause_mode is not None else config.get("pause_mode", "auto")
+    )
+    effective_enable_short_sentence = (
+        enable_short_sentence
+        if enable_short_sentence is not None
+        else config.get("enable_short_sentence", None)
     )
 
     # Get language code for TTS
@@ -1645,11 +1704,15 @@ def read(  # noqa: C901
             model_path=model_path,
             voices_path=voices_path,
             use_gpu=effective_use_gpu,
+            model_quality=model_quality,
+            model_source=model_source,
+            model_variant=model_variant,
         )
         generation = GenerationConfig(
             speed=effective_speed,
             lang=espeak_lang,
             pause_mode=cast(Literal["tts", "manual", "auto"], effective_pause_mode),
+            enable_short_sentence=effective_enable_short_sentence,
             pause_clause=effective_pause_clause,
             pause_sentence=effective_pause_sentence,
             pause_paragraph=effective_pause_paragraph,
@@ -1658,6 +1721,9 @@ def read(  # noqa: C901
         pipeline_config = PipelineConfig(
             voice=effective_voice,
             generation=generation,
+            model_quality=model_quality,
+            model_source=model_source,
+            model_variant=model_variant,
             model_path=model_path,
             voices_path=voices_path,
         )

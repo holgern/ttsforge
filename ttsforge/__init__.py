@@ -18,7 +18,7 @@ from pykokoro.tokenizer import (
     Tokenizer,
 )
 from pykokoro.constants import SUPPORTED_LANGUAGES
-
+from pykokoro.onnx_backend import VOICE_NAMES_BY_VARIANT
 from .constants import (
     DEFAULT_CONFIG,
     LANGUAGE_DESCRIPTIONS,
@@ -27,23 +27,7 @@ from .constants import (
 )
 
 # Import from pykokoro
-try:
-    from pykokoro.constants import SAMPLE_RATE
-    from pykokoro.onnx_backend import LANG_CODE_TO_ONNX
-except ImportError:
-    # Fallback values if pykokoro not installed
-    SAMPLE_RATE = 24000
-    LANG_CODE_TO_ONNX = {
-        "a": "en-us",
-        "b": "en-gb",
-        "e": "es",
-        "f": "fr-fr",
-        "h": "hi",
-        "i": "it",
-        "j": "ja",
-        "p": "pt",
-        "z": "zh",
-    }
+from pykokoro.constants import SAMPLE_RATE
 
 from .conversion import (
     Chapter,
@@ -73,6 +57,7 @@ __all__ = [
     "LANGUAGE_DESCRIPTIONS",
     "SUPPORTED_OUTPUT_FORMATS",
     "VOICES",
+    "VOICE_NAMES_BY_VARIANT",
     # Conversion
     "Chapter",
     "ConversionOptions",

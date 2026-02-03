@@ -3,10 +3,10 @@
 # from pykokoro.onnx_backend import VOICE_NAMES_V1_0
 # from pykokoro.onnx_backend import VOICE_NAMES_V1_1_ZH, VOICE_NAMES_V1_1_DE
 
-from pykokoro.onnx_backend import VOICE_NAMES_V1_0 as VOICE_NAMES
+from pykokoro.onnx_backend import DEFAULT_MODEL_SOURCE, VOICE_NAMES_V1_0
 
 # Re-export from pykokoro for convenience
-VOICES = VOICE_NAMES
+VOICES = VOICE_NAMES_V1_0
 
 # Audio constants from pykokoro
 try:
@@ -24,6 +24,7 @@ PROGRAM_DESCRIPTION = "Generate audiobooks from EPUB files using Kokoro ONNX TTS
 LANGUAGE_DESCRIPTIONS = {
     "a": "American English",
     "b": "British English",
+    "d": "German",
     "e": "Spanish",
     "f": "French",
     "h": "Hindi",
@@ -35,6 +36,8 @@ LANGUAGE_DESCRIPTIONS = {
 
 # ISO language code to ttsforge language code mapping
 ISO_TO_LANG_CODE = {
+    "de": "d",
+    "de-de": "d",
     "en": "a",  # Default to American English
     "en-us": "a",
     "en-gb": "b",
@@ -62,6 +65,8 @@ VOICE_PREFIX_TO_LANG = {
     "am": "a",  # American Male
     "bf": "b",  # British Female
     "bm": "b",  # British Male
+    "df": "d",  # German Female
+    "dm": "d",  # German Male
     "ef": "e",  # Spanish Female
     "em": "e",  # Spanish Male
     "ff": "f",  # French Female
@@ -82,6 +87,7 @@ VOICE_PREFIX_TO_LANG = {
 DEFAULT_VOICE_FOR_LANG = {
     "a": "af_heart",
     "b": "bf_emma",
+    "d": "df_eva",
     "e": "ef_dora",
     "f": "ff_siwis",
     "h": "hf_alpha",
@@ -115,6 +121,7 @@ DEFAULT_CONFIG = {
     "use_gpu": False,  # GPU requires onnxruntime-gpu
     # Model quality: fp32, fp16, q8, q8f16, q4, q4f16, uint8, uint8f16
     "model_quality": "fp32",
+    "model_source": DEFAULT_MODEL_SOURCE,
     "model_variant": "v1.0",
     "silence_between_chapters": 2.0,
     "save_chapters_separately": False,
@@ -128,6 +135,7 @@ DEFAULT_CONFIG = {
     "pause_paragraph": 0.9,
     "pause_variance": 0.05,
     "pause_mode": "auto",  # "tts", "manual", or "auto
+    "enable_short_sentence": None,
     # Language override for phonemization (e.g., 'de', 'fr', 'en-us')
     # If None, language is determined from voice prefix
     "phonemization_lang": None,
@@ -154,6 +162,7 @@ AUDIO_CHANNELS = 1
 SAMPLE_TEXTS = {
     "a": "This is a sample of the selected voice.",
     "b": "This is a sample of the selected voice.",
+    "d": "Dies ist ein Beispiel für die ausgewählte Stimme.",
     "e": "Este es una muestra de la voz seleccionada.",
     "f": "Ceci est un exemple de la voix sélectionnée.",
     "h": "यह चयनित आवाज़ का एक नमूना है।",  # noqa: E501

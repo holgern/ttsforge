@@ -555,6 +555,14 @@ def _resolve_model_source_and_variant(cfg: dict) -> tuple[ModelSource, ModelVari
     return cast(ModelSource, source), cast(ModelVariant, variant)
 
 
+def _resolve_voice_names(
+    model_source: ModelSource = "huggingface",
+    model_variant: ModelVariant = "v1.0",
+) -> list[str]:
+    """Return the list of voice names for the given model variant."""
+    return VOICE_NAMES_BY_VARIANT.get(model_variant, VOICE_NAMES)
+
+
 def _get_cache_voices_path(
     model_source: ModelSource,
     model_variant: ModelVariant,
@@ -708,7 +716,7 @@ def download(ctx: click.Context, force: bool, quality: str | None) -> None:
 
         # ---- voices
         if model_source == "huggingface":
-            voice_names = VOICE_NAMES_BY_VARIANT.get(model_variant, VOICE_NAMES)
+            voice_names = _resolve_voice_names(model_source, model_variant)
             total_voices = len(voice_names)
             voices_task = progress.add_task(
                 f"Downloading voices (0/{total_voices})...", total=total_voices
@@ -1269,6 +1277,12 @@ def list_names(  # noqa: C901
         )
         console.print("[dim]Type 'q' to quit, 's' to skip, 'r' to replay.[/dim]\n")
 
+        cfg = load_config()
+        model_source, model_variant = _resolve_model_source_and_variant(cfg)
+        model_quality = cast(
+            ModelQuality, cfg.get("model_quality", DEFAULT_MODEL_QUALITY)
+        )
+
         # Initialize converter with phoneme dictionary
         try:
             # Auto-detect if voice is a blend
@@ -1279,6 +1293,9 @@ def list_names(  # noqa: C901
                 voice=parsed_voice or "af_sky",
                 voice_blend=parsed_voice_blend,
                 language=language,
+                model_quality=model_quality,
+                model_source=model_source,
+                model_variant=model_variant,
             )
             converter = TTSConverter(options)
 

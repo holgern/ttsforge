@@ -452,6 +452,7 @@ Here's an example ``config.json`` with custom settings:
      "pause_paragraph": 0.9,
      "pause_variance": 0.05,
      "pause_mode": "auto",
+     "enable_short_sentence": None,
      "announce_chapters": true,
      "chapter_pause_after_title": 2.0,
       "save_chapters_separately": false,

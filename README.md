@@ -554,6 +554,7 @@ ttsforge convert book.epub --gpu
 | `pause_paragraph`           | `0.9`          | Paragraph pause (seconds)            |
 | `pause_variance`            | `0.05`         | Pause variance (seconds)             |
 | `pause_mode`                | `auto`         | Pause mode (`tts`, `manual`, `auto`) |
+| `enable_short_sentence`     | `None`         | Handle short sentences               |
 | `announce_chapters`         | `true`         | Speak chapter titles                 |
 | `chapter_pause_after_title` | `2.0`          | Pause after chapter title            |
 | `phonemization_lang`        | `None`         | Override phonemization language      |
